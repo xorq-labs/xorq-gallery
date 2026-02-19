@@ -1,5 +1,5 @@
 {
-  description = "hello world application using uv2nix";
+  description = "xorq gallery - examples demonstrating deferred ML pipelines";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
@@ -45,11 +45,24 @@
         root = "$REPO_ROOT";
       };
 
+      # Override to provide hatchling + its transitive deps as build deps for xorq (git source)
+      xorqOverlay = _final: prev: {
+        xorq = prev.xorq.overrideAttrs (old: {
+          nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
+            prev.hatchling
+            prev.pathspec
+            prev.pluggy
+            prev.trove-classifiers
+            prev.packaging
+          ];
+        });
+      };
+
       pythonSets = forAllSystems (
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-          python = pkgs.python3;
+          python = pkgs.python312;
         in
         (pkgs.callPackage pyproject-nix.build.packages {
           inherit python;
@@ -58,6 +71,7 @@
             lib.composeManyExtensions [
               pyproject-build-systems.overlays.wheel
               overlay
+              xorqOverlay
             ]
           )
       );
@@ -69,7 +83,7 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           pythonSet = pythonSets.${system}.overrideScope editableOverlay;
-          virtualenv = pythonSet.mkVirtualEnv "hello-world-dev-env" workspace.deps.all;
+          virtualenv = pythonSet.mkVirtualEnv "gallery-dev-env" workspace.deps.all;
         in
         {
           default = pkgs.mkShell {
@@ -98,7 +112,7 @@
         pkgs.nixfmt-tree
       );
       packages = forAllSystems (system: {
-        default = pythonSets.${system}.mkVirtualEnv "hello-world-env" workspace.deps.default;
+        default = pythonSets.${system}.mkVirtualEnv "gallery-env" workspace.deps.default;
       });
     };
 }

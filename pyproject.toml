@@ -1,12 +1,15 @@
 [project]
-name = "hello-world"
+name = "xorq-gallery"
 version = "0.1.0"
-description = "Add your description here"
-requires-python = ">=3.10"
-dependencies = [ ]
-
-[project.scripts]
-hello = "hello_world:hello"
+description = "Gallery of xorq examples demonstrating deferred ML pipelines"
+requires-python = ">=3.12"
+dependencies = [
+    "xorq",
+    "scikit-learn",
+    "matplotlib",
+    "pandas",
+    "numpy",
+]
 
 [build-system]
 requires = ["uv_build>=0.9.0,<0.10.0"]
@@ -24,10 +27,19 @@ test = [
     "pytest-cov>=7.0.0",
 ]
 
+[tool.uv.sources]
+xorq = { git = "https://github.com/xorq-labs/xorq.git", branch = "main" }
+
+[tool.uv.extra-build-dependencies]
+xorq = ["hatchling"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.ruff.lint]
 extend-select = ["I", "ICN"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["hello_world"]
+known-first-party = ["xorq_gallery"]
 section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
 lines-after-imports = 2
