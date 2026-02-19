@@ -20,20 +20,16 @@ import os
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
+import xorq.api as xo
 from sklearn.datasets import fetch_openml
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-from sklearn.model_selection import TimeSeriesSplit, train_test_split
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline as SklearnPipeline
-
-import xorq.api as xo
-from xorq.expr.ml.cross_validation import (
-    _fold_pairs_from_fold_expr,
-    _make_folds_from_sklearn,
-)
 from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
+
+from xorq_gallery.utils import deferred_sequential_split
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +63,7 @@ model_params = dict(max_iter=200, max_depth=8, learning_rate=0.1, random_state=4
 # =========================================================================
 # SKLEARN WAY -- lagged features via pandas, eager split
 # =========================================================================
+
 
 def sklearn_way(df):
     """Eager sklearn: pandas shift for lags, shuffle=False split."""
@@ -105,6 +102,7 @@ def sklearn_way(df):
 # XORQ WAY -- lagged features via ibis, deferred TimeSeriesSplit
 # =========================================================================
 
+
 def xorq_way(df):
     """Deferred xorq: ibis .lag(), TimeSeriesSplit fold, Pipeline.from_instance."""
     con = xo.connect()
@@ -136,25 +134,13 @@ def xorq_way(df):
     ]
     all_features = lagged_features + calendar_features + weather_features
 
-    # TimeSeriesSplit(n_splits=2): fold_1 = first 2/3 train, last 1/3 test
-    cv = TimeSeriesSplit(n_splits=2)
-    fold_expr = _make_folds_from_sklearn(
-        expr=data_with_lags,
-        cv=cv,
-        features=tuple(all_features),
-        target=target,
-        order_by="row_idx",
+    train_data, test_data = deferred_sequential_split(
+        data_with_lags, features=tuple(all_features), target=target, order_by="row_idx"
     )
-    fold_pairs = _fold_pairs_from_fold_expr(fold_expr, n_splits=2)
-    train_data, test_data = fold_pairs[-1]
 
-    sk_pipe = SklearnPipeline(
-        [("hgbr", HistGradientBoostingRegressor(**model_params))]
-    )
+    sk_pipe = SklearnPipeline([("hgbr", HistGradientBoostingRegressor(**model_params))])
     xorq_pipe = Pipeline.from_instance(sk_pipe)
-    fitted = xorq_pipe.fit(
-        train_data, features=tuple(all_features), target=target
-    )
+    fitted = xorq_pipe.fit(train_data, features=tuple(all_features), target=target)
     preds = fitted.predict(test_data, name="pred")
 
     metrics_expr = preds.agg(
@@ -219,9 +205,7 @@ if __name__ in ("__main__", "__pytest_main__"):
         ax.legend(fontsize=9)
 
     axes[0].set_ylabel("Bike count")
-    plt.suptitle(
-        "Lagged Features Forecasting: sklearn vs xorq (last 96h)", fontsize=14
-    )
+    plt.suptitle("Lagged Features Forecasting: sklearn vs xorq (last 96h)", fontsize=14)
     plt.tight_layout()
     plt.savefig("imgs/time_series_lagged_features.png", dpi=150)
     plt.close()

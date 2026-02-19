@@ -16,11 +16,10 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import xorq.api as xo
 from scipy import ndimage, sparse
 from sklearn.linear_model import Lasso, Ridge
 from sklearn.pipeline import Pipeline as SklearnPipeline
-
-import xorq.api as xo
 from xorq.expr.ml.pipeline_lib import Pipeline
 
 
@@ -28,8 +27,8 @@ from xorq.expr.ml.pipeline_lib import Pipeline
 # Shared: synthetic data generation
 # ---------------------------------------------------------------------------
 
-l = 128
-n_pixels = l * l
+img_size = 128
+n_pixels = img_size * img_size
 np.random.seed(0)
 
 
@@ -78,9 +77,9 @@ def generate_synthetic_data(l_x):
 
 
 # Generate data
-n_angles = l // 7
-proj_operator = build_projection_operator(l, n_angles)
-image = generate_synthetic_data(l)
+n_angles = img_size // 7
+proj_operator = build_projection_operator(img_size, n_angles)
+image = generate_synthetic_data(img_size)
 proj = proj_operator @ image.ravel()[:, np.newaxis]
 proj += 0.15 * np.random.randn(*proj.shape)
 proj_flat = proj.ravel()
@@ -90,15 +89,16 @@ proj_flat = proj.ravel()
 # SKLEARN WAY
 # =========================================================================
 
+
 def sklearn_way():
     """Eager sklearn: fit Ridge and Lasso directly on sparse matrix."""
     ridge = Ridge(alpha=0.2)
     ridge.fit(proj_operator, proj_flat)
-    rec_l2 = ridge.coef_.reshape(l, l)
+    rec_l2 = ridge.coef_.reshape(img_size, img_size)
 
     lasso = Lasso(alpha=0.001)
     lasso.fit(proj_operator, proj_flat)
-    rec_l1 = lasso.coef_.reshape(l, l)
+    rec_l1 = lasso.coef_.reshape(img_size, img_size)
 
     l2_err = np.linalg.norm(image.ravel() - rec_l2.ravel())
     l1_err = np.linalg.norm(image.ravel() - rec_l1.ravel())
@@ -111,6 +111,7 @@ def sklearn_way():
 # =========================================================================
 # XORQ WAY
 # =========================================================================
+
 
 def xorq_way():
     """Deferred xorq: register matrix as ibis table, fit via Pipeline."""
@@ -127,18 +128,16 @@ def xorq_way():
     target_col = "projection"
 
     # Ridge (L2)
-    xorq_ridge = Pipeline.from_instance(
-        SklearnPipeline([("ridge", Ridge(alpha=0.2))])
-    )
+    xorq_ridge = Pipeline.from_instance(SklearnPipeline([("ridge", Ridge(alpha=0.2))]))
     fitted_ridge = xorq_ridge.fit(data, features=features, target=target_col)
-    rec_l2 = fitted_ridge.predict_step.model.coef_.reshape(l, l)
+    rec_l2 = fitted_ridge.predict_step.model.coef_.reshape(img_size, img_size)
 
     # Lasso (L1)
     xorq_lasso = Pipeline.from_instance(
         SklearnPipeline([("lasso", Lasso(alpha=0.001))])
     )
     fitted_lasso = xorq_lasso.fit(data, features=features, target=target_col)
-    rec_l1 = fitted_lasso.predict_step.model.coef_.reshape(l, l)
+    rec_l1 = fitted_lasso.predict_step.model.coef_.reshape(img_size, img_size)
 
     l2_err = np.linalg.norm(image.ravel() - rec_l2.ravel())
     l1_err = np.linalg.norm(image.ravel() - rec_l1.ravel())
@@ -164,9 +163,7 @@ if __name__ in ("__main__", "__pytest_main__"):
     # 2 rows (sklearn, xorq) x 3 cols (original, L2, L1)
     fig, axes = plt.subplots(2, 3, figsize=(12, 8))
 
-    for row, (label, res) in enumerate(
-        [("sklearn", sk), ("xorq", xo_res)]
-    ):
+    for row, (label, res) in enumerate([("sklearn", sk), ("xorq", xo_res)]):
         axes[row, 0].imshow(image, cmap="gray", interpolation="nearest")
         axes[row, 0].set_title(f"{label} - Original")
         axes[row, 0].axis("off")

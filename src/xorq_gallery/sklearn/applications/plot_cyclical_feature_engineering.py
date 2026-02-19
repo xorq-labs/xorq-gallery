@@ -19,23 +19,19 @@ import os
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
+import xorq.api as xo
 from sklearn.compose import ColumnTransformer
 from sklearn.datasets import fetch_openml
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import RidgeCV
 from sklearn.metrics import mean_absolute_error
-from sklearn.model_selection import TimeSeriesSplit, train_test_split
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, SplineTransformer
-
-import xorq.api as xo
-from xorq.expr.ml.cross_validation import (
-    _fold_pairs_from_fold_expr,
-    _make_folds_from_sklearn,
-)
 from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
+
+from xorq_gallery.utils import deferred_sequential_split
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +138,7 @@ sklearn_hgbr = SklearnPipeline(
 # SKLEARN WAY -- eager, train_test_split(shuffle=False)
 # =========================================================================
 
+
 def sklearn_way(df):
     """Eager sklearn: time-ordered split, fit, predict, score."""
     X = df[all_feature_cols]
@@ -174,24 +171,16 @@ def sklearn_way(df):
 # XORQ WAY -- deferred, TimeSeriesSplit(n_splits=2) fold_1
 # =========================================================================
 
+
 def xorq_way(df):
     """Deferred xorq: TimeSeriesSplit fold assignment, Pipeline.from_instance."""
     con = xo.connect()
     data = con.register(df, "bike_sharing")
     features = tuple(all_feature_cols)
 
-    # TimeSeriesSplit(n_splits=2): fold_1 = first 2/3 train, last 1/3 test
-    # This matches sklearn's train_test_split(test_size=0.33, shuffle=False)
-    cv = TimeSeriesSplit(n_splits=2)
-    fold_expr = _make_folds_from_sklearn(
-        expr=data,
-        cv=cv,
-        features=features,
-        target=y_col,
-        order_by="row_idx",
+    train_data, test_data = deferred_sequential_split(
+        data, features=features, target=y_col, order_by="row_idx"
     )
-    fold_pairs = _fold_pairs_from_fold_expr(fold_expr, n_splits=2)
-    train_data, test_data = fold_pairs[-1]  # last fold = largest train
 
     results = {}
     for name, sk_pipe in [

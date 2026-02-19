@@ -5,7 +5,13 @@ import pytest
 from pytest import param
 
 
-examples_dir = pathlib.Path(__file__).parents[1] / "src" / "xorq_gallery" / "sklearn" / "applications"
+examples_dir = (
+    pathlib.Path(__file__).parents[1]
+    / "src"
+    / "xorq_gallery"
+    / "sklearn"
+    / "applications"
+)
 scripts = sorted(examples_dir.glob("*.py"))
 
 

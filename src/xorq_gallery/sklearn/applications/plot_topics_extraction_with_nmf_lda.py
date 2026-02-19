@@ -16,12 +16,11 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import xorq.api as xo
 from sklearn.datasets import fetch_20newsgroups
-from sklearn.decomposition import LatentDirichletAllocation, NMF
+from sklearn.decomposition import NMF, LatentDirichletAllocation
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.pipeline import Pipeline as SklearnPipeline
-
-import xorq.api as xo
 from xorq.expr.ml.pipeline_lib import Pipeline
 
 
@@ -59,9 +58,7 @@ def get_top_words(model, feature_names, n_top=n_top_words):
     return topics
 
 
-def plot_top_words_side_by_side(
-    sk_model, xo_model, feature_names, n_top, title
-):
+def plot_top_words_side_by_side(sk_model, xo_model, feature_names, n_top, title):
     """Plot top words for sklearn (left) vs xorq (right)."""
     n_topics = sk_model.components_.shape[0]
     fig, axes = plt.subplots(n_topics, 2, figsize=(14, 2.5 * n_topics))
@@ -77,9 +74,7 @@ def plot_top_words_side_by_side(
 
             ax = axes[topic_idx, col]
             ax.barh(top_features, weights, height=0.7)
-            ax.set_title(
-                f"{label} Topic {topic_idx + 1}", fontsize=9
-            )
+            ax.set_title(f"{label} Topic {topic_idx + 1}", fontsize=9)
             ax.tick_params(axis="both", which="major", labelsize=7)
 
     plt.suptitle(title, fontsize=13)
@@ -128,6 +123,7 @@ pipelines = {
 # SKLEARN WAY
 # =========================================================================
 
+
 def sklearn_way(texts):
     """Eager sklearn: vectorize + decompose on raw text list."""
     results = {}
@@ -144,7 +140,7 @@ def sklearn_way(texts):
         }
         print(f"  sklearn {name}:")
         for i, words in enumerate(topics[:3]):
-            print(f"    Topic {i+1}: {', '.join(words[:8])}")
+            print(f"    Topic {i + 1}: {', '.join(words[:8])}")
         print(f"    ... ({n_components} topics total)")
     return results
 
@@ -152,6 +148,7 @@ def sklearn_way(texts):
 # =========================================================================
 # XORQ WAY
 # =========================================================================
+
 
 def xorq_way(texts, targets):
     """Deferred xorq: register text as ibis, Pipeline.from_instance."""
@@ -177,7 +174,7 @@ def xorq_way(texts, targets):
         }
         print(f"  xorq   {name}:")
         for i, words in enumerate(topics[:3]):
-            print(f"    Topic {i+1}: {', '.join(words[:8])}")
+            print(f"    Topic {i + 1}: {', '.join(words[:8])}")
         print(f"    ... ({n_components} topics total)")
     return results
 
