@@ -1,0 +1,33 @@
+[project]
+name = "hello-world"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.10"
+dependencies = [ ]
+
+[project.scripts]
+hello = "hello_world:hello"
+
+[build-system]
+requires = ["uv_build>=0.9.0,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.5.1",
+    "pytest>=9.0.2",
+    "ruff>=0.14.14",
+]
+test = [
+    "coverage>=7.13.2",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+]
+
+[tool.ruff.lint]
+extend-select = ["I", "ICN"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["hello_world"]
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+lines-after-imports = 2
