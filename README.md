@@ -7,7 +7,7 @@ Side-by-side examples comparing **sklearn** (eager) and **xorq** (deferred) appr
 Run any example directly with `uv`:
 
 ```bash
-uv tool run --isolated --with git+ssh://git@github.com/xorq-labs/xorq-gallery python -m xorq_gallery.sklearn.applications.plot_cyclical_feature_engineering
+uv tool run --isolated --python 3.12 --with git+ssh://git@github.com/xorq-labs/xorq-gallery python -m xorq_gallery.sklearn.applications.plot_cyclical_feature_engineering
 ```
 
 ## Development
