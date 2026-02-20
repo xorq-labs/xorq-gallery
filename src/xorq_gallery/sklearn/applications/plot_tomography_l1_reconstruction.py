@@ -22,6 +22,8 @@ from sklearn.linear_model import Lasso, Ridge
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from xorq.expr.ml.pipeline_lib import Pipeline
 
+from xorq_gallery.utils import deferred_matplotlib_plot, fig_to_image, load_plot_bytes
+
 
 # ---------------------------------------------------------------------------
 # Shared: synthetic data generation
@@ -86,6 +88,35 @@ def _generate_data():
     return proj_operator, image, proj_flat, n_angles
 
 
+# ---------------------------------------------------------------------------
+# Plotting helpers (used by deferred_matplotlib_plot)
+# ---------------------------------------------------------------------------
+
+
+def _build_reconstruction_figure(image, rec_l2, rec_l1, l2_err, l1_err, n_angles):
+    """Return a UDAF-compatible plotting function for reconstruction results."""
+    def _plot(_df):
+        fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+
+        axes[0].imshow(image, cmap="gray", interpolation="nearest")
+        axes[0].set_title("Original")
+        axes[0].axis("off")
+
+        axes[1].imshow(rec_l2, cmap="gray", interpolation="nearest")
+        axes[1].set_title(f"Ridge (L2) err={l2_err:.2f}")
+        axes[1].axis("off")
+
+        axes[2].imshow(rec_l1, cmap="gray", interpolation="nearest")
+        axes[2].set_title(f"Lasso (L1) err={l1_err:.2f}")
+        axes[2].axis("off")
+
+        plt.suptitle(f"xorq - Tomography: {n_angles} projections", fontsize=13)
+        plt.tight_layout()
+        return fig
+
+    return _plot
+
+
 # =========================================================================
 # SKLEARN WAY
 # =========================================================================
@@ -114,8 +145,13 @@ def sklearn_way(proj_operator, image, proj_flat):
 # =========================================================================
 
 
-def xorq_way(proj_operator, image, proj_flat):
-    """Deferred xorq: register matrix as ibis table, fit via Pipeline."""
+def xorq_way(proj_operator, image, proj_flat, n_angles):
+    """Deferred xorq: register matrix as ibis table, fit via Pipeline.
+
+    Returns a deferred plot expression (PNG bytes via UDAF).  The fit
+    goes through ibis data, then model coefficients are captured in the
+    closure for the deferred visualization.
+    """
     con = xo.connect()
 
     # Dense matrix as ibis table (small enough for this demo)
@@ -145,7 +181,8 @@ def xorq_way(proj_operator, image, proj_flat):
     print(f"  xorq   Ridge L2 error: {l2_err:.2f}")
     print(f"  xorq   Lasso L1 error: {l1_err:.2f}")
 
-    return {"l2": rec_l2, "l1": rec_l1}
+    plot_fn = _build_reconstruction_figure(image, rec_l2, rec_l1, l2_err, l1_err, n_angles)
+    return deferred_matplotlib_plot(data, plot_fn)
 
 
 # =========================================================================
@@ -161,23 +198,38 @@ def main():
     sk = sklearn_way(proj_operator, image, proj_flat)
 
     print("\n=== XORQ WAY ===")
-    xo_res = xorq_way(proj_operator, image, proj_flat)
+    plot_expr = xorq_way(proj_operator, image, proj_flat, n_angles)
 
-    # 2 rows (sklearn, xorq) x 3 cols (original, L2, L1)
-    fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+    # Execute deferred plot
+    xo_png = plot_expr.execute()
 
-    for row, (label, res) in enumerate([("sklearn", sk), ("xorq", xo_res)]):
-        axes[row, 0].imshow(image, cmap="gray", interpolation="nearest")
-        axes[row, 0].set_title(f"{label} - Original")
-        axes[row, 0].axis("off")
+    # Build sklearn figure natively
+    l2_err = np.linalg.norm(image.ravel() - sk["l2"].ravel())
+    l1_err = np.linalg.norm(image.ravel() - sk["l1"].ravel())
 
-        axes[row, 1].imshow(res["l2"], cmap="gray", interpolation="nearest")
-        axes[row, 1].set_title(f"{label} - Ridge (L2)")
-        axes[row, 1].axis("off")
+    sk_fig, sk_axes = plt.subplots(1, 3, figsize=(12, 4))
+    sk_axes[0].imshow(image, cmap="gray", interpolation="nearest")
+    sk_axes[0].set_title("Original")
+    sk_axes[0].axis("off")
+    sk_axes[1].imshow(sk["l2"], cmap="gray", interpolation="nearest")
+    sk_axes[1].set_title(f"Ridge (L2) err={l2_err:.2f}")
+    sk_axes[1].axis("off")
+    sk_axes[2].imshow(sk["l1"], cmap="gray", interpolation="nearest")
+    sk_axes[2].set_title(f"Lasso (L1) err={l1_err:.2f}")
+    sk_axes[2].axis("off")
+    plt.suptitle(f"sklearn - Tomography: {n_angles} projections", fontsize=13)
+    plt.tight_layout()
 
-        axes[row, 2].imshow(res["l1"], cmap="gray", interpolation="nearest")
-        axes[row, 2].set_title(f"{label} - Lasso (L1)")
-        axes[row, 2].axis("off")
+    # Composite: sklearn (top) | xorq deferred (bottom)
+    xo_img = load_plot_bytes(xo_png)
+
+    fig, axes = plt.subplots(2, 1, figsize=(12, 8))
+    axes[0].imshow(fig_to_image(sk_fig))
+    axes[0].set_title("sklearn")
+    axes[0].axis("off")
+    axes[1].imshow(xo_img)
+    axes[1].set_title("xorq")
+    axes[1].axis("off")
 
     plt.suptitle(
         f"Tomography Reconstruction: {n_angles} projections, {n_pixels} pixels",
@@ -187,7 +239,7 @@ def main():
     out = "imgs/tomography_l1_reconstruction.png"
     plt.savefig(out, dpi=150)
     plt.close()
-    print(f"\nPlot saved to {out}")
+    print(f"Plot saved to {out}")
 
 
 if __name__ in ("__main__", "__pytest_main__"):

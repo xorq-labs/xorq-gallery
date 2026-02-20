@@ -6,11 +6,15 @@ Adding an order_by + shuffle=False mode is an easy lift.  This helper
 bridges the gap while we get the gallery together.
 """
 
+from io import BytesIO
+
+import xorq.expr.datatypes as dt
 from sklearn.model_selection import TimeSeriesSplit
 from xorq.expr.ml.cross_validation import (
     _fold_pairs_from_fold_expr,
     _make_folds_from_sklearn,
 )
+from xorq.expr.udf import agg
 
 
 def deferred_sequential_split(expr, *, features, target, order_by, test_size=0.3333):
@@ -48,3 +52,145 @@ def deferred_sequential_split(expr, *, features, target, order_by, test_size=0.3
     )
     fold_pairs = _fold_pairs_from_fold_expr(fold_expr, n_splits=2)
     return fold_pairs[-1]  # last fold = largest train set
+
+
+# ---------------------------------------------------------------------------
+# Deferred matplotlib plotting via UDAF
+# ---------------------------------------------------------------------------
+
+
+def _fig_to_png_bytes(fig):
+    """Serialize a matplotlib Figure to PNG bytes."""
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    buf.seek(0)
+    import matplotlib.pyplot as plt
+
+    plt.close(fig)
+    return buf.getvalue()
+
+
+def deferred_matplotlib_plot(expr, fn, name="plot"):
+    """Create a deferred plot that materializes on execute.
+
+    Wraps a plotting function in a pandas DataFrame UDAF.  The function
+    receives the full DataFrame and must return a ``matplotlib.figure.Figure``.
+    The figure is serialized to PNG bytes and stored in a binary column.
+
+    Parameters
+    ----------
+    expr : ibis expression
+        The table whose data the plotting function needs.
+    fn : callable(pd.DataFrame) -> matplotlib.figure.Figure
+        Plotting function.
+    name : str, optional
+        Column name for the binary output (default ``"plot"``).
+
+    Returns
+    -------
+    ibis scalar expression
+        Scalar expression whose ``.execute()`` returns PNG bytes.
+    """
+    def _plot_udaf_fn(df):
+        return _fig_to_png_bytes(fn(df))
+
+    plot_udaf = agg.pandas_df(
+        fn=_plot_udaf_fn,
+        schema=expr.schema(),
+        return_type=dt.binary,
+        name=name,
+    )
+    return plot_udaf.on_expr(expr)
+
+
+def save_plot(img_bytes, path):
+    """Write a deferred plot result to disk.
+
+    Parameters
+    ----------
+    img_bytes : bytes
+        PNG bytes from ``deferred_matplotlib_plot(...).execute()``.
+    path : str
+        File path to write the PNG to.
+    """
+    with open(path, "wb") as f:
+        f.write(img_bytes)
+    print(f"Plot saved to {path}")
+
+
+def show_plot(img_bytes):
+    """Display a deferred plot result.
+
+    Parameters
+    ----------
+    img_bytes : bytes
+        PNG bytes from ``deferred_matplotlib_plot(...).execute()``.
+    """
+    import matplotlib.image as mpimg
+    import matplotlib.pyplot as plt
+
+    img = mpimg.imread(BytesIO(img_bytes), format="png")
+    plt.imshow(img)
+    plt.axis("off")
+    plt.show()
+
+
+def fig_to_image(fig):
+    """Render a matplotlib Figure to a numpy RGBA image array.
+
+    Handles HiDPI/retina displays correctly by reading actual buffer
+    dimensions rather than logical dimensions.
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        The figure to render.
+
+    Returns
+    -------
+    numpy.ndarray
+        RGBA image array suitable for ``ax.imshow()``.
+        The figure is closed after rendering.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    fig.canvas.draw()
+    buf = fig.canvas.buffer_rgba()
+    img = np.asarray(buf)
+    plt.close(fig)
+    return img
+
+
+def load_plot_bytes(img_bytes):
+    """Load PNG bytes as a numpy image array for embedding in subplots.
+
+    Parameters
+    ----------
+    img_bytes : bytes
+        PNG bytes from ``deferred_matplotlib_plot(...).execute()``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Image array suitable for ``ax.imshow()``.
+    """
+    import matplotlib.image as mpimg
+
+    return mpimg.imread(BytesIO(img_bytes), format="png")
+
+
+def load_plot(path):
+    """Read a saved PNG file as bytes.
+
+    Parameters
+    ----------
+    path : str
+        Path to a PNG file.
+
+    Returns
+    -------
+    bytes
+    """
+    with open(path, "rb") as f:
+        return f.read()

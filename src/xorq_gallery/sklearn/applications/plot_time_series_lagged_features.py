@@ -29,7 +29,12 @@ from sklearn.pipeline import Pipeline as SklearnPipeline
 from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
 
-from xorq_gallery.utils import deferred_sequential_split
+from xorq_gallery.utils import (
+    deferred_matplotlib_plot,
+    deferred_sequential_split,
+    fig_to_image,
+    load_plot_bytes,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +70,38 @@ def _load_data():
     df["row_idx"] = range(len(df))
 
     return df
+
+
+# ---------------------------------------------------------------------------
+# Plotting helpers (used by deferred_matplotlib_plot)
+# ---------------------------------------------------------------------------
+
+N_PLOT = 96
+
+
+def _build_xorq_figure(df):
+    """Plot xorq predictions vs actuals for the last N_PLOT hours."""
+    actual = df[target].values
+    predicted = df["pred"].values
+    mae = mean_absolute_error(actual, predicted)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    hours = range(N_PLOT)
+    ax.plot(hours, actual[-N_PLOT:], color="black", linewidth=1.2, label="actual")
+    ax.plot(
+        hours,
+        predicted[-N_PLOT:],
+        color="tab:blue",
+        linewidth=1,
+        linestyle="--",
+        label=f"predicted (MAE={mae:.2f})",
+    )
+    ax.set_title("xorq - HGBR with lagged features")
+    ax.set_xlabel("Hours")
+    ax.set_ylabel("Bike count")
+    ax.legend(fontsize=9)
+    plt.tight_layout()
+    return fig
 
 
 # =========================================================================
@@ -111,7 +148,11 @@ def sklearn_way(df):
 
 
 def xorq_way(df):
-    """Deferred xorq: ibis .lag(), TimeSeriesSplit fold, Pipeline.from_instance."""
+    """Deferred xorq: ibis .lag(), TimeSeriesSplit fold, Pipeline.from_instance.
+
+    Returns deferred expressions for the plot (PNG bytes via UDAF) and
+    metrics.  Nothing is executed until the caller calls ``.execute()``.
+    """
     con = xo.connect()
     data = con.register(df, "bike_sharing")
 
@@ -150,27 +191,15 @@ def xorq_way(df):
     fitted = xorq_pipe.fit(train_data, features=tuple(all_features), target=target)
     preds = fitted.predict(test_data, name="pred")
 
-    metrics_expr = preds.agg(
-        mae=deferred_sklearn_metric(
-            target=target, pred="pred", metric=mean_absolute_error
-        ),
-        mse=deferred_sklearn_metric(
-            target=target, pred="pred", metric=mean_squared_error
-        ),
+    make_metric = deferred_sklearn_metric(target=target, pred="pred")
+    metrics = preds.agg(
+        mae=make_metric(metric=mean_absolute_error),
+        mse=make_metric(metric=mean_squared_error),
     )
 
-    metrics_df = metrics_expr.execute()
-    preds_df = preds.execute()
-    mae = metrics_df["mae"].iloc[0]
-    rmse = np.sqrt(metrics_df["mse"].iloc[0])
-    print(f"  xorq:   MAE = {mae:.2f}, RMSE = {rmse:.2f}")
+    plot_expr = deferred_matplotlib_plot(preds, _build_xorq_figure)
 
-    return {
-        "mae": mae,
-        "rmse": rmse,
-        "y_test": preds_df[target].values,
-        "y_pred": preds_df["pred"].values,
-    }
+    return plot_expr, metrics
 
 
 # =========================================================================
@@ -186,34 +215,49 @@ def main():
     sk = sklearn_way(df)
 
     print("\n=== XORQ WAY ===")
-    xo_res = xorq_way(df)
+    plot_expr, metrics = xorq_way(df)
 
-    # Side-by-side plot: last 96 hours
-    n_plot = 96
-    fig, axes = plt.subplots(1, 2, figsize=(16, 5), sharey=True)
+    # Execute deferred expressions
+    metrics_df = metrics.execute()
+    xo_mae = metrics_df["mae"].iloc[0]
+    xo_rmse = np.sqrt(metrics_df["mse"].iloc[0])
+    print(f"  xorq:   MAE = {xo_mae:.2f}, RMSE = {xo_rmse:.2f}")
 
-    for ax, label, res in [
-        (axes[0], "sklearn", sk),
-        (axes[1], "xorq", xo_res),
-    ]:
-        actual = res["y_test"][-n_plot:]
-        predicted = res["y_pred"][-n_plot:]
-        hours = range(n_plot)
+    xo_png = plot_expr.execute()
 
-        ax.plot(hours, actual, color="black", linewidth=1.2, label="actual")
-        ax.plot(
-            hours,
-            predicted,
-            color="tab:blue",
-            linewidth=1,
-            linestyle="--",
-            label=f"predicted (MAE={res['mae']:.2f})",
-        )
-        ax.set_title(f"{label} - HGBR with lagged features")
-        ax.set_xlabel("Hours")
-        ax.legend(fontsize=9)
+    # Build sklearn subplot natively
+    sk_fig, sk_ax = plt.subplots(figsize=(8, 5))
+    hours = range(N_PLOT)
+    sk_ax.plot(
+        hours, sk["y_test"][-N_PLOT:], color="black", linewidth=1.2, label="actual"
+    )
+    sk_ax.plot(
+        hours,
+        sk["y_pred"][-N_PLOT:],
+        color="tab:blue",
+        linewidth=1,
+        linestyle="--",
+        label=f"predicted (MAE={sk['mae']:.2f})",
+    )
+    sk_ax.set_title("sklearn - HGBR with lagged features")
+    sk_ax.set_xlabel("Hours")
+    sk_ax.set_ylabel("Bike count")
+    sk_ax.legend(fontsize=9)
+    plt.tight_layout()
 
-    axes[0].set_ylabel("Bike count")
+    # Composite: sklearn (left) | xorq deferred plot (right)
+    xo_img = load_plot_bytes(xo_png)
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 5))
+
+    axes[0].imshow(fig_to_image(sk_fig))
+    axes[0].set_title("sklearn")
+    axes[0].axis("off")
+
+    axes[1].imshow(xo_img)
+    axes[1].set_title("xorq")
+    axes[1].axis("off")
+
     plt.suptitle(
         "Lagged Features Forecasting: sklearn vs xorq (last 96h)", fontsize=14
     )
@@ -221,7 +265,7 @@ def main():
     out = "imgs/time_series_lagged_features.png"
     plt.savefig(out, dpi=150)
     plt.close()
-    print(f"\nPlot saved to {out}")
+    print(f"Plot saved to {out}")
 
 
 if __name__ in ("__main__", "__pytest_main__"):

@@ -31,7 +31,12 @@ from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, SplineTransformer
 from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
 
-from xorq_gallery.utils import deferred_sequential_split
+from xorq_gallery.utils import (
+    deferred_matplotlib_plot,
+    deferred_sequential_split,
+    fig_to_image,
+    load_plot_bytes,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +82,39 @@ def _load_data():
     df["row_idx"] = range(len(df))
 
     return df
+
+
+# ---------------------------------------------------------------------------
+# Plotting helpers (used by deferred_matplotlib_plot)
+# ---------------------------------------------------------------------------
+
+N_PLOT = 96
+
+
+def _build_prediction_figure(title):
+    """Return a UDAF-compatible plotting function for actual vs predicted."""
+    def _plot(df):
+        actual = df[y_col].values
+        predicted = df["pred"].values
+        mae = mean_absolute_error(actual, predicted)
+
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.plot(
+            range(N_PLOT), actual[-N_PLOT:],
+            color="black", linewidth=1.2, label="actual",
+        )
+        ax.plot(
+            range(N_PLOT), predicted[-N_PLOT:],
+            alpha=0.8, label=f"predicted (MAE={mae:.4f})",
+        )
+        ax.set_title(title)
+        ax.set_xlabel("Hours")
+        ax.set_ylabel("Fraction of max demand")
+        ax.legend(fontsize=8)
+        plt.tight_layout()
+        return fig
+
+    return _plot
 
 
 # ---------------------------------------------------------------------------
@@ -164,22 +202,22 @@ def sklearn_way(df, sklearn_spline_ridge, sklearn_hgbr):
         X, y, test_size=0.3333, shuffle=False
     )
 
-    results = {}
-    for name, pipe in [
-        ("Spline+Ridge", sklearn_spline_ridge),
-        ("HGBR", sklearn_hgbr),
-    ]:
-        pipe.fit(X_train, y_train)
-        y_pred = pipe.predict(X_test)
-        mae = mean_absolute_error(y_test, y_pred)
-        results[name] = {
-            "mae": mae,
-            "y_test": y_test.values,
-            "y_pred": y_pred,
-        }
-        print(f"  sklearn {name}: MAE = {mae:.4f}")
+    # Spline+Ridge
+    sklearn_spline_ridge.fit(X_train, y_train)
+    spline_pred = sklearn_spline_ridge.predict(X_test)
+    spline_mae = mean_absolute_error(y_test, spline_pred)
+    print(f"  sklearn Spline+Ridge: MAE = {spline_mae:.4f}")
 
-    return results
+    # HGBR
+    sklearn_hgbr.fit(X_train, y_train)
+    hgbr_pred = sklearn_hgbr.predict(X_test)
+    hgbr_mae = mean_absolute_error(y_test, hgbr_pred)
+    print(f"  sklearn HGBR: MAE = {hgbr_mae:.4f}")
+
+    return {
+        "Spline+Ridge": (spline_mae, (y_test.values, spline_pred)),
+        "HGBR": (hgbr_mae, (y_test.values, hgbr_pred)),
+    }
 
 
 # =========================================================================
@@ -188,7 +226,11 @@ def sklearn_way(df, sklearn_spline_ridge, sklearn_hgbr):
 
 
 def xorq_way(df, sklearn_spline_ridge, sklearn_hgbr):
-    """Deferred xorq: TimeSeriesSplit fold assignment, Pipeline.from_instance."""
+    """Deferred xorq: TimeSeriesSplit fold assignment, Pipeline.from_instance.
+
+    Returns deferred predictions and metrics for both models.
+    Nothing is executed until ``.execute()``.
+    """
     con = xo.connect()
     data = con.register(df, "bike_sharing")
     features = tuple(all_feature_cols)
@@ -197,31 +239,24 @@ def xorq_way(df, sklearn_spline_ridge, sklearn_hgbr):
         data, features=features, target=y_col, order_by="row_idx"
     )
 
-    results = {}
-    for name, sk_pipe in [
-        ("Spline+Ridge", sklearn_spline_ridge),
-        ("HGBR", sklearn_hgbr),
-    ]:
-        xorq_pipe = Pipeline.from_instance(sk_pipe)
-        fitted = xorq_pipe.fit(train_data, features=features, target=y_col)
-        preds = fitted.predict(test_data, name="pred")
+    make_metric = deferred_sklearn_metric(target=y_col, pred="pred")
 
-        mae_expr = preds.agg(
-            mae=deferred_sklearn_metric(
-                target=y_col, pred="pred", metric=mean_absolute_error
-            ),
-        )
+    # Spline+Ridge
+    spline_pipe = Pipeline.from_instance(sklearn_spline_ridge)
+    spline_fitted = spline_pipe.fit(train_data, features=features, target=y_col)
+    spline_preds = spline_fitted.predict(test_data, name="pred")
+    spline_metrics = spline_preds.agg(mae=make_metric(metric=mean_absolute_error))
 
-        mae = mae_expr.execute()["mae"].iloc[0]
-        preds_df = preds.execute()
-        results[name] = {
-            "mae": mae,
-            "y_test": preds_df[y_col].values,
-            "y_pred": preds_df["pred"].values,
-        }
-        print(f"  xorq   {name}: MAE = {mae:.4f}")
+    # HGBR
+    hgbr_pipe = Pipeline.from_instance(sklearn_hgbr)
+    hgbr_fitted = hgbr_pipe.fit(train_data, features=features, target=y_col)
+    hgbr_preds = hgbr_fitted.predict(test_data, name="pred")
+    hgbr_metrics = hgbr_preds.agg(mae=make_metric(metric=mean_absolute_error))
 
-    return results
+    return {
+        "Spline+Ridge": (spline_preds, spline_metrics),
+        "HGBR": (hgbr_preds, hgbr_metrics),
+    }
 
 
 # =========================================================================
@@ -239,44 +274,59 @@ def main():
     sk_results = sklearn_way(df, sklearn_spline_ridge, sklearn_hgbr)
 
     print("\n=== XORQ WAY ===")
-    xo_results = xorq_way(df, sklearn_spline_ridge, sklearn_hgbr)
+    deferred = xorq_way(df, sklearn_spline_ridge, sklearn_hgbr)
 
-    # Side-by-side plot: last 96 hours of predictions
-    n_plot = 96
-    fig, axes = plt.subplots(2, 2, figsize=(16, 8), sharex=True, sharey=True)
+    # Execute deferred expressions and print metrics
+    xo_plots = {}
+    for name, (preds_expr, metrics_expr) in deferred.items():
+        metrics_df = metrics_expr.execute()
+        mae = metrics_df["mae"].iloc[0]
+        print(f"  xorq   {name}: MAE = {mae:.4f}")
+        xo_plots[name] = deferred_matplotlib_plot(
+            preds_expr, _build_prediction_figure(f"xorq - {name}")
+        ).execute()
 
-    for col, (label, results) in enumerate(
-        [("sklearn", sk_results), ("xorq", xo_results)]
-    ):
-        for row, name in enumerate(["Spline+Ridge", "HGBR"]):
-            ax = axes[row, col]
-            r = results[name]
-            ax.plot(
-                range(n_plot),
-                r["y_test"][-n_plot:],
-                color="black",
-                linewidth=1.2,
-                label="actual",
-            )
-            ax.plot(
-                range(n_plot),
-                r["y_pred"][-n_plot:],
-                alpha=0.8,
-                label=f"predicted (MAE={r['mae']:.4f})",
-            )
-            ax.set_title(f"{label} - {name}")
-            ax.legend(fontsize=8)
-            if col == 0:
-                ax.set_ylabel("Fraction of max demand")
-            if row == 1:
-                ax.set_xlabel("Hours")
+    # Build sklearn subplot figures natively
+    model_names = ["Spline+Ridge", "HGBR"]
+
+    sk_figs = {}
+    for name in model_names:
+        mae, (y_test, y_pred) = sk_results[name]
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.plot(
+            range(N_PLOT), y_test[-N_PLOT:],
+            color="black", linewidth=1.2, label="actual",
+        )
+        ax.plot(
+            range(N_PLOT), y_pred[-N_PLOT:],
+            alpha=0.8, label=f"predicted (MAE={mae:.4f})",
+        )
+        ax.set_title(f"sklearn - {name}")
+        ax.set_xlabel("Hours")
+        ax.set_ylabel("Fraction of max demand")
+        ax.legend(fontsize=8)
+        plt.tight_layout()
+        sk_figs[name] = fig
+
+    # Composite: 2x2 grid -- sklearn (left) | xorq deferred (right)
+    fig, axes = plt.subplots(2, 2, figsize=(16, 8))
+
+    for row, name in enumerate(model_names):
+        # sklearn subplot (rendered to image)
+        axes[row, 0].imshow(fig_to_image(sk_figs[name]))
+        axes[row, 0].axis("off")
+
+        # xorq subplot (loaded from deferred PNG bytes)
+        xo_img = load_plot_bytes(xo_plots[name])
+        axes[row, 1].imshow(xo_img)
+        axes[row, 1].axis("off")
 
     plt.suptitle("Cyclical Feature Engineering: sklearn vs xorq", fontsize=14)
     plt.tight_layout()
     out = "imgs/cyclical_feature_engineering.png"
     plt.savefig(out, dpi=150)
     plt.close()
-    print(f"\nPlot saved to {out}")
+    print(f"Plot saved to {out}")
 
 
 if __name__ in ("__main__", "__pytest_main__"):

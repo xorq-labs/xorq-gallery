@@ -23,6 +23,8 @@ from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from xorq.expr.ml.pipeline_lib import Pipeline
 
+from xorq_gallery.utils import deferred_matplotlib_plot, fig_to_image, load_plot_bytes
+
 
 # ---------------------------------------------------------------------------
 # Shared config
@@ -61,28 +63,32 @@ def get_top_words(model, feature_names, n_top=n_top_words):
     return topics
 
 
-def plot_top_words_side_by_side(sk_model, xo_model, feature_names, n_top, title):
-    """Plot top words for sklearn (left) vs xorq (right)."""
-    n_topics = sk_model.components_.shape[0]
-    fig, axes = plt.subplots(n_topics, 2, figsize=(14, 2.5 * n_topics))
+def plot_top_words(model, feature_names, n_top, title):
+    """Plot top words per topic for a single decomposition model."""
+    n_topics = model.components_.shape[0]
+    fig, axes = plt.subplots(n_topics, 1, figsize=(7, 2.5 * n_topics))
 
     for topic_idx in range(n_topics):
-        for col, (label, model) in enumerate(
-            [("sklearn", sk_model), ("xorq", xo_model)]
-        ):
-            topic = model.components_[topic_idx]
-            top_idx = topic.argsort()[-n_top:]
-            top_features = feature_names[top_idx]
-            weights = topic[top_idx]
+        topic = model.components_[topic_idx]
+        top_idx = topic.argsort()[-n_top:]
+        top_features = feature_names[top_idx]
+        weights = topic[top_idx]
 
-            ax = axes[topic_idx, col]
-            ax.barh(top_features, weights, height=0.7)
-            ax.set_title(f"{label} Topic {topic_idx + 1}", fontsize=9)
-            ax.tick_params(axis="both", which="major", labelsize=7)
+        ax = axes[topic_idx]
+        ax.barh(top_features, weights, height=0.7)
+        ax.set_title(f"Topic {topic_idx + 1}", fontsize=9)
+        ax.tick_params(axis="both", which="major", labelsize=7)
 
     plt.suptitle(title, fontsize=13)
     plt.tight_layout()
     return fig
+
+
+def _build_topics_figure(model, feature_names, pipe_name):
+    """Return a UDAF-compatible plotting function for topic extraction results."""
+    def _plot(_df):
+        return plot_top_words(model, feature_names, n_top_words, f"xorq - {pipe_name}")
+    return _plot
 
 
 # ---------------------------------------------------------------------------
@@ -156,12 +162,17 @@ def sklearn_way(texts, pipelines):
 
 
 def xorq_way(texts, targets, pipelines):
-    """Deferred xorq: register text as ibis, Pipeline.from_instance."""
+    """Deferred xorq: register text as ibis, Pipeline.from_instance.
+
+    Returns a dict mapping pipeline name to a deferred plot expression
+    (PNG bytes via UDAF).  The fit goes through ibis data, then fitted
+    model components are captured in the closure for visualization.
+    """
     con = xo.connect()
     df = pd.DataFrame({"text": texts, "label": targets})
     data = con.register(df, "newsgroups")
 
-    results = {}
+    plot_exprs = {}
     for name, sk_pipe in pipelines.items():
         xorq_pipe = Pipeline.from_instance(sk_pipe)
         fitted = xorq_pipe.fit(data, features=("text",), target="label")
@@ -172,16 +183,16 @@ def xorq_way(texts, targets, pipelines):
         feature_names = np.array(vectorizer.get_feature_names_out())
         topics = get_top_words(decomp, feature_names)
 
-        results[name] = {
-            "model": decomp,
-            "feature_names": feature_names,
-            "topics": topics,
-        }
         print(f"  xorq   {name}:")
         for i, words in enumerate(topics[:3]):
             print(f"    Topic {i + 1}: {', '.join(words[:8])}")
         print(f"    ... ({n_components} topics total)")
-    return results
+
+        plot_exprs[name] = deferred_matplotlib_plot(
+            data, _build_topics_figure(decomp, feature_names, name)
+        )
+
+    return plot_exprs
 
 
 # =========================================================================
@@ -198,23 +209,40 @@ def main():
     sk_results = sklearn_way(texts, pipelines)
 
     print("\n=== XORQ WAY ===")
-    xo_results = xorq_way(texts, targets, pipelines)
+    plot_exprs = xorq_way(texts, targets, pipelines)
 
-    # Side-by-side topic comparison plots
+    # For each method: build sklearn figure natively, execute xorq deferred,
+    # composite side by side
     for name in pipelines:
-        fig = plot_top_words_side_by_side(
-            sk_results[name]["model"],
-            xo_results[name]["model"],
-            sk_results[name]["feature_names"],
-            n_top_words,
-            f"{name}: sklearn (left) vs xorq (right)",
+        # Execute xorq deferred plot
+        xo_png = plot_exprs[name].execute()
+
+        # Build sklearn figure natively
+        sk_model = sk_results[name]["model"]
+        sk_feature_names = sk_results[name]["feature_names"]
+        sk_fig = plot_top_words(
+            sk_model, sk_feature_names, n_top_words, f"sklearn - {name}"
         )
+
+        # Composite: sklearn (left) | xorq deferred (right)
+        xo_img = load_plot_bytes(xo_png)
+
+        fig, axes = plt.subplots(1, 2, figsize=(14, 2.5 * n_components))
+        axes[0].imshow(fig_to_image(sk_fig))
+        axes[0].set_title("sklearn")
+        axes[0].axis("off")
+        axes[1].imshow(xo_img)
+        axes[1].set_title("xorq")
+        axes[1].axis("off")
+
+        plt.suptitle(f"{name}: sklearn vs xorq", fontsize=13)
+        plt.tight_layout()
+
         fname = name.lower().replace(" ", "_").replace("(", "").replace(")", "")
         out = f"imgs/topics_{fname}.png"
         plt.savefig(out, dpi=150)
-        print(f"\nPlot saved to {out}")
-
-    plt.close("all")
+        plt.close()
+        print(f"Plot saved to {out}")
 
 
 if __name__ in ("__main__", "__pytest_main__"):
