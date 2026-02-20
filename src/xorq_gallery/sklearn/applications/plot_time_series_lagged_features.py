@@ -218,8 +218,10 @@ def main():
         "Lagged Features Forecasting: sklearn vs xorq (last 96h)", fontsize=14
     )
     plt.tight_layout()
-    plt.savefig("imgs/time_series_lagged_features.png", dpi=150)
+    out = "imgs/time_series_lagged_features.png"
+    plt.savefig(out, dpi=150)
     plt.close()
+    print(f"\nPlot saved to {out}")
 
 
 if __name__ in ("__main__", "__pytest_main__"):

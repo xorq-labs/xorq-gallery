@@ -184,8 +184,10 @@ def main():
         fontsize=13,
     )
     plt.tight_layout()
-    plt.savefig("imgs/tomography_l1_reconstruction.png", dpi=150)
+    out = "imgs/tomography_l1_reconstruction.png"
+    plt.savefig(out, dpi=150)
     plt.close()
+    print(f"\nPlot saved to {out}")
 
 
 if __name__ in ("__main__", "__pytest_main__"):

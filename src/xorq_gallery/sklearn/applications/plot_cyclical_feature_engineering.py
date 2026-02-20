@@ -273,8 +273,10 @@ def main():
 
     plt.suptitle("Cyclical Feature Engineering: sklearn vs xorq", fontsize=14)
     plt.tight_layout()
-    plt.savefig("imgs/cyclical_feature_engineering.png", dpi=150)
+    out = "imgs/cyclical_feature_engineering.png"
+    plt.savefig(out, dpi=150)
     plt.close()
+    print(f"\nPlot saved to {out}")
 
 
 if __name__ in ("__main__", "__pytest_main__"):

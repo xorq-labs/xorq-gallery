@@ -210,7 +210,9 @@ def main():
             f"{name}: sklearn (left) vs xorq (right)",
         )
         fname = name.lower().replace(" ", "_").replace("(", "").replace(")", "")
-        plt.savefig(f"imgs/topics_{fname}.png", dpi=150)
+        out = f"imgs/topics_{fname}.png"
+        plt.savefig(out, dpi=150)
+        print(f"\nPlot saved to {out}")
 
     plt.close("all")
 
