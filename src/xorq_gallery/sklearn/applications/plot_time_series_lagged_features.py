@@ -33,31 +33,38 @@ from xorq_gallery.utils import deferred_sequential_split
 
 
 # ---------------------------------------------------------------------------
-# Data loading (shared)
+# Constants
 # ---------------------------------------------------------------------------
-
-bike_sharing = fetch_openml(
-    "Bike_Sharing_Demand", version=2, as_frame=True, parser="pandas"
-)
-df = bike_sharing.frame
-
-df["count"] = df["count"].astype(float)
-df["hour"] = df["hour"].astype(int)
-df["weekday"] = df["weekday"].astype(int)
-df["month"] = df["month"].astype(int)
-df["temp"] = df["temp"].astype(float)
-df["humidity"] = df["humidity"].astype(float)
-df["windspeed"] = df["windspeed"].astype(float)
-
-# Row index for temporal ordering
-df["row_idx"] = range(len(df))
 
 target = "count"
 calendar_features = ["hour", "weekday", "month"]
 weather_features = ["temp", "humidity", "windspeed"]
-
-# Shared model config
 model_params = dict(max_iter=200, max_depth=8, learning_rate=0.1, random_state=42)
+
+
+# ---------------------------------------------------------------------------
+# Data loading (shared)
+# ---------------------------------------------------------------------------
+
+
+def _load_data():
+    bike_sharing = fetch_openml(
+        "Bike_Sharing_Demand", version=2, as_frame=True, parser="pandas"
+    )
+    df = bike_sharing.frame
+
+    df["count"] = df["count"].astype(float)
+    df["hour"] = df["hour"].astype(int)
+    df["weekday"] = df["weekday"].astype(int)
+    df["month"] = df["month"].astype(int)
+    df["temp"] = df["temp"].astype(float)
+    df["humidity"] = df["humidity"].astype(float)
+    df["windspeed"] = df["windspeed"].astype(float)
+
+    # Row index for temporal ordering
+    df["row_idx"] = range(len(df))
+
+    return df
 
 
 # =========================================================================
@@ -170,8 +177,10 @@ def xorq_way(df):
 # Run and plot side by side
 # =========================================================================
 
-if __name__ in ("__main__", "__pytest_main__"):
+def main():
     os.makedirs("imgs", exist_ok=True)
+
+    df = _load_data()
 
     print("=== SKLEARN WAY ===")
     sk = sklearn_way(df)
@@ -205,9 +214,14 @@ if __name__ in ("__main__", "__pytest_main__"):
         ax.legend(fontsize=9)
 
     axes[0].set_ylabel("Bike count")
-    plt.suptitle("Lagged Features Forecasting: sklearn vs xorq (last 96h)", fontsize=14)
+    plt.suptitle(
+        "Lagged Features Forecasting: sklearn vs xorq (last 96h)", fontsize=14
+    )
     plt.tight_layout()
     plt.savefig("imgs/time_series_lagged_features.png", dpi=150)
     plt.close()
 
+
+if __name__ in ("__main__", "__pytest_main__"):
+    main()
     pytest_examples_passed = True

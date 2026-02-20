@@ -35,103 +35,118 @@ from xorq_gallery.utils import deferred_sequential_split
 
 
 # ---------------------------------------------------------------------------
-# Data loading (shared)
+# Feature groups
 # ---------------------------------------------------------------------------
 
-bike_sharing = fetch_openml(
-    "Bike_Sharing_Demand", version=2, as_frame=True, parser="pandas"
-)
-df = bike_sharing.frame
-
-# Collapse rare category
-df["weather"] = (
-    df["weather"]
-    .astype(object)
-    .replace(to_replace="heavy_rain", value="rain")
-    .astype("category")
-)
-
-# Ensure numeric types
-for col in ("hour", "weekday", "month"):
-    df[col] = df[col].astype(int)
-for col in ("temp", "feel_temp", "humidity", "windspeed"):
-    df[col] = df[col].astype(float)
-
-# Target: fraction of max demand
 y_col = "count"
-df[y_col] = df[y_col] / df[y_col].max()
-
-# Row index for temporal ordering
-df["row_idx"] = range(len(df))
-
-# Feature groups
 time_features = ["hour", "weekday", "month"]
 weather_col = "weather"
 numerical_weather = ["temp", "feel_temp", "humidity", "windspeed"]
 all_feature_cols = time_features + [weather_col] + numerical_weather
 
+
+# ---------------------------------------------------------------------------
+# Data loading (shared)
+# ---------------------------------------------------------------------------
+
+
+def _load_data():
+    bike_sharing = fetch_openml(
+        "Bike_Sharing_Demand", version=2, as_frame=True, parser="pandas"
+    )
+    df = bike_sharing.frame
+
+    # Collapse rare category
+    df["weather"] = (
+        df["weather"]
+        .astype(object)
+        .replace(to_replace="heavy_rain", value="rain")
+        .astype("category")
+    )
+
+    # Ensure numeric types
+    for col in ("hour", "weekday", "month"):
+        df[col] = df[col].astype(int)
+    for col in ("temp", "feel_temp", "humidity", "windspeed"):
+        df[col] = df[col].astype(float)
+
+    # Target: fraction of max demand
+    df[y_col] = df[y_col] / df[y_col].max()
+
+    # Row index for temporal ordering
+    df["row_idx"] = range(len(df))
+
+    return df
+
+
 # ---------------------------------------------------------------------------
 # Shared pipeline definitions
 # ---------------------------------------------------------------------------
 
-spline_preprocessor = ColumnTransformer(
-    [
-        (
-            "hour_spline",
-            SplineTransformer(
-                degree=3, n_knots=12, knots="uniform", extrapolation="periodic"
-            ),
-            ["hour"],
-        ),
-        (
-            "weekday_spline",
-            SplineTransformer(
-                degree=3, n_knots=7, knots="uniform", extrapolation="periodic"
-            ),
-            ["weekday"],
-        ),
-        (
-            "month_spline",
-            SplineTransformer(
-                degree=3, n_knots=12, knots="uniform", extrapolation="periodic"
-            ),
-            ["month"],
-        ),
-        (
-            "weather_ohe",
-            OneHotEncoder(handle_unknown="ignore", sparse_output=False),
-            [weather_col],
-        ),
-        ("num_scale", MinMaxScaler(), numerical_weather),
-    ]
-)
 
-sklearn_spline_ridge = SklearnPipeline(
-    [
-        ("preprocess", spline_preprocessor),
-        ("ridge", RidgeCV(alphas=tuple(np.logspace(-6, 6, 25).tolist()))),
-    ]
-)
-
-sklearn_hgbr = SklearnPipeline(
-    [
-        (
-            "preprocess",
-            ColumnTransformer(
-                [
-                    (
-                        "cat",
-                        OneHotEncoder(handle_unknown="ignore", sparse_output=False),
-                        [weather_col],
-                    ),
-                    ("num", MinMaxScaler(), numerical_weather),
-                    ("time", "passthrough", time_features),
-                ]
+def _build_pipelines():
+    spline_preprocessor = ColumnTransformer(
+        [
+            (
+                "hour_spline",
+                SplineTransformer(
+                    degree=3, n_knots=12, knots="uniform", extrapolation="periodic"
+                ),
+                ["hour"],
             ),
-        ),
-        ("hgbr", HistGradientBoostingRegressor(max_iter=200, random_state=42)),
-    ]
-)
+            (
+                "weekday_spline",
+                SplineTransformer(
+                    degree=3, n_knots=7, knots="uniform", extrapolation="periodic"
+                ),
+                ["weekday"],
+            ),
+            (
+                "month_spline",
+                SplineTransformer(
+                    degree=3, n_knots=12, knots="uniform", extrapolation="periodic"
+                ),
+                ["month"],
+            ),
+            (
+                "weather_ohe",
+                OneHotEncoder(handle_unknown="ignore", sparse_output=False),
+                [weather_col],
+            ),
+            ("num_scale", MinMaxScaler(), numerical_weather),
+        ]
+    )
+
+    sklearn_spline_ridge = SklearnPipeline(
+        [
+            ("preprocess", spline_preprocessor),
+            ("ridge", RidgeCV(alphas=tuple(np.logspace(-6, 6, 25).tolist()))),
+        ]
+    )
+
+    sklearn_hgbr = SklearnPipeline(
+        [
+            (
+                "preprocess",
+                ColumnTransformer(
+                    [
+                        (
+                            "cat",
+                            OneHotEncoder(
+                                handle_unknown="ignore", sparse_output=False
+                            ),
+                            [weather_col],
+                        ),
+                        ("num", MinMaxScaler(), numerical_weather),
+                        ("time", "passthrough", time_features),
+                    ]
+                ),
+            ),
+            ("hgbr", HistGradientBoostingRegressor(max_iter=200, random_state=42)),
+        ]
+    )
+
+    return sklearn_spline_ridge, sklearn_hgbr
 
 
 # =========================================================================
@@ -139,7 +154,7 @@ sklearn_hgbr = SklearnPipeline(
 # =========================================================================
 
 
-def sklearn_way(df):
+def sklearn_way(df, sklearn_spline_ridge, sklearn_hgbr):
     """Eager sklearn: time-ordered split, fit, predict, score."""
     X = df[all_feature_cols]
     y = df[y_col]
@@ -172,7 +187,7 @@ def sklearn_way(df):
 # =========================================================================
 
 
-def xorq_way(df):
+def xorq_way(df, sklearn_spline_ridge, sklearn_hgbr):
     """Deferred xorq: TimeSeriesSplit fold assignment, Pipeline.from_instance."""
     con = xo.connect()
     data = con.register(df, "bike_sharing")
@@ -213,14 +228,18 @@ def xorq_way(df):
 # Run and plot side by side
 # =========================================================================
 
-if __name__ in ("__main__", "__pytest_main__"):
+
+def main():
     os.makedirs("imgs", exist_ok=True)
 
+    df = _load_data()
+    sklearn_spline_ridge, sklearn_hgbr = _build_pipelines()
+
     print("=== SKLEARN WAY ===")
-    sk_results = sklearn_way(df)
+    sk_results = sklearn_way(df, sklearn_spline_ridge, sklearn_hgbr)
 
     print("\n=== XORQ WAY ===")
-    xo_results = xorq_way(df)
+    xo_results = xorq_way(df, sklearn_spline_ridge, sklearn_hgbr)
 
     # Side-by-side plot: last 96 hours of predictions
     n_plot = 96
@@ -257,4 +276,7 @@ if __name__ in ("__main__", "__pytest_main__"):
     plt.savefig("imgs/cyclical_feature_engineering.png", dpi=150)
     plt.close()
 
+
+if __name__ in ("__main__", "__pytest_main__"):
+    main()
     pytest_examples_passed = True

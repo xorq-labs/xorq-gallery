@@ -25,7 +25,7 @@ from xorq.expr.ml.pipeline_lib import Pipeline
 
 
 # ---------------------------------------------------------------------------
-# Shared config and data
+# Shared config
 # ---------------------------------------------------------------------------
 
 n_samples = 2000
@@ -33,20 +33,23 @@ n_features = 1000
 n_components = 10
 n_top_words = 20
 
-newsgroups = fetch_20newsgroups(
-    remove=("headers", "footers", "quotes"),
-    shuffle=True,
-    random_state=42,
-)
-texts = newsgroups.data[:n_samples]
-targets = newsgroups.target[:n_samples]
-
 tfidf_params = dict(
     max_df=0.95, min_df=2, max_features=n_features, stop_words="english"
 )
 count_params = dict(
     max_df=0.95, min_df=2, max_features=n_features, stop_words="english"
 )
+
+
+def _load_data():
+    newsgroups = fetch_20newsgroups(
+        remove=("headers", "footers", "quotes"),
+        shuffle=True,
+        random_state=42,
+    )
+    texts = newsgroups.data[:n_samples]
+    targets = newsgroups.target[:n_samples]
+    return texts, targets
 
 
 def get_top_words(model, feature_names, n_top=n_top_words):
@@ -86,37 +89,39 @@ def plot_top_words_side_by_side(sk_model, xo_model, feature_names, n_top, title)
 # Pipeline definitions (shared sklearn Pipeline objects)
 # ---------------------------------------------------------------------------
 
-pipelines = {
-    "NMF (Frobenius)": SklearnPipeline(
-        [
-            ("tfidf", TfidfVectorizer(**tfidf_params)),
-            (
-                "nmf",
-                NMF(
-                    n_components=n_components,
-                    random_state=42,
-                    beta_loss="frobenius",
-                    max_iter=300,
+
+def _build_pipelines():
+    return {
+        "NMF (Frobenius)": SklearnPipeline(
+            [
+                ("tfidf", TfidfVectorizer(**tfidf_params)),
+                (
+                    "nmf",
+                    NMF(
+                        n_components=n_components,
+                        random_state=42,
+                        beta_loss="frobenius",
+                        max_iter=300,
+                    ),
                 ),
-            ),
-        ]
-    ),
-    "LDA": SklearnPipeline(
-        [
-            ("count", CountVectorizer(**count_params)),
-            (
-                "lda",
-                LatentDirichletAllocation(
-                    n_components=n_components,
-                    max_iter=5,
-                    learning_method="online",
-                    learning_offset=50.0,
-                    random_state=42,
+            ]
+        ),
+        "LDA": SklearnPipeline(
+            [
+                ("count", CountVectorizer(**count_params)),
+                (
+                    "lda",
+                    LatentDirichletAllocation(
+                        n_components=n_components,
+                        max_iter=5,
+                        learning_method="online",
+                        learning_offset=50.0,
+                        random_state=42,
+                    ),
                 ),
-            ),
-        ]
-    ),
-}
+            ]
+        ),
+    }
 
 
 # =========================================================================
@@ -124,7 +129,7 @@ pipelines = {
 # =========================================================================
 
 
-def sklearn_way(texts):
+def sklearn_way(texts, pipelines):
     """Eager sklearn: vectorize + decompose on raw text list."""
     results = {}
     for name, pipe in pipelines.items():
@@ -150,7 +155,7 @@ def sklearn_way(texts):
 # =========================================================================
 
 
-def xorq_way(texts, targets):
+def xorq_way(texts, targets, pipelines):
     """Deferred xorq: register text as ibis, Pipeline.from_instance."""
     con = xo.connect()
     df = pd.DataFrame({"text": texts, "label": targets})
@@ -183,14 +188,17 @@ def xorq_way(texts, targets):
 # Run and plot side by side
 # =========================================================================
 
-if __name__ in ("__main__", "__pytest_main__"):
+def main():
     os.makedirs("imgs", exist_ok=True)
 
+    texts, targets = _load_data()
+    pipelines = _build_pipelines()
+
     print("=== SKLEARN WAY ===")
-    sk_results = sklearn_way(texts)
+    sk_results = sklearn_way(texts, pipelines)
 
     print("\n=== XORQ WAY ===")
-    xo_results = xorq_way(texts, targets)
+    xo_results = xorq_way(texts, targets, pipelines)
 
     # Side-by-side topic comparison plots
     for name in pipelines:
@@ -206,4 +214,7 @@ if __name__ in ("__main__", "__pytest_main__"):
 
     plt.close("all")
 
+
+if __name__ in ("__main__", "__pytest_main__"):
+    main()
     pytest_examples_passed = True

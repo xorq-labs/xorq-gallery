@@ -2,7 +2,7 @@
 name = "xorq-gallery"
 version = "0.1.0"
 description = "Gallery of xorq examples demonstrating deferred ML pipelines"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "xorq",
     "scikit-learn",

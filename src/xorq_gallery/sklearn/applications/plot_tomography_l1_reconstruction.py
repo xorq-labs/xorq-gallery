@@ -76,13 +76,14 @@ def generate_synthetic_data(l_x):
     return np.logical_xor(res, ndimage.binary_erosion(res)).astype(float)
 
 
-# Generate data
-n_angles = img_size // 7
-proj_operator = build_projection_operator(img_size, n_angles)
-image = generate_synthetic_data(img_size)
-proj = proj_operator @ image.ravel()[:, np.newaxis]
-proj += 0.15 * np.random.randn(*proj.shape)
-proj_flat = proj.ravel()
+def _generate_data():
+    n_angles = img_size // 7
+    proj_operator = build_projection_operator(img_size, n_angles)
+    image = generate_synthetic_data(img_size)
+    proj = proj_operator @ image.ravel()[:, np.newaxis]
+    proj += 0.15 * np.random.randn(*proj.shape)
+    proj_flat = proj.ravel()
+    return proj_operator, image, proj_flat, n_angles
 
 
 # =========================================================================
@@ -90,7 +91,7 @@ proj_flat = proj.ravel()
 # =========================================================================
 
 
-def sklearn_way():
+def sklearn_way(proj_operator, image, proj_flat):
     """Eager sklearn: fit Ridge and Lasso directly on sparse matrix."""
     ridge = Ridge(alpha=0.2)
     ridge.fit(proj_operator, proj_flat)
@@ -113,7 +114,7 @@ def sklearn_way():
 # =========================================================================
 
 
-def xorq_way():
+def xorq_way(proj_operator, image, proj_flat):
     """Deferred xorq: register matrix as ibis table, fit via Pipeline."""
     con = xo.connect()
 
@@ -151,14 +152,16 @@ def xorq_way():
 # Run and plot side by side
 # =========================================================================
 
-if __name__ in ("__main__", "__pytest_main__"):
+def main():
     os.makedirs("imgs", exist_ok=True)
 
+    proj_operator, image, proj_flat, n_angles = _generate_data()
+
     print("=== SKLEARN WAY ===")
-    sk = sklearn_way()
+    sk = sklearn_way(proj_operator, image, proj_flat)
 
     print("\n=== XORQ WAY ===")
-    xo_res = xorq_way()
+    xo_res = xorq_way(proj_operator, image, proj_flat)
 
     # 2 rows (sklearn, xorq) x 3 cols (original, L2, L1)
     fig, axes = plt.subplots(2, 3, figsize=(12, 8))
@@ -184,4 +187,7 @@ if __name__ in ("__main__", "__pytest_main__"):
     plt.savefig("imgs/tomography_l1_reconstruction.png", dpi=150)
     plt.close()
 
+
+if __name__ in ("__main__", "__pytest_main__"):
+    main()
     pytest_examples_passed = True
