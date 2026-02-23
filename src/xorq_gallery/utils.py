@@ -7,17 +7,12 @@ bridges the gap while we get the gallery together.
 """
 
 from io import BytesIO
+from pathlib import Path
 
-import xorq.expr.datatypes as dt
-from sklearn.model_selection import TimeSeriesSplit
-from xorq.expr.ml.cross_validation import (
-    _fold_pairs_from_fold_expr,
-    _make_folds_from_sklearn,
-)
-from xorq.expr.udf import agg
+from toolz import compose
 
 
-def deferred_sequential_split(expr, *, features, target, order_by, test_size=0.3333):
+def deferred_sequential_split(expr, *, features, target, order_by):
     """Split an ibis expression into (train, test) preserving row order.
 
     Uses TimeSeriesSplit(n_splits=2) under the hood so the last fold gives
@@ -42,6 +37,11 @@ def deferred_sequential_split(expr, *, features, target, order_by, test_size=0.3
     -------
     train_expr, test_expr : tuple of ibis expressions
     """
+    from sklearn.model_selection import TimeSeriesSplit
+    from xorq.expr.ml.cross_validation import (
+        _fold_pairs_from_fold_expr,
+        _make_folds_from_sklearn,
+    )
     cv = TimeSeriesSplit(n_splits=2)
     fold_expr = _make_folds_from_sklearn(
         expr=expr,
@@ -50,8 +50,9 @@ def deferred_sequential_split(expr, *, features, target, order_by, test_size=0.3
         target=target,
         order_by=order_by,
     )
-    fold_pairs = _fold_pairs_from_fold_expr(fold_expr, n_splits=2)
-    return fold_pairs[-1]  # last fold = largest train set
+    # last fold = largest train set
+    (*_, fold_pair) = _fold_pairs_from_fold_expr(fold_expr, n_splits=2)
+    return fold_pair
 
 
 # ---------------------------------------------------------------------------
@@ -59,14 +60,14 @@ def deferred_sequential_split(expr, *, features, target, order_by, test_size=0.3
 # ---------------------------------------------------------------------------
 
 
-def _fig_to_png_bytes(fig):
+def _fig_to_png_bytes(fig, close=True):
     """Serialize a matplotlib Figure to PNG bytes."""
-    buf = BytesIO()
-    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
-    buf.seek(0)
     import matplotlib.pyplot as plt
 
-    plt.close(fig)
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    if close:
+        plt.close(fig)
     return buf.getvalue()
 
 
@@ -91,11 +92,11 @@ def deferred_matplotlib_plot(expr, fn, name="plot"):
     ibis scalar expression
         Scalar expression whose ``.execute()`` returns PNG bytes.
     """
-    def _plot_udaf_fn(df):
-        return _fig_to_png_bytes(fn(df))
 
+    import xorq.expr.datatypes as dt
+    from xorq.expr.udf import agg
     plot_udaf = agg.pandas_df(
-        fn=_plot_udaf_fn,
+        fn=compose(_fig_to_png_bytes, fn),
         schema=expr.schema(),
         return_type=dt.binary,
         name=name,
@@ -113,8 +114,7 @@ def save_plot(img_bytes, path):
     path : str
         File path to write the PNG to.
     """
-    with open(path, "wb") as f:
-        f.write(img_bytes)
+    Path(path).write_bytes(img_bytes)
     print(f"Plot saved to {path}")
 
 
@@ -126,16 +126,15 @@ def show_plot(img_bytes):
     img_bytes : bytes
         PNG bytes from ``deferred_matplotlib_plot(...).execute()``.
     """
-    import matplotlib.image as mpimg
     import matplotlib.pyplot as plt
 
-    img = mpimg.imread(BytesIO(img_bytes), format="png")
+    img = load_plot_bytes(img_bytes)
     plt.imshow(img)
     plt.axis("off")
     plt.show()
 
 
-def fig_to_image(fig):
+def fig_to_image(fig, close=True):
     """Render a matplotlib Figure to a numpy RGBA image array.
 
     Handles HiDPI/retina displays correctly by reading actual buffer
@@ -158,7 +157,8 @@ def fig_to_image(fig):
     fig.canvas.draw()
     buf = fig.canvas.buffer_rgba()
     img = np.asarray(buf)
-    plt.close(fig)
+    if close:
+        plt.close(fig)
     return img
 
 
@@ -180,17 +180,4 @@ def load_plot_bytes(img_bytes):
     return mpimg.imread(BytesIO(img_bytes), format="png")
 
 
-def load_plot(path):
-    """Read a saved PNG file as bytes.
-
-    Parameters
-    ----------
-    path : str
-        Path to a PNG file.
-
-    Returns
-    -------
-    bytes
-    """
-    with open(path, "rb") as f:
-        return f.read()
+load_plot = compose(Path.read_bytes, Path)

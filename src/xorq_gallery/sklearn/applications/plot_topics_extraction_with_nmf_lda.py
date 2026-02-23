@@ -21,6 +21,7 @@ from sklearn.datasets import fetch_20newsgroups
 from sklearn.decomposition import NMF, LatentDirichletAllocation
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.pipeline import Pipeline as SklearnPipeline
+from toolz import curry
 from xorq.expr.ml.pipeline_lib import Pipeline
 
 from xorq_gallery.utils import deferred_matplotlib_plot, fig_to_image, load_plot_bytes
@@ -56,11 +57,10 @@ def _load_data():
 
 def get_top_words(model, feature_names, n_top=n_top_words):
     """Extract top words per topic from a fitted decomposition model."""
-    topics = []
-    for topic in model.components_:
-        top_indices = topic.argsort()[-n_top:][::-1]
-        topics.append(list(feature_names[top_indices]))
-    return topics
+    return [
+        list(np.array(feature_names)[topic.argsort()[-n_top:][::-1]])
+        for topic in model.components_
+    ]
 
 
 def plot_top_words(model, feature_names, n_top, title):
@@ -79,16 +79,15 @@ def plot_top_words(model, feature_names, n_top, title):
         ax.set_title(f"Topic {topic_idx + 1}", fontsize=9)
         ax.tick_params(axis="both", which="major", labelsize=7)
 
-    plt.suptitle(title, fontsize=13)
-    plt.tight_layout()
+    fig.suptitle(title, fontsize=13)
+    fig.tight_layout()
     return fig
 
 
-def _build_topics_figure(model, feature_names, pipe_name):
+@curry
+def _build_topics_figure(_df, model, feature_names, pipe_name):
     """Return a UDAF-compatible plotting function for topic extraction results."""
-    def _plot(_df):
-        return plot_top_words(model, feature_names, n_top_words, f"xorq - {pipe_name}")
-    return _plot
+    return plot_top_words(model, np.array(feature_names), n_top_words, f"xorq - {pipe_name}")
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +171,7 @@ def xorq_way(texts, targets, pipelines):
     df = pd.DataFrame({"text": texts, "label": targets})
     data = con.register(df, "newsgroups")
 
-    plot_exprs = {}
+    plot_expr_pairs = ()
     for name, sk_pipe in pipelines.items():
         xorq_pipe = Pipeline.from_instance(sk_pipe)
         fitted = xorq_pipe.fit(data, features=("text",), target="label")
@@ -188,16 +187,26 @@ def xorq_way(texts, targets, pipelines):
             print(f"    Topic {i + 1}: {', '.join(words[:8])}")
         print(f"    ... ({n_components} topics total)")
 
-        plot_exprs[name] = deferred_matplotlib_plot(
-            data, _build_topics_figure(decomp, feature_names, name)
+        plot_expr_pairs += (
+            (
+                name, 
+                deferred_matplotlib_plot(
+                    data, _build_topics_figure(
+                        model=decomp,
+                        feature_names=tuple(feature_names),
+                        pipe_name=name,
+                    )
+                ),
+            ),
         )
 
-    return plot_exprs
+    return plot_expr_pairs
 
 
 # =========================================================================
 # Run and plot side by side
 # =========================================================================
+
 
 def main():
     os.makedirs("imgs", exist_ok=True)
@@ -209,13 +218,13 @@ def main():
     sk_results = sklearn_way(texts, pipelines)
 
     print("\n=== XORQ WAY ===")
-    plot_exprs = xorq_way(texts, targets, pipelines)
+    plot_expr_pairs = xorq_way(texts, targets, pipelines)
 
     # For each method: build sklearn figure natively, execute xorq deferred,
     # composite side by side
-    for name in pipelines:
+    for (name, plot_expr) in plot_expr_pairs:
         # Execute xorq deferred plot
-        xo_png = plot_exprs[name].execute()
+        xo_png = plot_expr.execute()
 
         # Build sklearn figure natively
         sk_model = sk_results[name]["model"]
@@ -235,13 +244,13 @@ def main():
         axes[1].set_title("xorq")
         axes[1].axis("off")
 
-        plt.suptitle(f"{name}: sklearn vs xorq", fontsize=13)
-        plt.tight_layout()
+        fig.suptitle(f"{name}: sklearn vs xorq", fontsize=13)
+        fig.tight_layout()
 
         fname = name.lower().replace(" ", "_").replace("(", "").replace(")", "")
         out = f"imgs/topics_{fname}.png"
-        plt.savefig(out, dpi=150)
-        plt.close()
+        fig.savefig(out, dpi=150)
+        plt.close(fig)
         print(f"Plot saved to {out}")
 
 

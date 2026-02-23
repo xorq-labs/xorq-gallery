@@ -5,20 +5,25 @@ import pytest
 from pytest import param
 
 
-examples_dir = (
+sklearn_dir = (
     pathlib.Path(__file__).parents[1]
     / "src"
     / "xorq_gallery"
     / "sklearn"
-    / "applications"
 )
-scripts = sorted(examples_dir.glob("*.py"))
+
+# Collect all example scripts from all categories (applications, calibration, etc.)
+scripts = []
+for category_dir in sorted(sklearn_dir.iterdir()):
+    if category_dir.is_dir() and not category_dir.name.startswith("_"):
+        for script in sorted(category_dir.glob("plot_*.py")):
+            scripts.append((category_dir.name, script))
 
 
 @pytest.mark.parametrize(
-    "script",
-    [param(script, id=script.stem) for script in scripts],
+    "category,script",
+    [param(cat, script, id=f"{cat}/{script.stem}") for cat, script in scripts],
 )
-def test_script_execution(script):
+def test_script_execution(category, script):
     dct = runpy.run_path(str(script), run_name="__pytest_main__")
     assert dct.get("pytest_examples_passed")

@@ -41,11 +41,19 @@ from xorq_gallery.utils import (
 # Constants
 # ---------------------------------------------------------------------------
 
+ROW_IDX = "row_idx"
+pred_col = "pred"
 target = "count"
-calendar_features = ["hour", "weekday", "month"]
-weather_features = ["temp", "humidity", "windspeed"]
+calendar_features = ("hour", "weekday", "month")
+weather_features = ("temp", "humidity", "windspeed")
 model_params = dict(max_iter=200, max_depth=8, learning_rate=0.1, random_state=42)
-
+lagged_features_ns = (
+    ("lagged_count_1h", 1),
+    ("lagged_count_2h", 2),
+    ("lagged_count_3h", 3),
+    ("lagged_count_1d", 24),
+    ("lagged_count_7d", 24*7),
+)
 
 # ---------------------------------------------------------------------------
 # Data loading (shared)
@@ -57,19 +65,12 @@ def _load_data():
         "Bike_Sharing_Demand", version=2, as_frame=True, parser="pandas"
     )
     df = bike_sharing.frame
-
-    df["count"] = df["count"].astype(float)
-    df["hour"] = df["hour"].astype(int)
-    df["weekday"] = df["weekday"].astype(int)
-    df["month"] = df["month"].astype(int)
-    df["temp"] = df["temp"].astype(float)
-    df["humidity"] = df["humidity"].astype(float)
-    df["windspeed"] = df["windspeed"].astype(float)
-
-    # Row index for temporal ordering
-    df["row_idx"] = range(len(df))
-
-    return df
+    return (
+        df
+        .astype({name: float for name in ("count", "temp", "humidity", "windspeed")})
+        .astype({name: int for name in ("hour", "weekday", "month")})
+        .assign(**{ROW_IDX: range(len(df))})
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +83,7 @@ N_PLOT = 96
 def _build_xorq_figure(df):
     """Plot xorq predictions vs actuals for the last N_PLOT hours."""
     actual = df[target].values
-    predicted = df["pred"].values
+    predicted = df[pred_col].values
     mae = mean_absolute_error(actual, predicted)
 
     fig, ax = plt.subplots(figsize=(8, 5))
@@ -100,7 +101,7 @@ def _build_xorq_figure(df):
     ax.set_xlabel("Hours")
     ax.set_ylabel("Bike count")
     ax.legend(fontsize=9)
-    plt.tight_layout()
+    fig.tight_layout()
     return fig
 
 
@@ -112,16 +113,17 @@ def _build_xorq_figure(df):
 def sklearn_way(df):
     """Eager sklearn: pandas shift for lags, shuffle=False split."""
     # Engineer lagged features with pandas
-    ldf = df[["count", "row_idx"] + calendar_features + weather_features].copy()
-    ldf["lagged_count_1h"] = ldf["count"].shift(1)
-    ldf["lagged_count_2h"] = ldf["count"].shift(2)
-    ldf["lagged_count_3h"] = ldf["count"].shift(3)
-    ldf["lagged_count_1d"] = ldf["count"].shift(24)
-    ldf["lagged_count_7d"] = ldf["count"].shift(24 * 7)
-    ldf = ldf.dropna()
+    ldf = (
+        df[list(("count", ROW_IDX) + calendar_features + weather_features)]
+        .assign(**{
+            lagged_feature: lambda d, n=n: d["count"].shift(n)
+            for lagged_feature, n in lagged_features_ns
+        })
+        .dropna()
+    )
 
     lagged_cols = [c for c in ldf.columns if c.startswith("lagged_")]
-    feature_cols = lagged_cols + calendar_features + weather_features
+    feature_cols = lagged_cols + list(calendar_features + weather_features)
 
     X = ldf[feature_cols]
     y = ldf[target]
@@ -157,41 +159,28 @@ def xorq_way(df):
     data = con.register(df, "bike_sharing")
 
     # Lagged features via ibis window functions
-    data_with_lags = data.mutate(
-        lagged_count_1h=data[target].lag(1).over(order_by="row_idx"),
-        lagged_count_2h=data[target].lag(2).over(order_by="row_idx"),
-        lagged_count_3h=data[target].lag(3).over(order_by="row_idx"),
-        lagged_count_1d=data[target].lag(24).over(order_by="row_idx"),
-        lagged_count_7d=data[target].lag(24 * 7).over(order_by="row_idx"),
-    ).drop_null(
-        subset=[
-            "lagged_count_1h",
-            "lagged_count_2h",
-            "lagged_count_3h",
-            "lagged_count_1d",
-            "lagged_count_7d",
-        ]
+    lagged_features = list(lagged_feature for lagged_feature, _ in lagged_features_ns)
+    data_with_lags = (
+        data
+        .mutate(**{
+            lagged_feature: data[target].lag(n).over(order_by=ROW_IDX)
+            for (lagged_feature, n) in lagged_features_ns
+        })
+        .drop_null(subset=lagged_features)
     )
 
-    lagged_features = [
-        "lagged_count_1h",
-        "lagged_count_2h",
-        "lagged_count_3h",
-        "lagged_count_1d",
-        "lagged_count_7d",
-    ]
-    all_features = lagged_features + calendar_features + weather_features
+    all_features = tuple(lagged_features) + calendar_features + weather_features
 
     train_data, test_data = deferred_sequential_split(
-        data_with_lags, features=tuple(all_features), target=target, order_by="row_idx"
+        data_with_lags, features=tuple(all_features), target=target, order_by=ROW_IDX
     )
 
     sk_pipe = SklearnPipeline([("hgbr", HistGradientBoostingRegressor(**model_params))])
     xorq_pipe = Pipeline.from_instance(sk_pipe)
     fitted = xorq_pipe.fit(train_data, features=tuple(all_features), target=target)
-    preds = fitted.predict(test_data, name="pred")
+    preds = fitted.predict(test_data, name=pred_col)
 
-    make_metric = deferred_sklearn_metric(target=target, pred="pred")
+    make_metric = deferred_sklearn_metric(target=target, pred=pred_col)
     metrics = preds.agg(
         mae=make_metric(metric=mean_absolute_error),
         mse=make_metric(metric=mean_squared_error),
@@ -205,6 +194,7 @@ def xorq_way(df):
 # =========================================================================
 # Run and plot side by side
 # =========================================================================
+
 
 def main():
     os.makedirs("imgs", exist_ok=True)
@@ -243,7 +233,7 @@ def main():
     sk_ax.set_xlabel("Hours")
     sk_ax.set_ylabel("Bike count")
     sk_ax.legend(fontsize=9)
-    plt.tight_layout()
+    sk_fig.tight_layout()
 
     # Composite: sklearn (left) | xorq deferred plot (right)
     xo_img = load_plot_bytes(xo_png)
@@ -258,13 +248,11 @@ def main():
     axes[1].set_title("xorq")
     axes[1].axis("off")
 
-    plt.suptitle(
-        "Lagged Features Forecasting: sklearn vs xorq (last 96h)", fontsize=14
-    )
-    plt.tight_layout()
+    fig.suptitle("Lagged Features Forecasting: sklearn vs xorq (last 96h)", fontsize=14)
+    fig.tight_layout()
     out = "imgs/time_series_lagged_features.png"
-    plt.savefig(out, dpi=150)
-    plt.close()
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
     print(f"Plot saved to {out}")
 
 

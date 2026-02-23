@@ -28,6 +28,7 @@ from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, SplineTransformer
+from toolz import curry
 from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
 
@@ -44,10 +45,12 @@ from xorq_gallery.utils import (
 # ---------------------------------------------------------------------------
 
 y_col = "count"
-time_features = ["hour", "weekday", "month"]
+pred_col = "pred"
+ROW_IDX = "row_idx"
+time_features = ("hour", "weekday", "month")
 weather_col = "weather"
-numerical_weather = ["temp", "feel_temp", "humidity", "windspeed"]
-all_feature_cols = time_features + [weather_col] + numerical_weather
+numerical_weather = ("temp", "feel_temp", "humidity", "windspeed")
+all_feature_cols = time_features + (weather_col,) + numerical_weather
 
 
 # ---------------------------------------------------------------------------
@@ -60,28 +63,21 @@ def _load_data():
         "Bike_Sharing_Demand", version=2, as_frame=True, parser="pandas"
     )
     df = bike_sharing.frame
-
-    # Collapse rare category
-    df["weather"] = (
-        df["weather"]
-        .astype(object)
-        .replace(to_replace="heavy_rain", value="rain")
-        .astype("category")
+    return (
+        df
+        .assign(**{
+            weather_col: (
+                df[weather_col]
+                .astype(object)
+                .replace(to_replace="heavy_rain", value="rain")
+                .astype("category")
+            ),
+            y_col: df[y_col].div(df[y_col].max()),
+            ROW_IDX: range(len(df)),
+        })
+        .astype({col: int for col in ("hour", "weekday", "month")})
+        .astype({col: float for col in ("temp", "feel_temp", "humidity", "windspeed")})
     )
-
-    # Ensure numeric types
-    for col in ("hour", "weekday", "month"):
-        df[col] = df[col].astype(int)
-    for col in ("temp", "feel_temp", "humidity", "windspeed"):
-        df[col] = df[col].astype(float)
-
-    # Target: fraction of max demand
-    df[y_col] = df[y_col] / df[y_col].max()
-
-    # Row index for temporal ordering
-    df["row_idx"] = range(len(df))
-
-    return df
 
 
 # ---------------------------------------------------------------------------
@@ -91,30 +87,34 @@ def _load_data():
 N_PLOT = 96
 
 
-def _build_prediction_figure(title):
-    """Return a UDAF-compatible plotting function for actual vs predicted."""
-    def _plot(df):
-        actual = df[y_col].values
-        predicted = df["pred"].values
-        mae = mean_absolute_error(actual, predicted)
+@curry
+def _prediction_figure(df, title):
+    """A UDAF-compatible plotting function for actual vs predicted."""
 
-        fig, ax = plt.subplots(figsize=(8, 5))
-        ax.plot(
-            range(N_PLOT), actual[-N_PLOT:],
-            color="black", linewidth=1.2, label="actual",
-        )
-        ax.plot(
-            range(N_PLOT), predicted[-N_PLOT:],
-            alpha=0.8, label=f"predicted (MAE={mae:.4f})",
-        )
-        ax.set_title(title)
-        ax.set_xlabel("Hours")
-        ax.set_ylabel("Fraction of max demand")
-        ax.legend(fontsize=8)
-        plt.tight_layout()
-        return fig
+    actual = df[y_col].values
+    predicted = df[pred_col].values
+    mae = mean_absolute_error(actual, predicted)
 
-    return _plot
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(
+        range(N_PLOT),
+        actual[-N_PLOT:],
+        color="black",
+        linewidth=1.2,
+        label="actual",
+    )
+    ax.plot(
+        range(N_PLOT),
+        predicted[-N_PLOT:],
+        alpha=0.8,
+        label=f"predicted (MAE={mae:.4f})",
+    )
+    ax.set_title(title)
+    ax.set_xlabel("Hours")
+    ax.set_ylabel("Fraction of max demand")
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    return fig
 
 
 # ---------------------------------------------------------------------------
@@ -170,9 +170,7 @@ def _build_pipelines():
                     [
                         (
                             "cat",
-                            OneHotEncoder(
-                                handle_unknown="ignore", sparse_output=False
-                            ),
+                            OneHotEncoder(handle_unknown="ignore", sparse_output=False),
                             [weather_col],
                         ),
                         ("num", MinMaxScaler(), numerical_weather),
@@ -194,7 +192,7 @@ def _build_pipelines():
 
 def sklearn_way(df, sklearn_spline_ridge, sklearn_hgbr):
     """Eager sklearn: time-ordered split, fit, predict, score."""
-    X = df[all_feature_cols]
+    X = df[list(all_feature_cols)]
     y = df[y_col]
 
     # shuffle=False preserves temporal order: first rows train, last rows test
@@ -233,24 +231,24 @@ def xorq_way(df, sklearn_spline_ridge, sklearn_hgbr):
     """
     con = xo.connect()
     data = con.register(df, "bike_sharing")
-    features = tuple(all_feature_cols)
+    features = list(all_feature_cols)
 
     train_data, test_data = deferred_sequential_split(
-        data, features=features, target=y_col, order_by="row_idx"
+        data, features=features, target=y_col, order_by=ROW_IDX
     )
 
-    make_metric = deferred_sklearn_metric(target=y_col, pred="pred")
+    make_metric = deferred_sklearn_metric(target=y_col, pred=pred_col)
 
     # Spline+Ridge
     spline_pipe = Pipeline.from_instance(sklearn_spline_ridge)
     spline_fitted = spline_pipe.fit(train_data, features=features, target=y_col)
-    spline_preds = spline_fitted.predict(test_data, name="pred")
+    spline_preds = spline_fitted.predict(test_data, name=pred_col)
     spline_metrics = spline_preds.agg(mae=make_metric(metric=mean_absolute_error))
 
     # HGBR
     hgbr_pipe = Pipeline.from_instance(sklearn_hgbr)
     hgbr_fitted = hgbr_pipe.fit(train_data, features=features, target=y_col)
-    hgbr_preds = hgbr_fitted.predict(test_data, name="pred")
+    hgbr_preds = hgbr_fitted.predict(test_data, name=pred_col)
     hgbr_metrics = hgbr_preds.agg(mae=make_metric(metric=mean_absolute_error))
 
     return {
@@ -283,7 +281,7 @@ def main():
         mae = metrics_df["mae"].iloc[0]
         print(f"  xorq   {name}: MAE = {mae:.4f}")
         xo_plots[name] = deferred_matplotlib_plot(
-            preds_expr, _build_prediction_figure(f"xorq - {name}")
+            preds_expr, _prediction_figure(title=f"xorq - {name}")
         ).execute()
 
     # Build sklearn subplot figures natively
@@ -294,18 +292,23 @@ def main():
         mae, (y_test, y_pred) = sk_results[name]
         fig, ax = plt.subplots(figsize=(8, 5))
         ax.plot(
-            range(N_PLOT), y_test[-N_PLOT:],
-            color="black", linewidth=1.2, label="actual",
+            range(N_PLOT),
+            y_test[-N_PLOT:],
+            color="black",
+            linewidth=1.2,
+            label="actual",
         )
         ax.plot(
-            range(N_PLOT), y_pred[-N_PLOT:],
-            alpha=0.8, label=f"predicted (MAE={mae:.4f})",
+            range(N_PLOT),
+            y_pred[-N_PLOT:],
+            alpha=0.8,
+            label=f"predicted (MAE={mae:.4f})",
         )
         ax.set_title(f"sklearn - {name}")
         ax.set_xlabel("Hours")
         ax.set_ylabel("Fraction of max demand")
         ax.legend(fontsize=8)
-        plt.tight_layout()
+        fig.tight_layout()
         sk_figs[name] = fig
 
     # Composite: 2x2 grid -- sklearn (left) | xorq deferred (right)
@@ -321,11 +324,11 @@ def main():
         axes[row, 1].imshow(xo_img)
         axes[row, 1].axis("off")
 
-    plt.suptitle("Cyclical Feature Engineering: sklearn vs xorq", fontsize=14)
-    plt.tight_layout()
+    fig.suptitle("Cyclical Feature Engineering: sklearn vs xorq", fontsize=14)
+    fig.tight_layout()
     out = "imgs/cyclical_feature_engineering.png"
-    plt.savefig(out, dpi=150)
-    plt.close()
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
     print(f"Plot saved to {out}")
 
 

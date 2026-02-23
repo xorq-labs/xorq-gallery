@@ -20,6 +20,7 @@ import xorq.api as xo
 from scipy import ndimage, sparse
 from sklearn.linear_model import Lasso, Ridge
 from sklearn.pipeline import Pipeline as SklearnPipeline
+from toolz import curry
 from xorq.expr.ml.pipeline_lib import Pipeline
 
 from xorq_gallery.utils import deferred_matplotlib_plot, fig_to_image, load_plot_bytes
@@ -93,28 +94,27 @@ def _generate_data():
 # ---------------------------------------------------------------------------
 
 
-def _build_reconstruction_figure(image, rec_l2, rec_l1, l2_err, l1_err, n_angles):
-    """Return a UDAF-compatible plotting function for reconstruction results."""
-    def _plot(_df):
-        fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+@curry
+def _build_reconstruction_figure(_df, image, rec_l2, rec_l1, l2_err, l1_err, n_angles):
+    """A UDAF-compatible plotting function for reconstruction results."""
+    (image, rec_l2, rec_l1) = map(np.array, (image, rec_l2, rec_l1))
+    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
 
-        axes[0].imshow(image, cmap="gray", interpolation="nearest")
-        axes[0].set_title("Original")
-        axes[0].axis("off")
+    axes[0].imshow(image, cmap="gray", interpolation="nearest")
+    axes[0].set_title("Original")
+    axes[0].axis("off")
 
-        axes[1].imshow(rec_l2, cmap="gray", interpolation="nearest")
-        axes[1].set_title(f"Ridge (L2) err={l2_err:.2f}")
-        axes[1].axis("off")
+    axes[1].imshow(rec_l2, cmap="gray", interpolation="nearest")
+    axes[1].set_title(f"Ridge (L2) err={l2_err:.2f}")
+    axes[1].axis("off")
 
-        axes[2].imshow(rec_l1, cmap="gray", interpolation="nearest")
-        axes[2].set_title(f"Lasso (L1) err={l1_err:.2f}")
-        axes[2].axis("off")
+    axes[2].imshow(rec_l1, cmap="gray", interpolation="nearest")
+    axes[2].set_title(f"Lasso (L1) err={l1_err:.2f}")
+    axes[2].axis("off")
 
-        plt.suptitle(f"xorq - Tomography: {n_angles} projections", fontsize=13)
-        plt.tight_layout()
-        return fig
-
-    return _plot
+    fig.suptitle(f"xorq - Tomography: {n_angles} projections", fontsize=13)
+    fig.tight_layout()
+    return fig
 
 
 # =========================================================================
@@ -181,13 +181,21 @@ def xorq_way(proj_operator, image, proj_flat, n_angles):
     print(f"  xorq   Ridge L2 error: {l2_err:.2f}")
     print(f"  xorq   Lasso L1 error: {l1_err:.2f}")
 
-    plot_fn = _build_reconstruction_figure(image, rec_l2, rec_l1, l2_err, l1_err, n_angles)
+    plot_fn = _build_reconstruction_figure(
+        image=tuple(tuple(el) for el in image),
+        rec_l2=tuple(tuple(el) for el in rec_l2),
+        rec_l1=tuple(tuple(el) for el in rec_l1),
+        l2_err=l2_err,
+        l1_err=l1_err,
+        n_angles=n_angles,
+    )
     return deferred_matplotlib_plot(data, plot_fn)
 
 
 # =========================================================================
 # Run and plot side by side
 # =========================================================================
+
 
 def main():
     os.makedirs("imgs", exist_ok=True)
@@ -217,8 +225,8 @@ def main():
     sk_axes[2].imshow(sk["l1"], cmap="gray", interpolation="nearest")
     sk_axes[2].set_title(f"Lasso (L1) err={l1_err:.2f}")
     sk_axes[2].axis("off")
-    plt.suptitle(f"sklearn - Tomography: {n_angles} projections", fontsize=13)
-    plt.tight_layout()
+    sk_fig.suptitle(f"sklearn - Tomography: {n_angles} projections", fontsize=13)
+    sk_fig.tight_layout()
 
     # Composite: sklearn (top) | xorq deferred (bottom)
     xo_img = load_plot_bytes(xo_png)
@@ -231,14 +239,14 @@ def main():
     axes[1].set_title("xorq")
     axes[1].axis("off")
 
-    plt.suptitle(
+    fig.suptitle(
         f"Tomography Reconstruction: {n_angles} projections, {n_pixels} pixels",
         fontsize=13,
     )
-    plt.tight_layout()
+    fig.tight_layout()
     out = "imgs/tomography_l1_reconstruction.png"
-    plt.savefig(out, dpi=150)
-    plt.close()
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
     print(f"Plot saved to {out}")
 
 
