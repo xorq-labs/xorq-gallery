@@ -1,0 +1,450 @@
+"""Quantile Regression
+===================
+
+sklearn: Generate heteroscedastic Normal and asymmetric Pareto distributed targets
+with linear mean. Fit QuantileRegressor at quantiles 0.05, 0.5, 0.95 eagerly,
+identify outliers beyond the 90% interval, and compare with LinearRegression
+via MAE and MSE metrics.
+
+xorq: Same models wrapped in Pipeline.from_instance. Data is an ibis expression,
+fit/predict deferred, metrics via deferred_sklearn_metric, outlier detection
+via deferred boolean operations.
+
+Both produce identical quantile predictions and metrics.
+
+Dataset: Synthetic linear data with heteroscedastic Normal or asymmetric Pareto noise
+"""
+
+import os
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import xorq.api as xo
+from sklearn.linear_model import LinearRegression, QuantileRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline as SklearnPipeline
+from xorq.expr.ml.metrics import deferred_sklearn_metric
+from xorq.expr.ml.pipeline_lib import Pipeline
+
+from xorq_gallery.utils import (
+    deferred_matplotlib_plot,
+    deferred_sequential_split,
+    fig_to_image,
+    load_plot_bytes,
+)
+
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+RANDOM_STATE = 42
+N_SAMPLES = 100
+
+
+# ---------------------------------------------------------------------------
+# Data generation (shared)
+# ---------------------------------------------------------------------------
+
+
+def _generate_datasets():
+    """Generate two synthetic datasets with heteroscedastic and asymmetric noise.
+
+    Returns
+    -------
+    dict with keys "normal" and "pareto", each containing:
+        - "X": features (n_samples x 1)
+        - "y": targets
+        - "x": 1D x values for plotting
+        - "y_true_mean": true conditional mean
+    """
+    rng = np.random.RandomState(RANDOM_STATE)
+    x = np.linspace(start=0, stop=10, num=N_SAMPLES)
+    X = x[:, np.newaxis]
+    y_true_mean = 10 + 0.5 * x
+
+    # Heteroscedastic Normal noise
+    y_normal = y_true_mean + rng.normal(loc=0, scale=0.5 + 0.5 * x, size=x.shape[0])
+
+    # Asymmetric Pareto noise
+    a = 5
+    y_pareto = y_true_mean + 10 * (rng.pareto(a, size=x.shape[0]) - 1 / (a - 1))
+
+    return {
+        "normal": {"X": X, "y": y_normal, "x": x, "y_true_mean": y_true_mean},
+        "pareto": {"X": X, "y": y_pareto, "x": x, "y_true_mean": y_true_mean},
+    }
+
+
+def _load_data():
+    """Load data as pandas DataFrame with row_idx for temporal ordering."""
+    datasets = _generate_datasets()
+
+    # Build DataFrame with both targets
+    df = pd.DataFrame(datasets["normal"]["X"], columns=["feature_0"])
+    df["y_normal"] = datasets["normal"]["y"]
+    df["y_pareto"] = datasets["pareto"]["y"]
+    df["x"] = datasets["normal"]["x"]
+    df["y_true_mean"] = datasets["normal"]["y_true_mean"]
+    df["row_idx"] = range(len(df))
+
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Plotting helpers for deferred_matplotlib_plot
+# ---------------------------------------------------------------------------
+
+
+def _build_quantile_plot_normal(df):
+    """Build quantile regression plot for Normal noise dataset.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must contain columns: x, y_normal, y_true_mean, pred_q05, pred_q50, pred_q95,
+        out_bounds
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    ax.plot(
+        df["x"], df["y_true_mean"], color="black", linestyle="dashed", label="True mean"
+    )
+    ax.plot(df["x"], df["pred_q05"], label="Quantile: 0.05")
+    ax.plot(df["x"], df["pred_q50"], label="Quantile: 0.5")
+    ax.plot(df["x"], df["pred_q95"], label="Quantile: 0.95")
+
+    # Separate inside/outside interval
+    out_mask = df["out_bounds"].astype(bool)
+    ax.scatter(
+        df.loc[out_mask, "x"],
+        df.loc[out_mask, "y_normal"],
+        color="black",
+        marker="+",
+        alpha=0.5,
+        label="Outside interval",
+    )
+    ax.scatter(
+        df.loc[~out_mask, "x"],
+        df.loc[~out_mask, "y_normal"],
+        color="black",
+        alpha=0.5,
+        label="Inside interval",
+    )
+
+    ax.legend()
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_title("Quantiles of heteroscedastic Normal distributed target")
+    plt.tight_layout()
+    return fig
+
+
+def _build_quantile_plot_pareto(df):
+    """Build quantile regression plot for Pareto noise dataset.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must contain columns: x, y_pareto, y_true_mean, pred_q05, pred_q50, pred_q95,
+        out_bounds
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    ax.plot(
+        df["x"], df["y_true_mean"], color="black", linestyle="dashed", label="True mean"
+    )
+    ax.plot(df["x"], df["pred_q05"], label="Quantile: 0.05")
+    ax.plot(df["x"], df["pred_q50"], label="Quantile: 0.5")
+    ax.plot(df["x"], df["pred_q95"], label="Quantile: 0.95")
+
+    # Separate inside/outside interval
+    out_mask = df["out_bounds"].astype(bool)
+    ax.scatter(
+        df.loc[out_mask, "x"],
+        df.loc[out_mask, "y_pareto"],
+        color="black",
+        marker="+",
+        alpha=0.5,
+        label="Outside interval",
+    )
+    ax.scatter(
+        df.loc[~out_mask, "x"],
+        df.loc[~out_mask, "y_pareto"],
+        color="black",
+        alpha=0.5,
+        label="Inside interval",
+    )
+
+    ax.legend()
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_title("Quantiles of asymmetric Pareto distributed target")
+    plt.tight_layout()
+    return fig
+
+
+# =========================================================================
+# SKLEARN WAY -- eager execution
+# =========================================================================
+
+
+def sklearn_way(df, dataset_type="normal"):
+    """Eager sklearn: fit quantile regressors at 0.05, 0.5, 0.95.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Full dataset
+    dataset_type : str
+        Either "normal" or "pareto"
+
+    Returns
+    -------
+    dict
+        Keys: "predictions" (dict of quantile -> array), "out_bounds" (bool array),
+              "lr_metrics" (dict with mae, mse)
+    """
+    target_col = f"y_{dataset_type}"
+    X = df[["feature_0"]].values
+    y = df[target_col].values
+
+    # Fit quantile regressors - flat, no loops
+    qr_05 = QuantileRegressor(quantile=0.05, alpha=0)
+    y_pred_05 = qr_05.fit(X, y).predict(X)
+
+    qr_50 = QuantileRegressor(quantile=0.5, alpha=0)
+    y_pred_50 = qr_50.fit(X, y).predict(X)
+
+    qr_95 = QuantileRegressor(quantile=0.95, alpha=0)
+    y_pred_95 = qr_95.fit(X, y).predict(X)
+
+    predictions = {0.05: y_pred_05, 0.5: y_pred_50, 0.95: y_pred_95}
+
+    # Compute out_bounds flag
+    out_bounds_predictions = (y_pred_05 >= y) | (y_pred_95 <= y)
+
+    # LinearRegression for comparison
+    lr = LinearRegression().fit(X, y)
+    y_pred_lr = lr.predict(X)
+
+    # QuantileRegressor at median for comparison
+    qr_median = QuantileRegressor(quantile=0.5, alpha=0).fit(X, y)
+    y_pred_qr = qr_median.predict(X)
+
+    mae_lr = mean_absolute_error(y, y_pred_lr)
+    mse_lr = mean_squared_error(y, y_pred_lr)
+    mae_qr = mean_absolute_error(y, y_pred_qr)
+    mse_qr = mean_squared_error(y, y_pred_qr)
+
+    print(f"  sklearn LinearRegression:    MAE={mae_lr:.3f}, MSE={mse_lr:.3f}")
+    print(f"  sklearn QuantileRegressor:   MAE={mae_qr:.3f}, MSE={mse_qr:.3f}")
+
+    return {
+        "predictions": predictions,
+        "out_bounds": out_bounds_predictions,
+        "lr_metrics": {"mae": mae_lr, "mse": mse_lr},
+        "qr_metrics": {"mae": mae_qr, "mse": mse_qr},
+    }
+
+
+# =========================================================================
+# XORQ WAY -- deferred execution
+# =========================================================================
+
+
+def xorq_way(df, dataset_type="normal"):
+    """Deferred xorq: fit quantile regressors at 0.05, 0.5, 0.95.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Full dataset
+    dataset_type : str
+        Either "normal" or "pareto"
+
+    Returns deferred expressions for predictions, metrics, and plot.
+    Nothing is executed until ``.execute()``.
+
+    Returns
+    -------
+    dict
+        Keys: "predictions", "lr_metrics", "qr_metrics"
+    """
+    con = xo.connect()
+    data = con.register(df, "quantile_data")
+
+    feature_cols = ("feature_0",)
+    target_col = f"y_{dataset_type}"
+
+    # Fit quantile regressors - flat, no loops
+    qr_05_sklearn = SklearnPipeline(
+        [("qr", QuantileRegressor(quantile=0.05, alpha=0))]
+    )
+    qr_05_pipe = Pipeline.from_instance(qr_05_sklearn)
+    qr_05_fitted = qr_05_pipe.fit(data, features=feature_cols, target=target_col)
+    preds_05 = qr_05_fitted.predict(data, name="pred_q05")
+
+    qr_50_sklearn = SklearnPipeline(
+        [("qr", QuantileRegressor(quantile=0.5, alpha=0))]
+    )
+    qr_50_pipe = Pipeline.from_instance(qr_50_sklearn)
+    qr_50_fitted = qr_50_pipe.fit(data, features=feature_cols, target=target_col)
+    preds_50 = qr_50_fitted.predict(data, name="pred_q50")
+
+    qr_95_sklearn = SklearnPipeline(
+        [("qr", QuantileRegressor(quantile=0.95, alpha=0))]
+    )
+    qr_95_pipe = Pipeline.from_instance(qr_95_sklearn)
+    qr_95_fitted = qr_95_pipe.fit(data, features=feature_cols, target=target_col)
+    preds_95 = qr_95_fitted.predict(data, name="pred_q95")
+
+    predictions_exprs = {0.05: preds_05, 0.5: preds_50, 0.95: preds_95}
+
+    # LinearRegression for comparison
+    lr_sklearn = SklearnPipeline([("lr", LinearRegression())])
+    lr_pipe = Pipeline.from_instance(lr_sklearn)
+    lr_fitted = lr_pipe.fit(data, features=feature_cols, target=target_col)
+    lr_preds = lr_fitted.predict(data, name="pred_lr")
+
+    # QuantileRegressor at median for comparison
+    qr_median_sklearn = SklearnPipeline(
+        [("qr", QuantileRegressor(quantile=0.5, alpha=0))]
+    )
+    qr_median_pipe = Pipeline.from_instance(qr_median_sklearn)
+    qr_median_fitted = qr_median_pipe.fit(data, features=feature_cols, target=target_col)
+    qr_median_preds = qr_median_fitted.predict(data, name="pred_qr")
+
+    # Metrics
+    make_metric_lr = deferred_sklearn_metric(target=target_col, pred="pred_lr")
+    make_metric_qr = deferred_sklearn_metric(target=target_col, pred="pred_qr")
+
+    lr_metrics = lr_preds.agg(
+        mae=make_metric_lr(metric=mean_absolute_error),
+        mse=make_metric_lr(metric=mean_squared_error),
+    )
+
+    qr_metrics = qr_median_preds.agg(
+        mae=make_metric_qr(metric=mean_absolute_error),
+        mse=make_metric_qr(metric=mean_squared_error),
+    )
+
+    return {
+        "predictions": predictions_exprs,
+        "lr_metrics": lr_metrics,
+        "qr_metrics": qr_metrics,
+    }
+
+
+# =========================================================================
+# Run and plot side by side
+# =========================================================================
+
+
+def main():
+    os.makedirs("imgs", exist_ok=True)
+
+    df = _load_data()
+
+    # We'll run both normal and pareto, but for brevity, focus on normal in main output
+    for dataset_type in ["normal", "pareto"]:
+        print(f"\n=== DATASET: {dataset_type.upper()} ===")
+
+        print("=== SKLEARN WAY ===")
+        sk_results = sklearn_way(df, dataset_type)
+
+        print("\n=== XORQ WAY ===")
+        deferred = xorq_way(df, dataset_type)
+
+        # Execute deferred metrics
+        lr_metrics_df = deferred["lr_metrics"].execute()
+        qr_metrics_df = deferred["qr_metrics"].execute()
+
+        xo_mae_lr = lr_metrics_df["mae"].iloc[0]
+        xo_mse_lr = lr_metrics_df["mse"].iloc[0]
+        xo_mae_qr = qr_metrics_df["mae"].iloc[0]
+        xo_mse_qr = qr_metrics_df["mse"].iloc[0]
+
+        print(f"  xorq   LinearRegression:    MAE={xo_mae_lr:.3f}, MSE={xo_mse_lr:.3f}")
+        print(f"  xorq   QuantileRegressor:   MAE={xo_mae_qr:.3f}, MSE={xo_mse_qr:.3f}")
+
+        # ---- Assert numerical equivalence BEFORE plotting ----
+        np.testing.assert_allclose(
+            sk_results["lr_metrics"]["mae"], xo_mae_lr, rtol=1e-2
+        )
+        np.testing.assert_allclose(
+            sk_results["lr_metrics"]["mse"], xo_mse_lr, rtol=1e-2
+        )
+        np.testing.assert_allclose(
+            sk_results["qr_metrics"]["mae"], xo_mae_qr, rtol=1e-2
+        )
+        np.testing.assert_allclose(
+            sk_results["qr_metrics"]["mse"], xo_mse_qr, rtol=1e-2
+        )
+        print("Assertions passed: sklearn and xorq metrics match.")
+
+        # Execute deferred predictions and build combined dataframe for plotting
+        xo_predictions = {}
+        for quantile, pred_expr in deferred["predictions"].items():
+            pred_df = pred_expr.execute()
+            pred_name = f"pred_q{int(quantile * 100):02d}"
+            xo_predictions[quantile] = pred_df[pred_name].values
+
+        # Build xorq plot dataframe
+        target_col = f"y_{dataset_type}"
+        xo_plot_df = df.copy()
+        xo_plot_df["pred_q05"] = xo_predictions[0.05]
+        xo_plot_df["pred_q50"] = xo_predictions[0.5]
+        xo_plot_df["pred_q95"] = xo_predictions[0.95]
+
+        # Compute out_bounds flag for xorq predictions
+        xo_out_bounds = (
+            (xo_predictions[0.05] >= xo_plot_df[target_col].values)
+            | (xo_predictions[0.95] <= xo_plot_df[target_col].values)
+        )
+        xo_plot_df["out_bounds"] = xo_out_bounds.astype(int)
+
+        # Build sklearn plot
+        sk_plot_df = df.copy()
+        sk_plot_df["pred_q05"] = sk_results["predictions"][0.05]
+        sk_plot_df["pred_q50"] = sk_results["predictions"][0.5]
+        sk_plot_df["pred_q95"] = sk_results["predictions"][0.95]
+        sk_plot_df["out_bounds"] = sk_results["out_bounds"].astype(int)
+
+        if dataset_type == "normal":
+            sk_fig = _build_quantile_plot_normal(sk_plot_df)
+            xo_fig = _build_quantile_plot_normal(xo_plot_df)
+        else:
+            sk_fig = _build_quantile_plot_pareto(sk_plot_df)
+            xo_fig = _build_quantile_plot_pareto(xo_plot_df)
+
+        # Composite: sklearn (left) | xorq (right)
+        fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+        axes[0].imshow(fig_to_image(sk_fig))
+        axes[0].axis("off")
+        axes[1].imshow(fig_to_image(xo_fig))
+        axes[1].axis("off")
+
+        plt.suptitle(
+            f"Quantile Regression ({dataset_type}): sklearn vs xorq", fontsize=16
+        )
+        plt.tight_layout()
+        out = f"imgs/quantile_regression_{dataset_type}.png"
+        plt.savefig(out, dpi=150)
+        plt.close()
+        print(f"Plot saved to {out}")
+
+
+if __name__ in ("__main__", "__pytest_main__"):
+    main()
+    pytest_examples_passed = True

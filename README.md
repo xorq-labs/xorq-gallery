@@ -10,6 +10,12 @@ Run any example directly with `uv`:
 uv tool run --isolated --python 3.12 --with git+ssh://git@github.com/xorq-labs/xorq-gallery python -m xorq_gallery.sklearn.applications.plot_cyclical_feature_engineering
 ```
 
+Or run locally:
+
+```bash
+python -m xorq_gallery.sklearn.applications.plot_cyclical_feature_engineering
+```
+
 ## Development
 
 ```bash
