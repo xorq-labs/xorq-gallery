@@ -16,6 +16,12 @@ Or run locally:
 xorq-gallery run plot_cyclical_feature_engineering
 ```
 
+Run all examples in a group
+
+```bash
+xorq-gallery run-all --group svm
+```
+
 ## Development
 
 ```bash
