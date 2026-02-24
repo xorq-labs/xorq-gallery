@@ -10,6 +10,7 @@ dependencies = [
     "pandas",
     "numpy",
     "toolz>=1.1.0",
+    "click>=8.3.1",
 ]
 
 [build-system]

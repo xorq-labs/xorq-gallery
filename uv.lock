@@ -1624,6 +1624,7 @@ name = "xorq-gallery"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "click" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pandas" },
@@ -1647,6 +1648,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "click", specifier = ">=8.3.1" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pandas" },
