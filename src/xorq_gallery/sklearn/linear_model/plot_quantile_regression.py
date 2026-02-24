@@ -15,6 +15,8 @@ Both produce identical quantile predictions and metrics.
 Dataset: Synthetic linear data with heteroscedastic Normal or asymmetric Pareto noise
 """
 
+from __future__ import annotations
+
 import os
 
 import matplotlib.pyplot as plt
@@ -25,6 +27,7 @@ from sklearn.linear_model import LinearRegression, QuantileRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline as SklearnPipeline
+from toolz import curry
 from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
 
@@ -42,6 +45,8 @@ from xorq_gallery.utils import (
 
 RANDOM_STATE = 42
 N_SAMPLES = 100
+FEATURE_COLS = ("feature_0",)
+ROW_IDX = "row_idx"
 
 
 # ---------------------------------------------------------------------------
@@ -83,12 +88,12 @@ def _load_data():
     datasets = _generate_datasets()
 
     # Build DataFrame with both targets
-    df = pd.DataFrame(datasets["normal"]["X"], columns=["feature_0"])
+    df = pd.DataFrame(datasets["normal"]["X"], columns=[FEATURE_COLS[0]])
     df["y_normal"] = datasets["normal"]["y"]
     df["y_pareto"] = datasets["pareto"]["y"]
     df["x"] = datasets["normal"]["x"]
     df["y_true_mean"] = datasets["normal"]["y_true_mean"]
-    df["row_idx"] = range(len(df))
+    df[ROW_IDX] = range(len(df))
 
     return df
 
@@ -98,14 +103,19 @@ def _load_data():
 # ---------------------------------------------------------------------------
 
 
-def _build_quantile_plot_normal(df):
-    """Build quantile regression plot for Normal noise dataset.
+@curry
+def _build_quantile_plot(df, dataset_type, y_col):
+    """Build quantile regression plot for specified dataset type.
 
     Parameters
     ----------
     df : pd.DataFrame
-        Must contain columns: x, y_normal, y_true_mean, pred_q05, pred_q50, pred_q95,
+        Must contain columns: x, y_col, y_true_mean, pred_q05, pred_q50, pred_q95,
         out_bounds
+    dataset_type : str
+        Either "normal" or "pareto" (used for title)
+    y_col : str
+        Name of the target column to plot
 
     Returns
     -------
@@ -124,7 +134,7 @@ def _build_quantile_plot_normal(df):
     out_mask = df["out_bounds"].astype(bool)
     ax.scatter(
         df.loc[out_mask, "x"],
-        df.loc[out_mask, "y_normal"],
+        df.loc[out_mask, y_col],
         color="black",
         marker="+",
         alpha=0.5,
@@ -132,7 +142,7 @@ def _build_quantile_plot_normal(df):
     )
     ax.scatter(
         df.loc[~out_mask, "x"],
-        df.loc[~out_mask, "y_normal"],
+        df.loc[~out_mask, y_col],
         color="black",
         alpha=0.5,
         label="Inside interval",
@@ -141,56 +151,13 @@ def _build_quantile_plot_normal(df):
     ax.legend()
     ax.set_xlabel("x")
     ax.set_ylabel("y")
-    ax.set_title("Quantiles of heteroscedastic Normal distributed target")
-    plt.tight_layout()
-    return fig
 
+    if dataset_type == "normal":
+        ax.set_title("Quantiles of heteroscedastic Normal distributed target")
+    else:
+        ax.set_title("Quantiles of asymmetric Pareto distributed target")
 
-def _build_quantile_plot_pareto(df):
-    """Build quantile regression plot for Pareto noise dataset.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Must contain columns: x, y_pareto, y_true_mean, pred_q05, pred_q50, pred_q95,
-        out_bounds
-
-    Returns
-    -------
-    matplotlib.figure.Figure
-    """
-    fig, ax = plt.subplots(figsize=(8, 6))
-
-    ax.plot(
-        df["x"], df["y_true_mean"], color="black", linestyle="dashed", label="True mean"
-    )
-    ax.plot(df["x"], df["pred_q05"], label="Quantile: 0.05")
-    ax.plot(df["x"], df["pred_q50"], label="Quantile: 0.5")
-    ax.plot(df["x"], df["pred_q95"], label="Quantile: 0.95")
-
-    # Separate inside/outside interval
-    out_mask = df["out_bounds"].astype(bool)
-    ax.scatter(
-        df.loc[out_mask, "x"],
-        df.loc[out_mask, "y_pareto"],
-        color="black",
-        marker="+",
-        alpha=0.5,
-        label="Outside interval",
-    )
-    ax.scatter(
-        df.loc[~out_mask, "x"],
-        df.loc[~out_mask, "y_pareto"],
-        color="black",
-        alpha=0.5,
-        label="Inside interval",
-    )
-
-    ax.legend()
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_title("Quantiles of asymmetric Pareto distributed target")
-    plt.tight_layout()
+    fig.tight_layout()
     return fig
 
 
@@ -216,7 +183,7 @@ def sklearn_way(df, dataset_type="normal"):
               "lr_metrics" (dict with mae, mse)
     """
     target_col = f"y_{dataset_type}"
-    X = df[["feature_0"]].values
+    X = df[list(FEATURE_COLS)].values
     y = df[target_col].values
 
     # Fit quantile regressors - flat, no loops
@@ -284,7 +251,6 @@ def xorq_way(df, dataset_type="normal"):
     con = xo.connect()
     data = con.register(df, "quantile_data")
 
-    feature_cols = ("feature_0",)
     target_col = f"y_{dataset_type}"
 
     # Fit quantile regressors - flat, no loops
@@ -292,21 +258,21 @@ def xorq_way(df, dataset_type="normal"):
         [("qr", QuantileRegressor(quantile=0.05, alpha=0))]
     )
     qr_05_pipe = Pipeline.from_instance(qr_05_sklearn)
-    qr_05_fitted = qr_05_pipe.fit(data, features=feature_cols, target=target_col)
+    qr_05_fitted = qr_05_pipe.fit(data, features=FEATURE_COLS, target=target_col)
     preds_05 = qr_05_fitted.predict(data, name="pred_q05")
 
     qr_50_sklearn = SklearnPipeline(
         [("qr", QuantileRegressor(quantile=0.5, alpha=0))]
     )
     qr_50_pipe = Pipeline.from_instance(qr_50_sklearn)
-    qr_50_fitted = qr_50_pipe.fit(data, features=feature_cols, target=target_col)
+    qr_50_fitted = qr_50_pipe.fit(data, features=FEATURE_COLS, target=target_col)
     preds_50 = qr_50_fitted.predict(data, name="pred_q50")
 
     qr_95_sklearn = SklearnPipeline(
         [("qr", QuantileRegressor(quantile=0.95, alpha=0))]
     )
     qr_95_pipe = Pipeline.from_instance(qr_95_sklearn)
-    qr_95_fitted = qr_95_pipe.fit(data, features=feature_cols, target=target_col)
+    qr_95_fitted = qr_95_pipe.fit(data, features=FEATURE_COLS, target=target_col)
     preds_95 = qr_95_fitted.predict(data, name="pred_q95")
 
     predictions_exprs = {0.05: preds_05, 0.5: preds_50, 0.95: preds_95}
@@ -314,7 +280,7 @@ def xorq_way(df, dataset_type="normal"):
     # LinearRegression for comparison
     lr_sklearn = SklearnPipeline([("lr", LinearRegression())])
     lr_pipe = Pipeline.from_instance(lr_sklearn)
-    lr_fitted = lr_pipe.fit(data, features=feature_cols, target=target_col)
+    lr_fitted = lr_pipe.fit(data, features=FEATURE_COLS, target=target_col)
     lr_preds = lr_fitted.predict(data, name="pred_lr")
 
     # QuantileRegressor at median for comparison
@@ -322,7 +288,7 @@ def xorq_way(df, dataset_type="normal"):
         [("qr", QuantileRegressor(quantile=0.5, alpha=0))]
     )
     qr_median_pipe = Pipeline.from_instance(qr_median_sklearn)
-    qr_median_fitted = qr_median_pipe.fit(data, features=feature_cols, target=target_col)
+    qr_median_fitted = qr_median_pipe.fit(data, features=FEATURE_COLS, target=target_col)
     qr_median_preds = qr_median_fitted.predict(data, name="pred_qr")
 
     # Metrics
@@ -421,12 +387,8 @@ def main():
         sk_plot_df["pred_q95"] = sk_results["predictions"][0.95]
         sk_plot_df["out_bounds"] = sk_results["out_bounds"].astype(int)
 
-        if dataset_type == "normal":
-            sk_fig = _build_quantile_plot_normal(sk_plot_df)
-            xo_fig = _build_quantile_plot_normal(xo_plot_df)
-        else:
-            sk_fig = _build_quantile_plot_pareto(sk_plot_df)
-            xo_fig = _build_quantile_plot_pareto(xo_plot_df)
+        sk_fig = _build_quantile_plot(sk_plot_df, dataset_type, target_col)
+        xo_fig = _build_quantile_plot(xo_plot_df, dataset_type, target_col)
 
         # Composite: sklearn (left) | xorq (right)
         fig, axes = plt.subplots(1, 2, figsize=(16, 6))
@@ -435,13 +397,13 @@ def main():
         axes[1].imshow(fig_to_image(xo_fig))
         axes[1].axis("off")
 
-        plt.suptitle(
+        fig.suptitle(
             f"Quantile Regression ({dataset_type}): sklearn vs xorq", fontsize=16
         )
-        plt.tight_layout()
+        fig.tight_layout()
         out = f"imgs/quantile_regression_{dataset_type}.png"
-        plt.savefig(out, dpi=150)
-        plt.close()
+        fig.savefig(out, dpi=150)
+        plt.close(fig)
         print(f"Plot saved to {out}")
 
 

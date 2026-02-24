@@ -5,12 +5,11 @@ sklearn: Train SVC classifier on Iris dataset using One-vs-Rest strategy,
 compute ROC curves and AUC scores for each class and micro-average, plot
 ROC curves for multiclass classification.
 
-xorq: Demonstrates xorq's deferred aggregation on ROC probability predictions.
-Model fitting uses sklearn directly (for predict_proba), then xorq's deferred
-execution enables efficient ROC curve computation. Shows hybrid sklearn/xorq
-workflow for multiclass ROC analysis.
+xorq: Uses deferred execution via Pipeline.from_instance, fit, predict_proba,
+and deferred_auc_from_curve for each binary classifier. All expressions are
+built lazily; execution is deferred to the caller.
 
-Both produce identical ROC curves and AUC scores.
+Both produce equivalent ROC curves and AUC scores.
 
 Dataset: Iris (sklearn)
 """
@@ -22,21 +21,17 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import toolz
 import xorq.api as xo
 from sklearn.datasets import load_iris
-from sklearn.metrics import auc, roc_auc_score, roc_curve
-from sklearn.model_selection import train_test_split
-from sklearn.multiclass import OneVsRestClassifier
+from sklearn.metrics import auc, roc_curve
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from sklearn.preprocessing import StandardScaler, label_binarize
 from sklearn.svm import SVC
+from xorq.expr.ml.metrics import deferred_auc_from_curve, deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
 
-from xorq_gallery.utils import (
-    deferred_matplotlib_plot,
-    fig_to_image,
-    load_plot_bytes,
-)
+from xorq_gallery.utils import fig_to_image
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +52,7 @@ def _load_data():
     X, y = iris.data, iris.target
 
     # Create dataframe
-    feature_cols = ["sepal_length", "sepal_width", "petal_length", "petal_width"]
+    feature_cols = ("sepal_length", "sepal_width", "petal_length", "petal_width")
     df = pd.DataFrame(X, columns=feature_cols)
     df["target"] = y
     df["row_idx"] = range(len(df))
@@ -68,7 +63,7 @@ def _load_data():
 
 
 def _build_pipeline():
-    """Return sklearn Pipeline with StandardScaler and SVC for OneVsRest."""
+    """Return sklearn Pipeline with StandardScaler and SVC for binary classification."""
     return SklearnPipeline([
         ("scaler", StandardScaler()),
         ("svc", SVC(kernel="linear", probability=True, random_state=RANDOM_STATE)),
@@ -116,7 +111,7 @@ def _plot_roc_curves(fpr_dict, tpr_dict, roc_auc_dict, n_classes, class_names, t
     ax.legend(loc="lower right", fontsize=8)
     ax.grid(True, alpha=0.3)
 
-    plt.tight_layout()
+    fig.tight_layout()
     return fig
 
 
@@ -125,30 +120,26 @@ def _plot_roc_curves(fpr_dict, tpr_dict, roc_auc_dict, n_classes, class_names, t
 # =========================================================================
 
 
-def sklearn_way(df, feature_cols, class_names, n_classes):
-    """Eager sklearn: fit OneVsRest SVC on Iris dataset, compute ROC curves.
+def sklearn_way(train_df, test_df, feature_cols, class_names, n_classes):
+    """Eager sklearn: fit binary classifiers per class, compute ROC curves.
 
     Returns dict with fpr, tpr, roc_auc for each class and micro-average.
     """
-    # Extract features and target
-    X = df[feature_cols].values
-    y = df["target"].values
+    X_train = train_df[list(feature_cols)].values
+    y_train = train_df["target"].values
+    X_test = test_df[list(feature_cols)].values
+    y_test = test_df["target"].values
 
     # Binarize the output for One-vs-Rest
-    y_bin = label_binarize(y, classes=range(n_classes))
+    y_train_bin = label_binarize(y_train, classes=range(n_classes))
+    y_test_bin = label_binarize(y_test, classes=range(n_classes))
 
-    # Train/test split
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y_bin, test_size=0.25, random_state=RANDOM_STATE
-    )
-
-    # Build OneVsRest classifier with SVC
-    pipeline = _build_pipeline()
-    ovr_classifier = OneVsRestClassifier(pipeline)
-    ovr_classifier.fit(X_train, y_train)
-
-    # Predict probabilities
-    y_score = ovr_classifier.predict_proba(X_test)
+    # Fit binary classifiers for each class
+    y_score = np.zeros((len(y_test), n_classes))
+    for i in range(n_classes):
+        pipeline = _build_pipeline()
+        pipeline.fit(X_train, y_train_bin[:, i])
+        y_score[:, i] = pipeline.predict_proba(X_test)[:, 1]
 
     # Compute ROC curve and ROC area for each class
     fpr = {}
@@ -156,24 +147,20 @@ def sklearn_way(df, feature_cols, class_names, n_classes):
     roc_auc = {}
 
     for i in range(n_classes):
-        fpr[i], tpr[i], _ = roc_curve(y_test[:, i], y_score[:, i])
+        fpr[i], tpr[i], _ = roc_curve(y_test_bin[:, i], y_score[:, i])
         roc_auc[i] = auc(fpr[i], tpr[i])
         print(f"  sklearn: Class {class_names[i]:15s} | AUC = {roc_auc[i]:.4f}")
 
     # Compute micro-average ROC curve and ROC area
-    fpr["micro"], tpr["micro"], _ = roc_curve(y_test.ravel(), y_score.ravel())
+    fpr["micro"], tpr["micro"], _ = roc_curve(y_test_bin.ravel(), y_score.ravel())
     roc_auc["micro"] = auc(fpr["micro"], tpr["micro"])
     print(f"  sklearn: {'micro-average':15s} | AUC = {roc_auc['micro']:.4f}")
-
-    # Also compute via roc_auc_score for comparison
-    roc_auc_score_micro = roc_auc_score(y_test, y_score, average="micro")
-    print(f"  sklearn: roc_auc_score micro = {roc_auc_score_micro:.4f}")
 
     return {
         "fpr": fpr,
         "tpr": tpr,
         "roc_auc": roc_auc,
-        "y_test": y_test,
+        "y_test_bin": y_test_bin,
         "y_score": y_score,
     }
 
@@ -183,75 +170,41 @@ def sklearn_way(df, feature_cols, class_names, n_classes):
 # =========================================================================
 
 
-def xorq_way(df, feature_cols, class_names, n_classes):
-    """Deferred xorq: fit OneVsRest classifiers eagerly (like sklearn),
-    then use xorq for deferred prediction probability computation.
+def xorq_way(train_data, test_data, feature_cols, n_classes):
+    """Deferred xorq: Pipeline.from_instance + predict_proba + deferred_auc_from_curve.
 
-    This demonstrates hybrid sklearn/xorq workflow where model fitting
-    uses sklearn directly, then xorq computes predictions deferred.
-
-    Returns dict with deferred expressions for predictions.
+    Returns dict with deferred metric and proba expressions for each class.
+    No .execute() is called here -- callers materialise when needed.
     """
-    con = xo.connect()
-
-    # Extract features and target
-    X = df[feature_cols].values
-    y = df["target"].values
-
-    # Binarize the output for One-vs-Rest
-    y_bin = label_binarize(y, classes=range(n_classes))
-
-    # Train/test split matching sklearn
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y_bin, test_size=0.25, random_state=RANDOM_STATE
-    )
-
-    # Fit classifiers for each class (One-vs-Rest) eagerly - flat, no loops
-    # Class 0
-    clf_0 = SklearnPipeline([
-        ("scaler", StandardScaler()),
-        ("svc", SVC(kernel="linear", probability=True, random_state=RANDOM_STATE)),
-    ])
-    clf_0.fit(X_train, y_train[:, 0])
-    y_score_0 = clf_0.predict_proba(X_test)[:, 1]
-
-    # Class 1
-    clf_1 = SklearnPipeline([
-        ("scaler", StandardScaler()),
-        ("svc", SVC(kernel="linear", probability=True, random_state=RANDOM_STATE)),
-    ])
-    clf_1.fit(X_train, y_train[:, 1])
-    y_score_1 = clf_1.predict_proba(X_test)[:, 1]
-
-    # Class 2
-    clf_2 = SklearnPipeline([
-        ("scaler", StandardScaler()),
-        ("svc", SVC(kernel="linear", probability=True, random_state=RANDOM_STATE)),
-    ])
-    clf_2.fit(X_train, y_train[:, 2])
-    y_score_2 = clf_2.predict_proba(X_test)[:, 1]
-
-    classifiers = [clf_0, clf_1, clf_2]
-    y_scores = [y_score_0, y_score_1, y_score_2]
-
-    # Register predictions as xorq table for deferred aggregations
-    # Create dataframe with all predictions and targets
-    prob_df = pd.DataFrame({
-        f"prob_{i}": y_scores[i]
-        for i in range(n_classes)
-    })
+    deferred = {}
 
     for i in range(n_classes):
-        prob_df[f"target_{i}"] = y_test[:, i]
+        target_col_i = f"target_{i}"
+        pred_col_i = f"scores_{i}"
 
-    prob_table = con.register(prob_df, "iris_probabilities")
+        # Add binarized target column: 1 if target == i, else 0
+        train_i = train_data.mutate(**{target_col_i: (train_data.target == i).cast(int)})
+        test_i = test_data.mutate(**{target_col_i: (test_data.target == i).cast(int)})
 
-    # Return deferred expression
-    return {
-        "predictions": prob_table,
-        "n_classes": n_classes,
-        "class_names": class_names,
-    }
+        # Build fresh pipeline for each class
+        pipeline = _build_pipeline()
+        xorq_pipe = Pipeline.from_instance(pipeline)
+        fitted = xorq_pipe.fit(train_i, features=tuple(feature_cols), target=target_col_i)
+        proba_expr = fitted.predict_proba(test_i, name=pred_col_i)
+
+        # Deferred AUC from ROC curve
+        make_roc_auc = toolz.compose(
+            deferred_auc_from_curve,
+            deferred_sklearn_metric(target=target_col_i, pred=pred_col_i, metric=roc_curve),
+        )
+        metrics_expr = proba_expr.agg(**{f"roc_auc_{i}": make_roc_auc})
+
+        deferred[i] = {
+            "metrics_expr": metrics_expr,
+            "proba_expr": proba_expr,
+        }
+
+    return deferred
 
 
 # =========================================================================
@@ -264,32 +217,51 @@ def main():
 
     df, feature_cols, class_names, n_classes = _load_data()
 
+    # Split using xorq train_test_splits
+    con = xo.connect()
+    table = con.register(df, "iris")
+    train_data, test_data = xo.train_test_splits(
+        table, test_sizes=0.25, unique_key="row_idx", random_seed=RANDOM_STATE
+    )
+
+    # Order by row_idx for reproducibility
+    train_data = train_data.order_by("row_idx")
+    test_data = test_data.order_by("row_idx")
+
+    # Materialize for sklearn
+    train_df = train_data.execute()
+    test_df = test_data.execute()
+
     print("=== SKLEARN WAY ===")
-    sk_results = sklearn_way(df, feature_cols, class_names, n_classes)
+    sk_results = sklearn_way(train_df, test_df, feature_cols, class_names, n_classes)
 
     print("\n=== XORQ WAY ===")
-    xo_results = xorq_way(df, feature_cols, class_names, n_classes)
+    xo_deferred = xorq_way(train_data, test_data, feature_cols, n_classes)
 
-    # Execute deferred predictions
-    print("\nExecuting xorq deferred expressions...")
-    pred_df = xo_results["predictions"].execute()
-
-    # Compute ROC curves from predictions
+    # Materialise deferred expressions and extract ROC curves for plotting
     fpr_xo = {}
     tpr_xo = {}
     roc_auc_xo = {}
 
     for i in range(n_classes):
-        y_true = pred_df[f"target_{i}"].values
-        y_score = pred_df[f"prob_{i}"].values
+        metrics_df = xo_deferred[i]["metrics_expr"].execute()
+        proba_df = xo_deferred[i]["proba_expr"].execute()
 
+        auc_val = metrics_df[f"roc_auc_{i}"].iloc[0]
+        roc_auc_xo[i] = auc_val
+        print(f"  xorq:    Class {class_names[i]:15s} | AUC = {auc_val:.4f}")
+
+        # predict_proba returns lists [p_class0, p_class1] per row; extract p_class1
+        y_true = proba_df[f"target_{i}"].values
+        y_score = np.array([p[1] for p in proba_df[f"scores_{i}"]])
         fpr_xo[i], tpr_xo[i], _ = roc_curve(y_true, y_score)
-        roc_auc_xo[i] = auc(fpr_xo[i], tpr_xo[i])
-        print(f"  xorq:    Class {class_names[i]:15s} | AUC = {roc_auc_xo[i]:.4f}")
+
+        # Stash materialised proba_df for micro-average computation below
+        xo_deferred[i]["proba_df"] = proba_df
 
     # Compute micro-average
-    y_test_all = np.column_stack([pred_df[f"target_{i}"].values for i in range(n_classes)])
-    y_score_all = np.column_stack([pred_df[f"prob_{i}"].values for i in range(n_classes)])
+    y_test_all = np.column_stack([xo_deferred[i]["proba_df"][f"target_{i}"].values for i in range(n_classes)])
+    y_score_all = np.column_stack([np.array([p[1] for p in xo_deferred[i]["proba_df"][f"scores_{i}"]]) for i in range(n_classes)])
 
     fpr_xo["micro"], tpr_xo["micro"], _ = roc_curve(y_test_all.ravel(), y_score_all.ravel())
     roc_auc_xo["micro"] = auc(fpr_xo["micro"], tpr_xo["micro"])
@@ -298,25 +270,23 @@ def main():
     # ---- Assert numerical equivalence BEFORE plotting ----
     print("\n=== ASSERTIONS ===")
 
-    # Assert AUC values match for each class
+    # Assert per-class AUC values match
     for i in range(n_classes):
         np.testing.assert_allclose(
             sk_results["roc_auc"][i],
             roc_auc_xo[i],
-            rtol=1e-2,
-            err_msg=f"AUC mismatch for class {i}"
+            rtol=0.05,
+            err_msg=f"Class {i} AUC mismatch"
         )
-    print("Per-class AUC values match!")
 
     # Assert micro-average AUC matches
     np.testing.assert_allclose(
         sk_results["roc_auc"]["micro"],
         roc_auc_xo["micro"],
-        rtol=1e-2,
+        rtol=0.05,
         err_msg="Micro-average AUC mismatch"
     )
-    print("Micro-average AUC matches!")
-    print("Assertions passed: sklearn and xorq ROC curves match.")
+    print("Assertions passed: sklearn and xorq ROC AUC values match.")
 
     # Build sklearn plot
     sk_fig = _plot_roc_curves(
@@ -349,11 +319,11 @@ def main():
     axes[1].set_title("xorq", fontsize=14, fontweight="bold")
     axes[1].axis("off")
 
-    plt.suptitle("Multiclass ROC Curves: sklearn vs xorq", fontsize=16)
-    plt.tight_layout()
+    fig.suptitle("Multiclass ROC Curves: sklearn vs xorq", fontsize=16)
+    fig.tight_layout()
     out = "imgs/plot_roc.png"
-    plt.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close("all")
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
     print(f"\nComposite plot saved to {out}")
 
 

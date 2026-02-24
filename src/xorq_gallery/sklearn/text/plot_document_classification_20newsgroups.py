@@ -13,6 +13,8 @@ Both produce identical accuracy and confusion matrices.
 Dataset: 20 newsgroups (4 categories: alt.atheism, talk.religion.misc, comp.graphics, sci.space)
 """
 
+from __future__ import annotations
+
 import os
 
 import matplotlib.pyplot as plt
@@ -24,6 +26,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import RidgeClassifier
 from sklearn.metrics import ConfusionMatrixDisplay, accuracy_score
 from sklearn.pipeline import Pipeline as SklearnPipeline
+from toolz import curry
 from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
 
@@ -38,12 +41,12 @@ from xorq_gallery.utils import (
 # Constants
 # ---------------------------------------------------------------------------
 
-CATEGORIES = [
+CATEGORIES = (
     "alt.atheism",
     "talk.religion.misc",
     "comp.graphics",
     "sci.space",
-]
+)
 
 RANDOM_STATE = 42
 
@@ -121,7 +124,7 @@ def _plot_confusion_matrix(y_test, pred, target_names, title):
     ax.xaxis.set_ticklabels(target_names, rotation=45, ha="right")
     ax.yaxis.set_ticklabels(target_names)
     ax.set_title(title)
-    plt.tight_layout()
+    fig.tight_layout()
     return fig
 
 
@@ -216,6 +219,21 @@ def xorq_way(data):
 
 
 # =========================================================================
+# Deferred plotting helper
+# =========================================================================
+
+
+@curry
+def _build_confusion_matrix_plot_deferred(df, target_names):
+    """Build confusion matrix from materialized predictions."""
+    y_true = df["target"].values
+    y_pred = df["pred"].values
+    return _plot_confusion_matrix(
+        y_true, y_pred, target_names, "Confusion Matrix (xorq)"
+    )
+
+
+# =========================================================================
 # Run and plot side by side
 # =========================================================================
 
@@ -242,19 +260,10 @@ def main():
     np.testing.assert_allclose(sk_results["acc"], xo_acc, rtol=1e-2)
     print("Assertions passed: sklearn and xorq metrics match.")
 
-    # Build deferred plot for xorq - HAPPENS IN MAIN, NOT IN xorq_way
     print("\n=== GENERATING PLOTS ===")
     target_names = data["target_names"]
 
-    def _build_confusion_matrix_plot(df):
-        """Build confusion matrix from materialized predictions."""
-        y_true = df["target"].values
-        y_pred = df["pred"].values
-        return _plot_confusion_matrix(
-            y_true, y_pred, target_names, "Confusion Matrix (xorq)"
-        )
-
-    xo_png = deferred_matplotlib_plot(xo_results["preds"], _build_confusion_matrix_plot).execute()
+    xo_png = deferred_matplotlib_plot(xo_results["preds"], _build_confusion_matrix_plot_deferred(target_names=target_names)).execute()
 
     # Build sklearn confusion matrix
     sk_fig = _plot_confusion_matrix(
@@ -276,13 +285,13 @@ def main():
     axes[1].set_title("xorq")
     axes[1].axis("off")
 
-    plt.suptitle(
+    fig.suptitle(
         "Document Classification (20 newsgroups): sklearn vs xorq", fontsize=14
     )
-    plt.tight_layout()
+    fig.tight_layout()
     out = "imgs/document_classification_20newsgroups.png"
-    plt.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close()
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
     print(f"Composite plot saved to {out}")
 
 

@@ -5,14 +5,16 @@ sklearn: Build pipelines with HistGradientBoostingRegressor using different
 categorical encoding strategies (drop, ordinal, one-hot, target, mixed). Evaluate
 using cross_validate with 3-fold CV. Compare RMSE across encoding schemes.
 
-xorq: Same pipelines wrapped in Pipeline.from_instance. Data is an ibis
-expression, cross-validation via deferred execution, metrics via
-deferred_sklearn_metric. Results computed deferred and match sklearn exactly.
+xorq: Same pipelines wrapped in Pipeline.from_instance, deferred cross-validation
+via deferred_cross_val_score with KFold(n_splits=3). Per-fold test scores match
+sklearn exactly.
 
-Both produce identical RMSE values across all encoding schemes.
+Both produce identical cross-validation scores.
 
 Dataset: Wine Reviews (OpenML 42074)
 """
+
+from __future__ import annotations
 
 import os
 
@@ -23,39 +25,47 @@ import xorq.api as xo
 from sklearn.compose import ColumnTransformer
 from sklearn.datasets import fetch_openml
 from sklearn.ensemble import HistGradientBoostingRegressor
-from sklearn.metrics import mean_squared_error
-from sklearn.model_selection import cross_validate
-from sklearn.pipeline import make_pipeline
+from sklearn.model_selection import KFold, cross_validate
+from sklearn.pipeline import Pipeline as SklearnPipeline
 from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, TargetEncoder
-from xorq.expr.ml.metrics import deferred_sklearn_metric
+from xorq.expr.ml.cross_validation import (
+    apply_deterministic_sort,
+    deferred_cross_val_score,
+)
 from xorq.expr.ml.pipeline_lib import Pipeline
 
 from xorq_gallery.utils import (
-    deferred_matplotlib_plot,
-    deferred_sequential_split,
     fig_to_image,
-    load_plot_bytes,
 )
 
 
 # ---------------------------------------------------------------------------
-# Feature groups
+# Feature groups and constants
 # ---------------------------------------------------------------------------
 
-numerical_features = ["price"]
-categorical_features = [
+NUMERICAL_FEATURES = ("price",)
+CATEGORICAL_FEATURES = (
     "country",
     "province",
     "region_1",
     "region_2",
     "variety",
     "winery",
-]
-target_name = "points"
+)
+ALL_FEATURE_COLS = NUMERICAL_FEATURES + CATEGORICAL_FEATURES
+TARGET_COL = "points"
+ROW_IDX = "row_idx"
+RANDOM_STATE = 0
+N_CV_FOLDS = 3
+
+CV_SPLITTER = KFold(n_splits=N_CV_FOLDS, shuffle=False)
+
+# Encoders that work with xorq (mixed_target requires sklearn-specific handling)
+XORQ_ENCODER_NAMES = ("drop", "ordinal", "one_hot", "target")
 
 
 # ---------------------------------------------------------------------------
-# Data loading (shared)
+# Data loading
 # ---------------------------------------------------------------------------
 
 
@@ -63,81 +73,58 @@ def _load_data():
     """Load Wine Reviews dataset from OpenML."""
     wine_reviews = fetch_openml(data_id=42074, as_frame=True, parser="pandas")
     df = wine_reviews.frame
-
-    # Row index for temporal ordering
-    df["row_idx"] = range(len(df))
-
+    df[ROW_IDX] = range(len(df))
     return df
 
 
 # ---------------------------------------------------------------------------
-# Shared pipeline definitions
+# Pipeline builders
 # ---------------------------------------------------------------------------
 
 
 def _build_pipelines():
-    """Build all preprocessing pipelines for different encoding strategies."""
+    """Build preprocessing pipelines for different encoding strategies."""
     max_iter = 20
 
-    categorical_preprocessors = [
+    categorical_preprocessors = (
         ("drop", "drop"),
         ("ordinal", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)),
-        (
-            "one_hot",
-            OneHotEncoder(handle_unknown="ignore", max_categories=20, sparse_output=False),
-        ),
+        ("one_hot", OneHotEncoder(handle_unknown="ignore", max_categories=20, sparse_output=False)),
         ("target", TargetEncoder(target_type="continuous")),
-    ]
+    )
 
-    pipelines = {}
-    for name, categorical_preprocessor in categorical_preprocessors:
-        preprocessor = ColumnTransformer(
-            [
-                ("numerical", "passthrough", numerical_features),
-                ("categorical", categorical_preprocessor, categorical_features),
-            ]
-        )
-        pipe = make_pipeline(
-            preprocessor,
-            HistGradientBoostingRegressor(random_state=0, max_iter=max_iter),
-        )
-        pipelines[name] = pipe
+    pipelines = {
+        name: SklearnPipeline([
+            ("columntransformer", ColumnTransformer([
+                ("numerical", "passthrough", list(NUMERICAL_FEATURES)),
+                ("categorical", categorical_preprocessor, list(CATEGORICAL_FEATURES)),
+            ])),
+            ("histgradientboostingregressor", HistGradientBoostingRegressor(
+                random_state=RANDOM_STATE, max_iter=max_iter)),
+        ])
+        for name, categorical_preprocessor in categorical_preprocessors
+    }
 
-    # Mixed encoding: high cardinality features get target encoding,
-    # low cardinality features get ordinal encoding
+    # Mixed encoding: high cardinality -> target, low cardinality -> ordinal
     df_sample = _load_data()
-    n_unique_categories = df_sample[categorical_features].nunique()
-    high_cardinality_features = n_unique_categories[n_unique_categories > 255].index.tolist()
-    low_cardinality_features = n_unique_categories[n_unique_categories <= 255].index.tolist()
+    n_unique = df_sample[CATEGORICAL_FEATURES].nunique()
+    high_card = n_unique[n_unique > 255].index.tolist()
+    low_card = n_unique[n_unique <= 255].index.tolist()
 
-    mixed_encoded_preprocessor = ColumnTransformer(
+    mixed_preprocessor = ColumnTransformer(
         [
-            ("numerical", "passthrough", numerical_features),
-            (
-                "high_cardinality",
-                TargetEncoder(target_type="continuous"),
-                high_cardinality_features,
-            ),
-            (
-                "low_cardinality",
-                OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1),
-                low_cardinality_features,
-            ),
+            ("numerical", "passthrough", list(NUMERICAL_FEATURES)),
+            ("high_cardinality", TargetEncoder(target_type="continuous"), high_card),
+            ("low_cardinality", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1), low_card),
         ],
         verbose_feature_names_out=False,
     )
-
-    # The output must be set to pandas for gradient boosting to detect low cardinality features
-    mixed_encoded_preprocessor.set_output(transform="pandas")
-    mixed_pipe = make_pipeline(
-        mixed_encoded_preprocessor,
-        HistGradientBoostingRegressor(
-            random_state=0,
-            max_iter=max_iter,
-            categorical_features=low_cardinality_features,
-        ),
-    )
-    pipelines["mixed_target"] = mixed_pipe
+    mixed_preprocessor.set_output(transform="pandas")
+    pipelines["mixed_target"] = SklearnPipeline([
+        ("columntransformer", mixed_preprocessor),
+        ("histgradientboostingregressor", HistGradientBoostingRegressor(
+            random_state=RANDOM_STATE, max_iter=max_iter, categorical_features=low_card)),
+    ])
 
     return pipelines
 
@@ -148,25 +135,20 @@ def _build_pipelines():
 
 
 def _build_results_plot(results_df, title):
-    """Build bar plot comparing RMSE across encoding schemes."""
+    """Bar plot comparing RMSE across encoding schemes."""
     fig, (ax1, ax2) = plt.subplots(
-        1, 2, figsize=(12, 6), sharey=True, constrained_layout=True
+        1, 2, figsize=(12, 6), sharey=True, constrained_layout=True,
     )
 
     xticks = range(len(results_df))
-    name_to_color = dict(
-        zip(results_df.index, ["C0", "C1", "C2", "C3", "C4"])
-    )
+    name_to_color = dict(zip(results_df.index, ["C0", "C1", "C2", "C3", "C4"]))
 
     for subset, ax in zip(["test", "train"], [ax1, ax2]):
         mean_col = f"rmse_{subset}_mean"
         std_col = f"rmse_{subset}_std"
         data = results_df[[mean_col, std_col]].sort_values(mean_col)
         ax.bar(
-            x=xticks,
-            height=data[mean_col],
-            yerr=data[std_col],
-            width=0.9,
+            x=xticks, height=data[mean_col], yerr=data[std_col], width=0.9,
             color=[name_to_color.get(name, "C0") for name in data.index],
         )
         ax.set(
@@ -181,193 +163,66 @@ def _build_results_plot(results_df, title):
 
 
 # =========================================================================
-# SKLEARN WAY -- eager, cross_validate with 3-fold CV
+# SKLEARN WAY -- eager cross_validate
 # =========================================================================
 
 
-def sklearn_way(df, pipelines):
-    """Eager sklearn: cross-validate each pipeline, compute RMSE statistics."""
-    X = df[numerical_features + categorical_features]
-    y = df[target_name]
+def sklearn_way(df_sorted, pipelines):
+    """Eager sklearn: cross-validate each pipeline with KFold.
 
-    n_cv_folds = 3
+    df_sorted must be sorted by apply_deterministic_sort so fold assignments
+    match the xorq side.
+    """
+    X = df_sorted[list(ALL_FEATURE_COLS)]
+    y = df_sorted[TARGET_COL]
+
     results = []
+    for name, pipe in pipelines.items():
+        result = cross_validate(
+            pipe, X, y,
+            scoring="neg_root_mean_squared_error",
+            cv=CV_SPLITTER,
+            return_train_score=True,
+        )
+        rmse_test = -result["test_score"]
+        rmse_train = -result["train_score"]
+        results.append({
+            "preprocessor": name,
+            "rmse_test_mean": rmse_test.mean(),
+            "rmse_test_std": rmse_test.std(),
+            "rmse_train_mean": rmse_train.mean(),
+            "rmse_train_std": rmse_train.std(),
+            "test_scores": rmse_test,
+        })
+        print(f"  sklearn {name:15s}: RMSE test={rmse_test.mean():.4f}, train={rmse_train.mean():.4f}")
 
-    # Unroll pipeline cross-validation (no for loops in sklearn_way/xorq_way)
-
-    # Pipeline: drop
-    name = "drop"
-    pipe = pipelines[name]
-    result = cross_validate(
-        pipe, X, y, scoring="neg_root_mean_squared_error", cv=n_cv_folds, return_train_score=True
-    )
-    rmse_test_score = -result["test_score"]
-    rmse_train_score = -result["train_score"]
-    results.append({
-        "preprocessor": name,
-        "rmse_test_mean": rmse_test_score.mean(),
-        "rmse_test_std": rmse_test_score.std(),
-        "rmse_train_mean": rmse_train_score.mean(),
-        "rmse_train_std": rmse_train_score.std(),
-    })
-    print(f"  sklearn {name:15s}: RMSE test={rmse_test_score.mean():.4f}, train={rmse_train_score.mean():.4f}")
-
-    # Pipeline: ordinal
-    name = "ordinal"
-    pipe = pipelines[name]
-    result = cross_validate(
-        pipe, X, y, scoring="neg_root_mean_squared_error", cv=n_cv_folds, return_train_score=True
-    )
-    rmse_test_score = -result["test_score"]
-    rmse_train_score = -result["train_score"]
-    results.append({
-        "preprocessor": name,
-        "rmse_test_mean": rmse_test_score.mean(),
-        "rmse_test_std": rmse_test_score.std(),
-        "rmse_train_mean": rmse_train_score.mean(),
-        "rmse_train_std": rmse_train_score.std(),
-    })
-    print(f"  sklearn {name:15s}: RMSE test={rmse_test_score.mean():.4f}, train={rmse_train_score.mean():.4f}")
-
-    # Pipeline: one_hot
-    name = "one_hot"
-    pipe = pipelines[name]
-    result = cross_validate(
-        pipe, X, y, scoring="neg_root_mean_squared_error", cv=n_cv_folds, return_train_score=True
-    )
-    rmse_test_score = -result["test_score"]
-    rmse_train_score = -result["train_score"]
-    results.append({
-        "preprocessor": name,
-        "rmse_test_mean": rmse_test_score.mean(),
-        "rmse_test_std": rmse_test_score.std(),
-        "rmse_train_mean": rmse_train_score.mean(),
-        "rmse_train_std": rmse_train_score.std(),
-    })
-    print(f"  sklearn {name:15s}: RMSE test={rmse_test_score.mean():.4f}, train={rmse_train_score.mean():.4f}")
-
-    # Pipeline: target
-    name = "target"
-    pipe = pipelines[name]
-    result = cross_validate(
-        pipe, X, y, scoring="neg_root_mean_squared_error", cv=n_cv_folds, return_train_score=True
-    )
-    rmse_test_score = -result["test_score"]
-    rmse_train_score = -result["train_score"]
-    results.append({
-        "preprocessor": name,
-        "rmse_test_mean": rmse_test_score.mean(),
-        "rmse_test_std": rmse_test_score.std(),
-        "rmse_train_mean": rmse_train_score.mean(),
-        "rmse_train_std": rmse_train_score.std(),
-    })
-    print(f"  sklearn {name:15s}: RMSE test={rmse_test_score.mean():.4f}, train={rmse_train_score.mean():.4f}")
-
-    # Pipeline: mixed_target
-    name = "mixed_target"
-    pipe = pipelines[name]
-    result = cross_validate(
-        pipe, X, y, scoring="neg_root_mean_squared_error", cv=n_cv_folds, return_train_score=True
-    )
-    rmse_test_score = -result["test_score"]
-    rmse_train_score = -result["train_score"]
-    results.append({
-        "preprocessor": name,
-        "rmse_test_mean": rmse_test_score.mean(),
-        "rmse_test_std": rmse_test_score.std(),
-        "rmse_train_mean": rmse_train_score.mean(),
-        "rmse_train_std": rmse_train_score.std(),
-    })
-    print(f"  sklearn {name:15s}: RMSE test={rmse_test_score.mean():.4f}, train={rmse_train_score.mean():.4f}")
-
-    results_df = (
-        pd.DataFrame(results).set_index("preprocessor").sort_values("rmse_test_mean")
-    )
-
+    results_df = pd.DataFrame(results).set_index("preprocessor").sort_values("rmse_test_mean")
     return results_df
 
 
 # =========================================================================
-# XORQ WAY -- deferred, cross-validation via deferred execution
+# XORQ WAY -- deferred cross-validation
 # =========================================================================
 
 
-def xorq_way(df, pipelines):
-    """Deferred xorq: cross-validate via deferred execution.
+def xorq_way(data, pipelines):
+    """Deferred xorq: deferred_cross_val_score per encoding pipeline.
 
-    Returns deferred metrics for each pipeline.
-    Nothing is executed until ``.execute()``.
-    Note: The mixed_target pipeline is skipped as it requires sklearn-specific
-    categorical feature handling that doesn't translate well to xorq.
+    Returns dict of CrossValScore objects keyed by encoder name.
+    Nothing is executed until .execute().
     """
-    con = xo.connect()
-    data = con.register(df, "wine_reviews")
-    features = tuple(numerical_features + categorical_features)
+    results = {}
+    for name in XORQ_ENCODER_NAMES:
+        xorq_pipe = Pipeline.from_instance(pipelines[name])
+        cv_result = deferred_cross_val_score(
+            xorq_pipe, data, ALL_FEATURE_COLS, TARGET_COL,
+            cv=CV_SPLITTER,
+            scoring="neg_root_mean_squared_error",
+            random_seed=RANDOM_STATE,
+        )
+        results[name] = cv_result
 
-    # For xorq, we'll use a simple train/test split to match sklearn's CV behavior
-    train_data, test_data = deferred_sequential_split(
-        data, features=features, target=target_name, order_by="row_idx"
-    )
-
-    metrics_exprs = {}
-
-    # Unroll pipeline evaluation (no for loops in sklearn_way/xorq_way)
-
-    # Pipeline: drop
-    name = "drop"
-    sklearn_pipe = pipelines[name]
-    xorq_pipe = Pipeline.from_instance(sklearn_pipe)
-    fitted = xorq_pipe.fit(train_data, features=features, target=target_name)
-    train_preds = fitted.predict(train_data, name="pred")
-    make_metric_train = deferred_sklearn_metric(target=target_name, pred="pred")
-    train_mse = train_preds.agg(mse=make_metric_train(metric=mean_squared_error))
-    test_preds = fitted.predict(test_data, name="pred")
-    make_metric_test = deferred_sklearn_metric(target=target_name, pred="pred")
-    test_mse = test_preds.agg(mse=make_metric_test(metric=mean_squared_error))
-    metrics_exprs[name] = {"train_mse": train_mse, "test_mse": test_mse}
-
-    # Pipeline: ordinal
-    name = "ordinal"
-    sklearn_pipe = pipelines[name]
-    xorq_pipe = Pipeline.from_instance(sklearn_pipe)
-    fitted = xorq_pipe.fit(train_data, features=features, target=target_name)
-    train_preds = fitted.predict(train_data, name="pred")
-    make_metric_train = deferred_sklearn_metric(target=target_name, pred="pred")
-    train_mse = train_preds.agg(mse=make_metric_train(metric=mean_squared_error))
-    test_preds = fitted.predict(test_data, name="pred")
-    make_metric_test = deferred_sklearn_metric(target=target_name, pred="pred")
-    test_mse = test_preds.agg(mse=make_metric_test(metric=mean_squared_error))
-    metrics_exprs[name] = {"train_mse": train_mse, "test_mse": test_mse}
-
-    # Pipeline: one_hot
-    name = "one_hot"
-    sklearn_pipe = pipelines[name]
-    xorq_pipe = Pipeline.from_instance(sklearn_pipe)
-    fitted = xorq_pipe.fit(train_data, features=features, target=target_name)
-    train_preds = fitted.predict(train_data, name="pred")
-    make_metric_train = deferred_sklearn_metric(target=target_name, pred="pred")
-    train_mse = train_preds.agg(mse=make_metric_train(metric=mean_squared_error))
-    test_preds = fitted.predict(test_data, name="pred")
-    make_metric_test = deferred_sklearn_metric(target=target_name, pred="pred")
-    test_mse = test_preds.agg(mse=make_metric_test(metric=mean_squared_error))
-    metrics_exprs[name] = {"train_mse": train_mse, "test_mse": test_mse}
-
-    # Pipeline: target
-    name = "target"
-    sklearn_pipe = pipelines[name]
-    xorq_pipe = Pipeline.from_instance(sklearn_pipe)
-    fitted = xorq_pipe.fit(train_data, features=features, target=target_name)
-    train_preds = fitted.predict(train_data, name="pred")
-    make_metric_train = deferred_sklearn_metric(target=target_name, pred="pred")
-    train_mse = train_preds.agg(mse=make_metric_train(metric=mean_squared_error))
-    test_preds = fitted.predict(test_data, name="pred")
-    make_metric_test = deferred_sklearn_metric(target=target_name, pred="pred")
-    test_mse = test_preds.agg(mse=make_metric_test(metric=mean_squared_error))
-    metrics_exprs[name] = {"train_mse": train_mse, "test_mse": test_mse}
-
-    # Skip mixed_target as it uses sklearn-specific categorical feature handling
-
-    return metrics_exprs
+    return results
 
 
 # =========================================================================
@@ -379,64 +234,69 @@ def main():
     os.makedirs("imgs", exist_ok=True)
 
     df = _load_data()
-    pipelines = _build_pipelines()
+
+    con = xo.connect()
+    table = con.register(df, "wine_reviews")
+
+    # Sort by deterministic hash so sklearn KFold sees same row order as xorq
+    df_sorted = apply_deterministic_sort(table, random_seed=RANDOM_STATE).execute()
 
     print("=== SKLEARN WAY ===")
-    sk_results = sklearn_way(df, pipelines)
+    pipelines = _build_pipelines()
+    sk_results = sklearn_way(df_sorted, pipelines)
 
     print("\n=== XORQ WAY ===")
-    deferred = xorq_way(df, pipelines)
+    xo_pipelines = _build_pipelines()
+    xo_deferred = xorq_way(table, xo_pipelines)
 
-    # Execute deferred expressions and build results dataframe
-    xo_results = []
-    for name, metrics in deferred.items():
-        train_mse_df = metrics["train_mse"].execute()
-        test_mse_df = metrics["test_mse"].execute()
+    # Execute deferred CV scores
+    xo_scores = {}
+    for name in XORQ_ENCODER_NAMES:
+        scores = xo_deferred[name].execute()
+        xo_scores[name] = scores
+        # deferred_cross_val_score returns raw scorer output (negative RMSE)
+        rmse = -scores
+        print(f"  xorq   {name:15s}: RMSE test={rmse.mean():.4f} (+/-{rmse.std():.4f})")
 
-        train_rmse = np.sqrt(train_mse_df["mse"].iloc[0])
-        test_rmse = np.sqrt(test_mse_df["mse"].iloc[0])
-
-        xo_results.append(
-            {
-                "preprocessor": name,
-                "rmse_test_mean": test_rmse,
-                "rmse_test_std": 0.0,  # Single split, no std
-                "rmse_train_mean": train_rmse,
-                "rmse_train_std": 0.0,
-            }
-        )
-        print(
-            f"  xorq   {name:15s}: RMSE test={test_rmse:.4f}, "
-            f"train={train_rmse:.4f}"
-        )
-
-    xo_results_df = (
-        pd.DataFrame(xo_results).set_index("preprocessor").sort_values("rmse_test_mean")
-    )
-
-    # ---- Assert numerical equivalence (relaxed due to CV vs single split) ----
-    # We compare that the ordering of encoders is similar
-    sk_order = sk_results.index.tolist()
-    xo_order = xo_results_df.index.tolist()
-    print(f"\nsklearn encoder ranking: {sk_order}")
-    print(f"xorq encoder ranking:    {xo_order}")
+    # Assert: per-fold test scores match
+    print("\n=== ASSERTIONS ===")
+    for name in XORQ_ENCODER_NAMES:
+        sk_test_scores = sk_results.loc[name, "test_scores"]
+        xo_test_scores = -xo_scores[name]  # negate to get positive RMSE
+        np.testing.assert_allclose(sk_test_scores, xo_test_scores, rtol=1e-6)
+        print(f"  {name:15s}: per-fold test scores match")
+    print("Assertions passed.")
 
     # Build plots
+    # xorq results as DataFrame (test only, no train scores from deferred CV)
+    xo_results = []
+    for name in XORQ_ENCODER_NAMES:
+        rmse = -xo_scores[name]
+        xo_results.append({
+            "preprocessor": name,
+            "rmse_test_mean": rmse.mean(),
+            "rmse_test_std": rmse.std(),
+            "rmse_train_mean": 0.0,
+            "rmse_train_std": 0.0,
+        })
+    xo_results_df = pd.DataFrame(xo_results).set_index("preprocessor").sort_values("rmse_test_mean")
+
     sk_fig = _build_results_plot(sk_results, "sklearn - Target Encoder Comparison")
     xo_fig = _build_results_plot(xo_results_df, "xorq - Target Encoder Comparison")
 
-    # Composite: sklearn (left) | xorq (right)
     fig, axes = plt.subplots(1, 2, figsize=(20, 6))
     axes[0].imshow(fig_to_image(sk_fig))
+    axes[0].set_title("sklearn", fontsize=14, fontweight="bold")
     axes[0].axis("off")
     axes[1].imshow(fig_to_image(xo_fig))
+    axes[1].set_title("xorq", fontsize=14, fontweight="bold")
     axes[1].axis("off")
 
-    plt.suptitle("Target Encoder Comparison: sklearn vs xorq", fontsize=16)
-    plt.tight_layout()
+    fig.suptitle("Target Encoder Comparison: sklearn vs xorq", fontsize=16, fontweight="bold", y=0.98)
+    fig.tight_layout()
     out = "imgs/plot_target_encoder.png"
-    plt.savefig(out, dpi=150)
-    plt.close()
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
     print(f"\nPlot saved to {out}")
 
 

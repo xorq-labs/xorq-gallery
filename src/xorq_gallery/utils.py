@@ -131,7 +131,7 @@ def show_plot(img_bytes):
     img = load_plot_bytes(img_bytes)
     plt.imshow(img)
     plt.axis("off")
-    plt.show()
+    plt.show(block=False)
 
 
 def fig_to_image(fig, close=True):

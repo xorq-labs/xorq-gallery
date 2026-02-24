@@ -23,15 +23,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xorq.api as xo
+from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.datasets import load_diabetes
 from sklearn.ensemble import (
     GradientBoostingRegressor,
     RandomForestRegressor,
     VotingRegressor,
 )
-from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.linear_model import LinearRegression
-from sklearn.pipeline import make_pipeline
+from sklearn.pipeline import Pipeline as SklearnPipeline
 from xorq.expr.ml.pipeline_lib import Pipeline
 
 from xorq_gallery.utils import (
@@ -58,7 +58,6 @@ class VotingRegressorWrapper(BaseEstimator, RegressorMixin):
         self.estimators = estimators
 
     def fit(self, X, y):
-        # Ensure estimators is a list before fitting
         estimators_list = list(self.estimators) if not isinstance(self.estimators, list) else self.estimators
         self._voting_regressor = VotingRegressor(estimators=estimators_list)
         self._voting_regressor.fit(X, y)
@@ -85,7 +84,10 @@ class VotingRegressorWrapper(BaseEstimator, RegressorMixin):
 # ---------------------------------------------------------------------------
 
 RANDOM_STATE = 1
-N_DISPLAY_SAMPLES = 20  # Number of samples to display in plot
+N_DISPLAY_SAMPLES = 20
+TARGET_COL = "target"
+PRED_COL = "pred"
+ROW_IDX = "row_idx"
 
 
 # ---------------------------------------------------------------------------
@@ -96,13 +98,9 @@ N_DISPLAY_SAMPLES = 20  # Number of samples to display in plot
 def _load_data():
     """Load diabetes dataset from sklearn."""
     X, y = load_diabetes(return_X_y=True, as_frame=True)
-
-    # Combine into single dataframe
     df = X.copy()
-    df["target"] = y
-
-    # Row index for temporal ordering
-    df["row_idx"] = range(len(df))
+    df[TARGET_COL] = y
+    df[ROW_IDX] = range(len(df))
 
     print(f"Number of samples: {X.shape[0]}")
     print(f"Number of features: {X.shape[1]}")
@@ -116,20 +114,17 @@ def _load_data():
 
 
 def _build_models():
-    """Build individual regressors and voting ensemble.
-
-    Returns:
-        Dict of model_name -> sklearn estimator instance
-    """
+    """Build individual regressors and voting ensemble."""
     reg1 = GradientBoostingRegressor(random_state=RANDOM_STATE)
     reg2 = RandomForestRegressor(random_state=RANDOM_STATE)
     reg3 = LinearRegression()
 
-    # Create fresh instances for VotingRegressor to avoid shared state issues
     ereg_reg1 = GradientBoostingRegressor(random_state=RANDOM_STATE)
     ereg_reg2 = RandomForestRegressor(random_state=RANDOM_STATE)
     ereg_reg3 = LinearRegression()
 
+    # NOTE: VotingRegressor expects lists for estimators. xorq's attrs-based
+    # storage converts lists to tuples, so VotingRegressorWrapper is needed.
     ereg = VotingRegressor(
         estimators=[("gb", ereg_reg1), ("rf", ereg_reg2), ("lr", ereg_reg3)]
     )
@@ -148,16 +143,9 @@ def _build_models():
 
 
 def _plot_predictions(predictions_dict, y_true, title):
-    """Build line plot comparing predictions from multiple models.
-
-    Args:
-        predictions_dict: Dict of model_name -> predictions array
-        y_true: True target values
-        title: Plot title
-    """
+    """Build line plot comparing predictions from multiple models."""
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    # Plot styles for each model
     styles = {
         "GradientBoosting": {"marker": "o", "color": "g", "label": "GradientBoostingRegressor"},
         "RandomForest": {"marker": "^", "color": "b", "label": "RandomForestRegressor"},
@@ -166,14 +154,11 @@ def _plot_predictions(predictions_dict, y_true, title):
     }
 
     x_vals = np.arange(len(y_true))
-
     for model_name, preds in predictions_dict.items():
         style = styles.get(model_name, {"marker": "x", "color": "k", "label": model_name})
         ax.plot(x_vals, preds, linestyle="", **style)
 
-    # Plot true values as a reference line
     ax.plot(x_vals, y_true, "k--", alpha=0.3, label="True values")
-
     ax.set_xlabel("Sample index")
     ax.set_ylabel("Predicted target")
     ax.set_title(title)
@@ -184,25 +169,19 @@ def _plot_predictions(predictions_dict, y_true, title):
 
 
 # =========================================================================
-# SKLEARN WAY -- eager fit/predict on individual models and ensemble
+# SKLEARN WAY -- eager fit/predict
 # =========================================================================
 
 
 def sklearn_way(df, models):
-    """Eager sklearn: fit individual models and voting ensemble, predict.
+    """Eager sklearn: fit individual models and voting ensemble, predict."""
+    feature_cols = tuple(col for col in df.columns if col not in (TARGET_COL, ROW_IDX))
+    X = df[list(feature_cols)]
+    y = df[TARGET_COL]
 
-    Returns:
-        Dict of model_name -> predictions (on first N_DISPLAY_SAMPLES)
-    """
-    feature_cols = [col for col in df.columns if col not in ["target", "row_idx"]]
-    X = df[feature_cols]
-    y = df["target"]
-
-    # Fit all models on full dataset
     predictions = {}
     for name, model in models.items():
         model.fit(X, y)
-        # Predict on first N samples for visualization
         preds = model.predict(X.iloc[:N_DISPLAY_SAMPLES])
         predictions[name] = preds
         print(f"  sklearn: {name:20s} fitted and predicted")
@@ -216,45 +195,26 @@ def sklearn_way(df, models):
 
 
 def xorq_way(df, models):
-    """Deferred xorq: wrap models in Pipeline.from_instance, fit/predict deferred.
-
-    Returns deferred prediction expressions for each model.
-    Nothing is executed until ``.execute()``.
-    """
+    """Deferred xorq: wrap models in Pipeline.from_instance, fit/predict deferred."""
     con = xo.connect()
     data = con.register(df, "diabetes")
+    feature_cols = tuple(col for col in df.columns if col not in (TARGET_COL, ROW_IDX))
 
-    feature_cols = tuple(col for col in df.columns if col not in ["target", "row_idx"])
-
-    # Build deferred predictions for each model
     pred_exprs = {}
-
     for name, sklearn_model in models.items():
-        # VotingRegressor needs special wrapper to handle list->tuple conversion
+        # VotingRegressor needs wrapper for tuple->list conversion
         if isinstance(sklearn_model, VotingRegressor):
-            # Use wrapper that handles parameter type conversion
-            wrapped_model = VotingRegressorWrapper(estimators=sklearn_model.estimators)
-            sklearn_pipeline = make_pipeline(wrapped_model)
-        elif hasattr(sklearn_model, "steps"):
-            # Already a Pipeline
-            sklearn_pipeline = sklearn_model
+            wrapped = VotingRegressorWrapper(estimators=sklearn_model.estimators)
+            step_name = "votingregressorwrapper"
         else:
-            # Individual estimator - wrap in pipeline
-            sklearn_pipeline = make_pipeline(sklearn_model)
+            wrapped = sklearn_model
+            step_name = type(sklearn_model).__name__.lower()
 
-        # Wrap sklearn pipeline in xorq Pipeline
+        sklearn_pipeline = SklearnPipeline([(step_name, wrapped)])
         xorq_pipe = Pipeline.from_instance(sklearn_pipeline)
-
-        # Fit on full dataset
-        fitted = xorq_pipe.fit(data, features=feature_cols, target="target")
-
-        # Predict on full dataset, then limit to first N samples
-        preds = fitted.predict(data, name="pred")
-
-        # Limit to first N_DISPLAY_SAMPLES for visualization
-        preds_limited = preds.order_by("row_idx").limit(N_DISPLAY_SAMPLES)
-
-        pred_exprs[name] = preds_limited
+        fitted = xorq_pipe.fit(data, features=feature_cols, target=TARGET_COL)
+        preds = fitted.predict(data, name=PRED_COL)
+        pred_exprs[name] = preds.order_by(ROW_IDX).limit(N_DISPLAY_SAMPLES)
 
     return pred_exprs
 
@@ -269,7 +229,6 @@ def main():
 
     df = _load_data()
 
-    # Build separate model instances for sklearn and xorq to avoid state sharing
     sk_models = _build_models()
     xo_models = _build_models()
 
@@ -284,10 +243,10 @@ def main():
     xo_predictions = {}
     for name, pred_expr in deferred_preds.items():
         pred_df = pred_expr.execute()
-        xo_predictions[name] = pred_df["pred"].values
+        xo_predictions[name] = pred_df[PRED_COL].values
         print(f"  xorq:   {name:20s} executed")
 
-    # ---- Assert numerical equivalence BEFORE plotting ----
+    # Assert
     print("\n=== ASSERTIONS ===")
     for name in sk_models.keys():
         sk_preds = sk_predictions[name]
@@ -297,43 +256,24 @@ def main():
 
     print("Assertions passed: sklearn and xorq predictions match.")
 
-    # Get true values for plotting
-    y_true = df["target"].iloc[:N_DISPLAY_SAMPLES].values
+    y_true = df[TARGET_COL].iloc[:N_DISPLAY_SAMPLES].values
 
-    # Build sklearn plot
-    sk_fig = _plot_predictions(
-        sk_predictions,
-        y_true,
-        "sklearn - Individual and Voting Regressor Predictions"
-    )
+    sk_fig = _plot_predictions(sk_predictions, y_true, "sklearn - Individual and Voting Regressor Predictions")
+    xo_fig = _plot_predictions(xo_predictions, y_true, "xorq - Individual and Voting Regressor Predictions")
 
-    # Build xorq plot
-    xo_fig = _plot_predictions(
-        xo_predictions,
-        y_true,
-        "xorq - Individual and Voting Regressor Predictions"
-    )
-
-    # Composite: sklearn (left) | xorq (right)
     fig, axes = plt.subplots(1, 2, figsize=(18, 6))
-
     axes[0].imshow(fig_to_image(sk_fig))
     axes[0].axis("off")
     axes[0].set_title("sklearn", fontsize=12, pad=10)
-
     axes[1].imshow(fig_to_image(xo_fig))
     axes[1].axis("off")
     axes[1].set_title("xorq", fontsize=12, pad=10)
 
-    plt.suptitle(
-        "Voting Regressor: sklearn vs xorq",
-        fontsize=16,
-        y=0.98,
-    )
+    fig.suptitle("Voting Regressor: sklearn vs xorq", fontsize=16, y=0.98)
     plt.tight_layout()
     out = "imgs/plot_voting_regressor.png"
-    plt.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close()
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
     print(f"\nPlot saved to {out}")
 
 

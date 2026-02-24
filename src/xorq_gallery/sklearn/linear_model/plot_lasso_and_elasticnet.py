@@ -15,8 +15,10 @@ Both produce identical R^2 scores and coefficient patterns.
 Dataset: Synthetic sparse sinusoidal signals with Gaussian noise
 """
 
+from __future__ import annotations
+
 import os
-from io import BytesIO
+from time import time
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -28,10 +30,8 @@ from sklearn.linear_model import ARDRegression, ElasticNet, Lasso
 from sklearn.metrics import r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline as SklearnPipeline
-from time import time
 from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
-from xorq.expr.udf import agg
 
 from xorq_gallery.utils import (
     deferred_matplotlib_plot,
@@ -54,6 +54,12 @@ RANDOM_STATE = 0
 LASSO_ALPHA = 0.14
 ELASTICNET_ALPHA = 0.08
 ELASTICNET_L1_RATIO = 0.5
+
+# Column names
+FEATURE_COLS = tuple(f"feature_{i}" for i in range(N_FEATURES))
+TARGET_COL = "target"
+ROW_IDX = "row_idx"
+PRED_COL = "pred"
 
 
 # ---------------------------------------------------------------------------
@@ -99,11 +105,10 @@ def _load_data():
     true_coef, X, y, time_step = _generate_sparse_signal()
 
     # Build DataFrame
-    feature_cols = [f"feature_{i}" for i in range(N_FEATURES)]
-    df = pd.DataFrame(X, columns=feature_cols)
-    df["target"] = y
+    df = pd.DataFrame(X, columns=FEATURE_COLS)
+    df[TARGET_COL] = y
     df["time_step"] = time_step
-    df["row_idx"] = range(len(df))
+    df[ROW_IDX] = range(len(df))
 
     # Store true_coef separately for comparison
     df.attrs["true_coef"] = true_coef
@@ -151,7 +156,7 @@ def _build_coefficient_heatmap(coef_matrix, row_labels, r2_scores, title_prefix)
     ax.set_xlabel("coefficients")
 
     # Add colorbar
-    cbar = plt.colorbar(im, ax=ax)
+    cbar = fig.colorbar(im, ax=ax)
     cbar.set_label("coefficients' values")
 
     ax.set_title(
@@ -160,7 +165,7 @@ def _build_coefficient_heatmap(coef_matrix, row_labels, r2_scores, title_prefix)
         f"ARD $R^2$: {r2_scores['ARD']:.3f}, "
         f"ElasticNet $R^2$: {r2_scores['ElasticNet']:.3f}"
     )
-    plt.tight_layout()
+    fig.tight_layout()
     return fig
 
 
@@ -178,9 +183,8 @@ def sklearn_way(df):
         Keys: "Lasso", "ARD", "ElasticNet"
         Values: dict with "r2", "coef", "fit_time"
     """
-    feature_cols = [f"feature_{i}" for i in range(N_FEATURES)]
-    X = df[feature_cols].values
-    y = df["target"].values
+    X = df[list(FEATURE_COLS)].values
+    y = df[TARGET_COL].values
 
     # shuffle=False preserves temporal order: first rows train, last rows test
     # Using test_size=0.3333 to match deferred_sequential_split behavior
@@ -247,23 +251,20 @@ def xorq_way(df):
     con = xo.connect()
     data = con.register(df, "sparse_signal")
 
-    feature_cols = tuple(f"feature_{i}" for i in range(N_FEATURES))
-    target_col = "target"
-
     # Sequential split (first ~67% train, last ~33% test)
     train_data, test_data = deferred_sequential_split(
-        data, features=feature_cols, target=target_col, order_by="row_idx", test_size=0.3333
+        data, features=FEATURE_COLS, target=TARGET_COL, order_by=ROW_IDX, test_size=0.3333
     )
 
-    make_metric = deferred_sklearn_metric(target=target_col, pred="pred")
+    make_metric = deferred_sklearn_metric(target=TARGET_COL, pred=PRED_COL)
 
     results = {}
 
     # Lasso - wrap in sklearn Pipeline first
     lasso_sklearn_pipe = SklearnPipeline([("lasso", Lasso(alpha=LASSO_ALPHA))])
     lasso_pipe = Pipeline.from_instance(lasso_sklearn_pipe)
-    lasso_fitted = lasso_pipe.fit(train_data, features=feature_cols, target=target_col)
-    lasso_preds = lasso_fitted.predict(test_data, name="pred")
+    lasso_fitted = lasso_pipe.fit(train_data, features=FEATURE_COLS, target=TARGET_COL)
+    lasso_preds = lasso_fitted.predict(test_data, name=PRED_COL)
     lasso_metrics = lasso_preds.agg(r2=make_metric(metric=r2_score))
 
     results["Lasso"] = {
@@ -275,8 +276,8 @@ def xorq_way(df):
     # ARDRegression
     ard_sklearn_pipe = SklearnPipeline([("ard", ARDRegression())])
     ard_pipe = Pipeline.from_instance(ard_sklearn_pipe)
-    ard_fitted = ard_pipe.fit(train_data, features=feature_cols, target=target_col)
-    ard_preds = ard_fitted.predict(test_data, name="pred")
+    ard_fitted = ard_pipe.fit(train_data, features=FEATURE_COLS, target=TARGET_COL)
+    ard_preds = ard_fitted.predict(test_data, name=PRED_COL)
     ard_metrics = ard_preds.agg(r2=make_metric(metric=r2_score))
 
     results["ARD"] = {
@@ -290,8 +291,8 @@ def xorq_way(df):
         ("elasticnet", ElasticNet(alpha=ELASTICNET_ALPHA, l1_ratio=ELASTICNET_L1_RATIO))
     ])
     enet_pipe = Pipeline.from_instance(enet_sklearn_pipe)
-    enet_fitted = enet_pipe.fit(train_data, features=feature_cols, target=target_col)
-    enet_preds = enet_fitted.predict(test_data, name="pred")
+    enet_fitted = enet_pipe.fit(train_data, features=FEATURE_COLS, target=TARGET_COL)
+    enet_preds = enet_fitted.predict(test_data, name=PRED_COL)
     enet_metrics = enet_preds.agg(r2=make_metric(metric=r2_score))
 
     results["ElasticNet"] = {
@@ -394,13 +395,13 @@ def main():
     axes[1].imshow(fig_to_image(xo_fig))
     axes[1].axis("off")
 
-    plt.suptitle(
+    fig.suptitle(
         "L1-based models for Sparse Signals: sklearn vs xorq", fontsize=16
     )
-    plt.tight_layout()
+    fig.tight_layout()
     out = "imgs/lasso_and_elasticnet.png"
-    plt.savefig(out, dpi=150)
-    plt.close()
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
     print(f"\nPlot saved to {out}")
 
 

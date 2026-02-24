@@ -1,6 +1,10 @@
 """Tweedie regression on insurance claims
 ======================================
 
+WIP: This example needs work to match sklearn's full visualization suite including
+Lorenz curves and other insurance-specific plots. Currently only shows basic
+sorted predictions vs observed values.
+
 sklearn: Models insurance claim data using Poisson regression for claim frequency
 and Tweedie regression for pure premium. Uses sklearn's fetch_openml to load
 French Motor Third-Party Liability Claims dataset, applies preprocessing via
@@ -15,8 +19,9 @@ Both produce identical predictions and metrics (D², MAE, Tweedie deviance).
 Dataset: French Motor Third-Party Liability Claims (freMTPL2freq + freMTPL2sev)
 """
 
+from __future__ import annotations
+
 import os
-from functools import partial
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -27,7 +32,7 @@ from sklearn.datasets import fetch_openml
 from sklearn.linear_model import PoissonRegressor, TweedieRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_tweedie_deviance
 from sklearn.model_selection import train_test_split
-from sklearn.pipeline import Pipeline as SklearnPipeline, make_pipeline
+from sklearn.pipeline import Pipeline as SklearnPipeline
 from sklearn.preprocessing import (
     FunctionTransformer,
     KBinsDiscretizer,
@@ -46,6 +51,12 @@ from xorq_gallery.utils import fig_to_image, load_plot_bytes
 
 RANDOM_STATE = 0
 N_SAMPLES = 10000  # Use subset for faster execution
+
+ROW_IDX = "row_idx"
+FREQ_TARGET = "Frequency"
+PP_TARGET = "PurePremium"
+FREQ_PRED_COL = "freq_pred"
+PP_PRED_COL = "pp_pred"
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +77,7 @@ def _load_mtpl2_data():
     # freMTPL2freq dataset from https://www.openml.org/d/41214
     df_freq = fetch_openml(data_id=41214, as_frame=True, parser="auto").data
     df_freq["IDpol"] = df_freq["IDpol"].astype(int)
-    df_freq.set_index("IDpol", inplace=True)
+    df_freq = df_freq.set_index("IDpol")
 
     # freMTPL2sev dataset from https://www.openml.org/d/41215
     df_sev = fetch_openml(data_id=41215, as_frame=True, parser="auto").data
@@ -77,8 +88,9 @@ def _load_mtpl2_data():
     df = df_freq.join(df_sev, how="left")
     df["ClaimAmount"] = df["ClaimAmount"].fillna(0)
 
-    # unquote string fields
-    for column_name in df.columns[[t is object for t in df.dtypes.values]]:
+    # unquote string fields - use comprehension instead of for loop
+    object_cols = [col for col, dtype in zip(df.columns, df.dtypes.values) if dtype == object]
+    for column_name in object_cols:
         df[column_name] = df[column_name].str.strip("'")
 
     # Use subset for faster execution
@@ -93,13 +105,14 @@ def _load_mtpl2_data():
     df.loc[(df["ClaimAmount"] == 0) & (df["ClaimNb"] >= 1), "ClaimNb"] = 0
 
     # Create target variables
-    df["PurePremium"] = df["ClaimAmount"] / df["Exposure"]
-    df["Frequency"] = df["ClaimNb"] / df["Exposure"]
+    df[PP_TARGET] = df["ClaimAmount"] / df["Exposure"]
+    df[FREQ_TARGET] = df["ClaimNb"] / df["Exposure"]
 
     # Build preprocessing pipeline
-    log_scale_transformer = make_pipeline(
-        FunctionTransformer(func=np.log), StandardScaler()
-    )
+    log_scale_transformer = SklearnPipeline([
+        ("functiontransformer", FunctionTransformer(func=np.log)),
+        ("standardscaler", StandardScaler()),
+    ])
 
     column_trans = ColumnTransformer(
         [
@@ -145,9 +158,9 @@ def _load_data():
     feature_df.columns = [f"feature_{i}" for i in range(X.shape[1])]
 
     # Combine with targets and weights
-    result = pd.concat([feature_df, df[["Frequency", "PurePremium", "Exposure"]]], axis=1)
+    result = pd.concat([feature_df, df[[FREQ_TARGET, PP_TARGET, "Exposure"]]], axis=1)
     result = result.reset_index(drop=True)
-    result["row_idx"] = range(len(result))
+    result[ROW_IDX] = range(len(result))
 
     return result
 
@@ -179,35 +192,38 @@ def _build_comparison_plot(df_train, df_test, sk_freq_train, sk_freq_test,
     # Poisson frequency model - train
     ax = axes[0, 0]
     _plot_obs_pred_simple(
-        df_train, "Frequency", sk_freq_train, "Frequency", ax=ax, title="Poisson (train)"
+        df_train, FREQ_TARGET, sk_freq_train, "Frequency", ax=ax, title="Poisson (train)"
     )
 
     # Poisson frequency model - test
     ax = axes[0, 1]
     _plot_obs_pred_simple(
-        df_test, "Frequency", sk_freq_test, "Frequency", ax=ax, title="Poisson (test)"
+        df_test, FREQ_TARGET, sk_freq_test, "Frequency", ax=ax, title="Poisson (test)"
     )
 
     # Tweedie pure premium - train
     ax = axes[1, 0]
     _plot_obs_pred_simple(
-        df_train, "PurePremium", sk_tweedie_train, "Pure Premium", ax=ax,
+        df_train, PP_TARGET, sk_tweedie_train, "Pure Premium", ax=ax,
         title="Tweedie (train)"
     )
 
     # Tweedie pure premium - test
     ax = axes[1, 1]
     _plot_obs_pred_simple(
-        df_test, "PurePremium", sk_tweedie_test, "Pure Premium", ax=ax,
+        df_test, PP_TARGET, sk_tweedie_test, "Pure Premium", ax=ax,
         title="Tweedie (test)"
     )
 
-    plt.tight_layout()
+    fig.tight_layout()
     return fig
 
 
 def _plot_obs_pred_simple(df, target_col, predictions, ylabel, ax, title):
-    """Simple scatter plot of observed vs predicted.
+    """Plot sorted observed vs predicted values.
+
+    Following sklearn's plot_tweedie_regression_insurance_claims.py style:
+    sort by predictions and plot both observed and predicted against index.
 
     Parameters
     ----------
@@ -225,15 +241,19 @@ def _plot_obs_pred_simple(df, target_col, predictions, ylabel, ax, title):
         Plot title
     """
     observed = df[target_col].values
-    ax.scatter(observed, predictions, alpha=0.3, s=10)
 
-    # Add diagonal line
-    min_val = min(observed.min(), predictions.min())
-    max_val = max(observed.max(), predictions.max())
-    ax.plot([min_val, max_val], [min_val, max_val], 'r--', lw=2, label="Perfect prediction")
+    # Sort by predictions
+    sort_idx = np.argsort(predictions)
+    observed_sorted = observed[sort_idx]
+    predictions_sorted = predictions[sort_idx]
 
-    ax.set_xlabel(f"Observed {ylabel}")
-    ax.set_ylabel(f"Predicted {ylabel}")
+    # Plot observed and predicted against index
+    indices = np.arange(len(predictions_sorted))
+    ax.plot(indices, observed_sorted, '.', alpha=0.5, markersize=1, label="Observed", color='C0')
+    ax.plot(indices, predictions_sorted, '-', label="Predicted", color='C1', linewidth=2)
+
+    ax.set_xlabel("Samples sorted by predicted value")
+    ax.set_ylabel(ylabel)
     ax.set_title(title)
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -259,8 +279,8 @@ def sklearn_way(df):
               "freq_metrics", "tweedie_metrics" (dicts with mae, mse, tweedie_dev)
     """
     # Extract features and targets
-    feature_cols = [c for c in df.columns if c.startswith("feature_")]
-    X = df[feature_cols].values
+    feature_cols = tuple(c for c in df.columns if c.startswith("feature_"))
+    X = df[list(feature_cols)].values
 
     # Train/test split
     df_train, df_test, X_train, X_test = train_test_split(
@@ -272,20 +292,20 @@ def sklearn_way(df):
     glm_freq = PoissonRegressor(alpha=1e-4, max_iter=300)
     # Note: For consistency with xorq version, we don't use sample_weight here
     # In production, sample_weight=Exposure would be appropriate
-    glm_freq.fit(X_train, df_train["Frequency"])
+    glm_freq.fit(X_train, df_train[FREQ_TARGET])
 
     freq_pred_train = glm_freq.predict(X_train)
     freq_pred_test = glm_freq.predict(X_test)
 
     # Metrics for frequency (unweighted for comparison with xorq)
-    freq_mae_train = mean_absolute_error(df_train["Frequency"], freq_pred_train)
-    freq_mae_test = mean_absolute_error(df_test["Frequency"], freq_pred_test)
+    freq_mae_train = mean_absolute_error(df_train[FREQ_TARGET], freq_pred_train)
+    freq_mae_test = mean_absolute_error(df_test[FREQ_TARGET], freq_pred_test)
 
     freq_tweedie_dev_train = mean_tweedie_deviance(
-        df_train["Frequency"], freq_pred_train, power=1
+        df_train[FREQ_TARGET], freq_pred_train, power=1
     )
     freq_tweedie_dev_test = mean_tweedie_deviance(
-        df_test["Frequency"], freq_pred_test, power=1
+        df_test[FREQ_TARGET], freq_pred_test, power=1
     )
 
     print(f"    Frequency MAE (train/test): {freq_mae_train:.4f} / {freq_mae_test:.4f}")
@@ -295,20 +315,20 @@ def sklearn_way(df):
     print("  Training Tweedie pure premium model...")
     glm_pure_premium = TweedieRegressor(power=1.9, alpha=0.1, max_iter=300)
     # Note: For consistency with xorq version, we don't use sample_weight here
-    glm_pure_premium.fit(X_train, df_train["PurePremium"])
+    glm_pure_premium.fit(X_train, df_train[PP_TARGET])
 
     pp_pred_train = glm_pure_premium.predict(X_train)
     pp_pred_test = glm_pure_premium.predict(X_test)
 
     # Metrics for pure premium (unweighted for comparison with xorq)
-    pp_mae_train = mean_absolute_error(df_train["PurePremium"], pp_pred_train)
-    pp_mae_test = mean_absolute_error(df_test["PurePremium"], pp_pred_test)
+    pp_mae_train = mean_absolute_error(df_train[PP_TARGET], pp_pred_train)
+    pp_mae_test = mean_absolute_error(df_test[PP_TARGET], pp_pred_test)
 
     pp_tweedie_dev_train = mean_tweedie_deviance(
-        df_train["PurePremium"], pp_pred_train, power=1.9
+        df_train[PP_TARGET], pp_pred_train, power=1.9
     )
     pp_tweedie_dev_test = mean_tweedie_deviance(
-        df_test["PurePremium"], pp_pred_test, power=1.9
+        df_test[PP_TARGET], pp_pred_test, power=1.9
     )
 
     print(f"    Pure Premium MAE (train/test): {pp_mae_train:.4f} / {pp_mae_test:.4f}")
@@ -371,8 +391,8 @@ def xorq_way(df):
     )
 
     # Create train/test expressions using row_idx filter
-    train_data = data.filter(data["row_idx"].isin(train_indices))
-    test_data = data.filter(data["row_idx"].isin(test_indices))
+    train_data = data.filter(data[ROW_IDX].isin(train_indices))
+    test_data = data.filter(data[ROW_IDX].isin(test_indices))
 
     # ---- Poisson Frequency Model ----
     print("  Building deferred Poisson frequency model...")
@@ -385,19 +405,19 @@ def xorq_way(df):
     # sample_weight through to sklearn estimators. This is a known limitation.
     # The models are fitted without sample weights in the xorq version.
     freq_fitted = freq_pipe.fit(
-        train_data, features=feature_cols, target="Frequency"
+        train_data, features=feature_cols, target=FREQ_TARGET
     )
 
-    freq_train_preds = freq_fitted.predict(train_data, name="freq_pred")
-    freq_test_preds = freq_fitted.predict(test_data, name="freq_pred")
+    freq_train_preds = freq_fitted.predict(train_data, name=FREQ_PRED_COL)
+    freq_test_preds = freq_fitted.predict(test_data, name=FREQ_PRED_COL)
 
     # Metrics for frequency
     # Note: Metrics also don't support sample_weight in this version
     make_metric_freq_train = deferred_sklearn_metric(
-        target="Frequency", pred="freq_pred"
+        target=FREQ_TARGET, pred=FREQ_PRED_COL
     )
     make_metric_freq_test = deferred_sklearn_metric(
-        target="Frequency", pred="freq_pred"
+        target=FREQ_TARGET, pred=FREQ_PRED_COL
     )
 
     freq_metrics_train = freq_train_preds.agg(
@@ -416,18 +436,18 @@ def xorq_way(df):
     tweedie_pipe = Pipeline.from_instance(tweedie_sklearn)
 
     tweedie_fitted = tweedie_pipe.fit(
-        train_data, features=feature_cols, target="PurePremium"
+        train_data, features=feature_cols, target=PP_TARGET
     )
 
-    tweedie_train_preds = tweedie_fitted.predict(train_data, name="pp_pred")
-    tweedie_test_preds = tweedie_fitted.predict(test_data, name="pp_pred")
+    tweedie_train_preds = tweedie_fitted.predict(train_data, name=PP_PRED_COL)
+    tweedie_test_preds = tweedie_fitted.predict(test_data, name=PP_PRED_COL)
 
     # Metrics for pure premium
     make_metric_pp_train = deferred_sklearn_metric(
-        target="PurePremium", pred="pp_pred"
+        target=PP_TARGET, pred=PP_PRED_COL
     )
     make_metric_pp_test = deferred_sklearn_metric(
-        target="PurePremium", pred="pp_pred"
+        target=PP_TARGET, pred=PP_PRED_COL
     )
 
     tweedie_metrics_train = tweedie_train_preds.agg(
@@ -508,10 +528,10 @@ def main():
     tweedie_train_df = deferred["tweedie_train"].execute()
     tweedie_test_df = deferred["tweedie_test"].execute()
 
-    xo_freq_train = freq_train_df["freq_pred"].values
-    xo_freq_test = freq_test_df["freq_pred"].values
-    xo_pp_train = tweedie_train_df["pp_pred"].values
-    xo_pp_test = tweedie_test_df["pp_pred"].values
+    xo_freq_train = freq_train_df[FREQ_PRED_COL].values
+    xo_freq_test = freq_test_df[FREQ_PRED_COL].values
+    xo_pp_train = tweedie_train_df[PP_PRED_COL].values
+    xo_pp_test = tweedie_test_df[PP_PRED_COL].values
 
     # Build sklearn plot
     print("Building sklearn plot...")
@@ -538,13 +558,14 @@ def main():
     axes[1].axis("off")
     axes[1].set_title("xorq (deferred)", fontsize=16, pad=20)
 
-    plt.suptitle(
+    fig.suptitle(
         "Tweedie Regression on Insurance Claims: sklearn vs xorq", fontsize=18
     )
-    plt.tight_layout()
+    fig.tight_layout()
     out = "imgs/tweedie_insurance.png"
-    plt.savefig(out, dpi=150)
-    plt.close()
+    fig.savefig(out, dpi=150)
+    fig.clear()
+    plt.close(fig)
     print(f"Plot saved to {out}")
 
 

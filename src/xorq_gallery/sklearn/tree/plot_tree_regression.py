@@ -24,6 +24,7 @@ import pandas as pd
 import xorq.api as xo
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from sklearn.tree import DecisionTreeRegressor
+from toolz import curry
 from xorq.expr.ml.pipeline_lib import Pipeline
 
 from xorq_gallery.utils import (
@@ -39,7 +40,7 @@ from xorq_gallery.utils import (
 
 RANDOM_SEED = 42
 N_SAMPLES = 80
-MAX_DEPTHS = [2, 5]
+MAX_DEPTHS = (2, 5)
 MODEL_COLORS = {2: "darkorange", 5: "cornflowerblue"}
 MODEL_LABELS = {2: "max_depth=2", 5: "max_depth=5"}
 
@@ -116,15 +117,14 @@ def _plot_tree_result(ax, X, y, X_test, y_pred, max_depth, color):
     ax.legend()
 
 
-def _build_tree_plot(max_depth, X, y, X_test):
-    """Return a UDAF-compatible plotting function for tree regression."""
-    def _plot(pred_df):
-        y_pred = pred_df["pred"].values
-        fig, ax = plt.subplots(figsize=(8, 5))
-        _plot_tree_result(ax, X, y, X_test, y_pred, max_depth, MODEL_COLORS[max_depth])
-        plt.tight_layout()
-        return fig
-    return _plot
+@curry
+def _build_tree_plot_deferred(pred_df, max_depth, X, y, X_test):
+    """Build tree regression plot from materialized predictions."""
+    y_pred = pred_df["pred"].values
+    fig, ax = plt.subplots(figsize=(8, 5))
+    _plot_tree_result(ax, X, y, X_test, y_pred, max_depth, MODEL_COLORS[max_depth])
+    fig.tight_layout()
+    return fig
 
 
 # =========================================================================
@@ -247,7 +247,7 @@ def main():
 
     # Bottom row: xorq results (execute deferred plots)
     png_bytes_2 = deferred_matplotlib_plot(
-        xo_results[2], _build_tree_plot(2, X, y, X_test)
+        xo_results[2], _build_tree_plot_deferred(max_depth=2, X=X, y=y, X_test=X_test)
     ).execute()
     img_2 = load_plot_bytes(png_bytes_2)
     ax_xo_2 = axes[1, 0]
@@ -259,20 +259,20 @@ def main():
     )
 
     png_bytes_5 = deferred_matplotlib_plot(
-        xo_results[5], _build_tree_plot(5, X, y, X_test)
+        xo_results[5], _build_tree_plot_deferred(max_depth=5, X=X, y=y, X_test=X_test)
     ).execute()
     img_5 = load_plot_bytes(png_bytes_5)
     ax_xo_5 = axes[1, 1]
     ax_xo_5.imshow(img_5)
     ax_xo_5.axis("off")
 
-    plt.suptitle(
+    fig.suptitle(
         "Decision Tree Regression: sklearn vs xorq", fontsize=16, y=0.995
     )
-    plt.tight_layout()
+    fig.tight_layout()
     out = "imgs/tree_regression.png"
-    plt.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close()
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
     print(f"\nComposite plot saved to {out}")
 
 

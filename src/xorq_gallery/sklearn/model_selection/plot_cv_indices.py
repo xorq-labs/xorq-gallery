@@ -183,7 +183,7 @@ def _plot_cv_indices(cv, X, y, groups, n_splits, lw=10):
         loc=(1.02, 0.8),
     )
 
-    plt.tight_layout()
+    fig.tight_layout()
     fig.subplots_adjust(right=0.7)
 
     return fig
@@ -196,7 +196,7 @@ def _plot_all_cv_strategies(X, y, groups, n_splits):
     -------
     fig : matplotlib.figure.Figure
     """
-    cvs = [
+    cvs = (
         KFold,
         GroupKFold,
         ShuffleSplit,
@@ -205,7 +205,7 @@ def _plot_all_cv_strategies(X, y, groups, n_splits):
         GroupShuffleSplit,
         StratifiedShuffleSplit,
         TimeSeriesSplit,
-    ]
+    )
 
     # Create 4x2 grid
     fig, axes = plt.subplots(4, 2, figsize=(14, 12))
@@ -268,7 +268,7 @@ def _plot_all_cv_strategies(X, y, groups, n_splits):
         loc="center",
     )
 
-    plt.tight_layout()
+    fig.tight_layout()
 
     return fig
 
@@ -397,19 +397,19 @@ def main():
 
     assert len(sk_splits) == len(xo_splits), "Number of splits must match"
 
-    for i, (sk_split, xo_split) in enumerate(zip(sk_splits, xo_splits)):
-        sk_train, sk_test = sk_split
-        xo_train, xo_test = xo_split
-
-        np.testing.assert_array_equal(sk_train, xo_train,
-                                       err_msg=f"Train indices for split {i} must match")
-        np.testing.assert_array_equal(sk_test, xo_test,
-                                       err_msg=f"Test indices for split {i} must match")
-
-    print("Split indices match!")
+    sk_split_df = pd.DataFrame({
+        f"fold_{i}_{role}": pd.Series(indices)
+        for i, (train, test) in enumerate(sk_splits)
+        for role, indices in [("train", train), ("test", test)]
+    })
+    xo_split_df = pd.DataFrame({
+        f"fold_{i}_{role}": pd.Series(indices)
+        for i, (train, test) in enumerate(xo_splits)
+        for role, indices in [("train", train), ("test", test)]
+    })
+    pd.testing.assert_frame_equal(sk_split_df, xo_split_df)
     print("Assertions passed: sklearn and xorq CV splits are identical.")
 
-    # Execute deferred plots - call deferred_matplotlib_plot in main()
     print("\n=== EXECUTING DEFERRED PLOTS ===")
     xo_kfold_png = deferred_matplotlib_plot(
         xo_results["table"], _build_kfold_plot_from_df
@@ -436,11 +436,11 @@ def main():
     axes[1].set_title("xorq (deferred)", fontsize=14, fontweight="bold")
     axes[1].axis("off")
 
-    plt.suptitle("KFold Cross-Validation: sklearn vs xorq", fontsize=16)
-    plt.tight_layout()
+    fig.suptitle("KFold Cross-Validation: sklearn vs xorq", fontsize=16)
+    fig.tight_layout()
     out_kfold = "imgs/plot_cv_indices_kfold.png"
-    plt.savefig(out_kfold, dpi=150, bbox_inches="tight")
-    plt.close("all")
+    fig.savefig(out_kfold, dpi=150, bbox_inches="tight")
+    plt.close(fig)
     print(f"KFold comparison saved to {out_kfold}")
 
     # All CV strategies comparison
@@ -456,11 +456,11 @@ def main():
     axes[1].set_title("xorq (deferred)", fontsize=14, fontweight="bold")
     axes[1].axis("off")
 
-    plt.suptitle("All CV Strategies: sklearn vs xorq", fontsize=16)
-    plt.tight_layout()
+    fig.suptitle("All CV Strategies: sklearn vs xorq", fontsize=16)
+    fig.tight_layout()
     out_all = "imgs/plot_cv_indices_all.png"
-    plt.savefig(out_all, dpi=150, bbox_inches="tight")
-    plt.close("all")
+    fig.savefig(out_all, dpi=150, bbox_inches="tight")
+    plt.close(fig)
     print(f"All CV strategies comparison saved to {out_all}")
 
 

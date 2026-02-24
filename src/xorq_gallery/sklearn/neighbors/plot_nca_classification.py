@@ -13,6 +13,8 @@ Both produce identical accuracy scores.
 Dataset: iris (sklearn)
 """
 
+from __future__ import annotations
+
 import os
 
 import matplotlib.pyplot as plt
@@ -26,6 +28,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KNeighborsClassifier, NeighborhoodComponentsAnalysis
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from sklearn.preprocessing import StandardScaler
+from toolz import curry
 from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
 
@@ -126,6 +129,40 @@ def _plot_decision_boundary(ax, X, y, clf, title, score):
         size=15, ha="center", va="center",
         transform=ax.transAxes
     )
+
+
+@curry
+def _build_knn_plot(df, xo_results):
+    """Build decision boundary plot for KNN."""
+    split_data = xo_results["KNN"]["split_data"]
+    fitted_clf = split_data["sklearn_clf"].fit(split_data["X_train"], split_data["y_train"])
+    score = fitted_clf.score(split_data["X_test"], split_data["y_test"])
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    _plot_decision_boundary(
+        ax, split_data["X_full"], split_data["y_full"], fitted_clf,
+        f"KNN (k = {N_NEIGHBORS})",
+        score
+    )
+    fig.tight_layout()
+    return fig
+
+
+@curry
+def _build_nca_knn_plot(df, xo_results):
+    """Build decision boundary plot for NCA+KNN."""
+    split_data = xo_results["NCA+KNN"]["split_data"]
+    fitted_clf = split_data["sklearn_clf"].fit(split_data["X_train"], split_data["y_train"])
+    score = fitted_clf.score(split_data["X_test"], split_data["y_test"])
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    _plot_decision_boundary(
+        ax, split_data["X_full"], split_data["y_full"], fitted_clf,
+        f"NCA+KNN (k = {N_NEIGHBORS})",
+        score
+    )
+    fig.tight_layout()
+    return fig
 
 
 # =========================================================================
@@ -303,40 +340,9 @@ def main():
 
     print("Assertions passed: sklearn and xorq metrics match.")
 
-    # Build deferred plots for xorq - HAPPENS IN MAIN, NOT IN xorq_way
-    def _build_knn_plot(df):
-        """Build decision boundary plot for KNN."""
-        split_data = xo_results["KNN"]["split_data"]
-        fitted_clf = split_data["sklearn_clf"].fit(split_data["X_train"], split_data["y_train"])
-        score = fitted_clf.score(split_data["X_test"], split_data["y_test"])
-
-        fig, ax = plt.subplots(figsize=(6, 5))
-        _plot_decision_boundary(
-            ax, split_data["X_full"], split_data["y_full"], fitted_clf,
-            f"KNN (k = {N_NEIGHBORS})",
-            score
-        )
-        plt.tight_layout()
-        return fig
-
-    def _build_nca_knn_plot(df):
-        """Build decision boundary plot for NCA+KNN."""
-        split_data = xo_results["NCA+KNN"]["split_data"]
-        fitted_clf = split_data["sklearn_clf"].fit(split_data["X_train"], split_data["y_train"])
-        score = fitted_clf.score(split_data["X_test"], split_data["y_test"])
-
-        fig, ax = plt.subplots(figsize=(6, 5))
-        _plot_decision_boundary(
-            ax, split_data["X_full"], split_data["y_full"], fitted_clf,
-            f"NCA+KNN (k = {N_NEIGHBORS})",
-            score
-        )
-        plt.tight_layout()
-        return fig
-
     # Execute deferred plots
-    knn_png = deferred_matplotlib_plot(xo_results["KNN"]["preds"], _build_knn_plot).execute()
-    nca_knn_png = deferred_matplotlib_plot(xo_results["NCA+KNN"]["preds"], _build_nca_knn_plot).execute()
+    knn_png = deferred_matplotlib_plot(xo_results["KNN"]["preds"], _build_knn_plot(xo_results=xo_results)).execute()
+    nca_knn_png = deferred_matplotlib_plot(xo_results["NCA+KNN"]["preds"], _build_nca_knn_plot(xo_results=xo_results)).execute()
 
     # Build sklearn plots
     fig_sk, axes_sk = plt.subplots(1, 2, figsize=(12, 5))
@@ -355,8 +361,8 @@ def main():
         nca_knn_result["score"]
     )
 
-    plt.suptitle("sklearn: KNN vs NCA+KNN", fontsize=14)
-    plt.tight_layout()
+    fig_sk.suptitle("sklearn: KNN vs NCA+KNN", fontsize=14)
+    fig_sk.tight_layout()
 
     # Build xorq plots grid
     fig_xo, axes_xo = plt.subplots(1, 2, figsize=(12, 5))
@@ -367,8 +373,8 @@ def main():
     axes_xo[1].imshow(load_plot_bytes(nca_knn_png))
     axes_xo[1].axis("off")
 
-    plt.suptitle("xorq: KNN vs NCA+KNN", fontsize=14)
-    plt.tight_layout()
+    fig_xo.suptitle("xorq: KNN vs NCA+KNN", fontsize=14)
+    fig_xo.tight_layout()
 
     # Composite side-by-side
     sk_img = fig_to_image(fig_sk)
@@ -383,14 +389,14 @@ def main():
     axes[1].set_title("xorq", fontsize=12)
     axes[1].axis("off")
 
-    plt.suptitle(
+    fig.suptitle(
         "Comparing Nearest Neighbors with/without NCA: sklearn vs xorq",
         fontsize=16
     )
-    plt.tight_layout()
+    fig.tight_layout()
     out = "imgs/plot_nca_classification.png"
-    plt.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close("all")
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
     print(f"\nComposite plot saved to {out}")
 
 

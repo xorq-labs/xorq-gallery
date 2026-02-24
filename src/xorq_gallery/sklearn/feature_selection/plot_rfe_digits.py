@@ -19,12 +19,14 @@ import os
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import xorq.api as xo
 from sklearn.datasets import load_digits
 from sklearn.feature_selection import RFE
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from sklearn.preprocessing import MinMaxScaler
+from toolz import curry
 from xorq.expr.ml.pipeline_lib import Pipeline
 
 from xorq_gallery.utils import (
@@ -32,6 +34,14 @@ from xorq_gallery.utils import (
     fig_to_image,
     load_plot_bytes,
 )
+
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+FEATURE_PREFIX = "f"
+TARGET_COL = "target"
 
 
 # ---------------------------------------------------------------------------
@@ -92,10 +102,30 @@ def _plot_ranking(ranking, image_shape, title="Ranking of pixels with RFE\n(Logi
         for j in range(ranking.shape[1]):
             ax.text(j, i, str(int(ranking[i, j])), ha="center", va="center", color="black", fontsize=8)
 
-    plt.colorbar(im, ax=ax)
+    fig.colorbar(im, ax=ax)
     ax.set_title(title)
-    plt.tight_layout()
+    fig.tight_layout()
     return fig
+
+
+@curry
+def _build_ranking_plot(xo_ranking, image_shape, df):
+    """Build ranking plot from deferred execution.
+
+    Parameters
+    ----------
+    xo_ranking : ndarray
+        The ranking array extracted from xorq pipeline
+    image_shape : tuple
+        Shape of the original digit image
+    df : DataFrame
+        Deferred dataframe (not used but required for UDAF compatibility)
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    return _plot_ranking(xo_ranking, image_shape)
 
 
 # =========================================================================
@@ -127,27 +157,25 @@ def xorq_way(data):
     Returns dict with fitted pipeline for extracting rankings in main().
     Nothing is executed until ``.execute()``.
     """
-    import pandas as pd
-
     X = data["X"]
     y = data["y"]
 
     con = xo.connect()
 
     # Register dataset
-    df = pd.DataFrame(X, columns=[f"f{i}" for i in range(X.shape[1])])
-    df["target"] = y
+    df = pd.DataFrame(X, columns=[f"{FEATURE_PREFIX}{i}" for i in range(X.shape[1])])
+    df[TARGET_COL] = y
     table = con.register(df, "digits")
 
     # Feature columns
-    features = tuple(f"f{i}" for i in range(X.shape[1]))
+    features = tuple(f"{FEATURE_PREFIX}{i}" for i in range(X.shape[1]))
 
     # Wrap sklearn pipeline
     sklearn_pipe = _build_pipeline()
     xorq_pipe = Pipeline.from_instance(sklearn_pipe)
 
     # Fit deferred
-    fitted = xorq_pipe.fit(table, features=features, target="target")
+    fitted = xorq_pipe.fit(table, features=features, target=TARGET_COL)
 
     return {"fitted": fitted, "table": table}
 
@@ -184,14 +212,12 @@ def main():
     np.testing.assert_array_equal(sk_results['ranking'], xo_ranking)
     print("Assertions passed: sklearn and xorq rankings match exactly.")
 
-    # Create deferred plot with extracted ranking
-    def _build_ranking_plot(df):
-        """Build ranking plot from deferred execution."""
-        return _plot_ranking(xo_ranking, data["image_shape"])
-
     # Execute deferred plot
     print("\n=== PLOTTING ===")
-    xo_png = deferred_matplotlib_plot(xo_deferred["table"], _build_ranking_plot).execute()
+    xo_png = deferred_matplotlib_plot(
+        xo_deferred["table"],
+        _build_ranking_plot(xo_ranking, data["image_shape"])
+    ).execute()
 
     # Build sklearn plot
     sk_fig = _plot_ranking(sk_results["ranking"], data["image_shape"])
@@ -209,11 +235,11 @@ def main():
     axes[1].set_title("xorq")
     axes[1].axis("off")
 
-    plt.suptitle("RFE Pixel Rankings on Digits: sklearn vs xorq", fontsize=14)
-    plt.tight_layout()
+    fig.suptitle("RFE Pixel Rankings on Digits: sklearn vs xorq", fontsize=14)
+    fig.tight_layout()
     out = "imgs/plot_rfe_digits.png"
-    plt.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close()
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
     print(f"Composite plot saved to {out}")
 
 

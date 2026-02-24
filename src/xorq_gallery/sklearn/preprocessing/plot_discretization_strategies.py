@@ -15,10 +15,13 @@ Both produce identical discretization boundaries.
 Dataset: Synthetic (make_blobs, uniform random)
 """
 
+from __future__ import annotations
+
 import os
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import xorq.api as xo
 from sklearn.datasets import make_blobs
 from sklearn.pipeline import Pipeline as SklearnPipeline
@@ -125,7 +128,7 @@ def _build_dataset_figure(X, transformed_grids, title_prefix):
         axes[i].set_xlim(xx.min(), xx.max())
         axes[i].set_ylim(yy.min(), yy.max())
 
-    plt.tight_layout()
+    fig.tight_layout()
     return fig
 
 
@@ -176,118 +179,26 @@ def sklearn_way(X_list, pipelines):
     """
     figures = {}
 
-    # Unroll dataset processing (no for loops in sklearn_way/xorq_way)
+    for ds_idx, X in enumerate(X_list):
+        xx, yy = np.meshgrid(
+            np.linspace(X[:, 0].min(), X[:, 0].max(), 300),
+            np.linspace(X[:, 1].min(), X[:, 1].max(), 300),
+        )
+        grid = np.c_[xx.ravel(), yy.ravel()]
 
-    # Dataset 0
-    X = X_list[0]
-    xx, yy = np.meshgrid(
-        np.linspace(X[:, 0].min(), X[:, 0].max(), 300),
-        np.linspace(X[:, 1].min(), X[:, 1].max(), 300),
-    )
-    grid = np.c_[xx.ravel(), yy.ravel()]
+        transformed_grids = {}
+        for strategy in STRATEGIES:
+            pipe = pipelines[strategy]
+            pipe.fit(X)
+            grid_encoded = pipe.transform(grid)
+            transformed_grids[strategy] = {
+                "xx": xx,
+                "yy": yy,
+                "horizontal": grid_encoded[:, 0].reshape(xx.shape),
+                "vertical": grid_encoded[:, 1].reshape(xx.shape),
+            }
 
-    # Strategy: uniform
-    pipe = pipelines["uniform"]
-    pipe.fit(X)
-    grid_encoded = pipe.transform(grid)
-    horizontal_uniform = grid_encoded[:, 0].reshape(xx.shape)
-    vertical_uniform = grid_encoded[:, 1].reshape(xx.shape)
-
-    # Strategy: quantile
-    pipe = pipelines["quantile"]
-    pipe.fit(X)
-    grid_encoded = pipe.transform(grid)
-    horizontal_quantile = grid_encoded[:, 0].reshape(xx.shape)
-    vertical_quantile = grid_encoded[:, 1].reshape(xx.shape)
-
-    # Strategy: kmeans
-    pipe = pipelines["kmeans"]
-    pipe.fit(X)
-    grid_encoded = pipe.transform(grid)
-    horizontal_kmeans = grid_encoded[:, 0].reshape(xx.shape)
-    vertical_kmeans = grid_encoded[:, 1].reshape(xx.shape)
-
-    transformed_grids_0 = {
-        "uniform": {"xx": xx, "yy": yy, "horizontal": horizontal_uniform, "vertical": vertical_uniform},
-        "quantile": {"xx": xx, "yy": yy, "horizontal": horizontal_quantile, "vertical": vertical_quantile},
-        "kmeans": {"xx": xx, "yy": yy, "horizontal": horizontal_kmeans, "vertical": vertical_kmeans},
-    }
-    fig = _build_dataset_figure(X, transformed_grids_0, "sklearn")
-    figures["dataset_0"] = fig
-
-    # Dataset 1
-    X = X_list[1]
-    xx, yy = np.meshgrid(
-        np.linspace(X[:, 0].min(), X[:, 0].max(), 300),
-        np.linspace(X[:, 1].min(), X[:, 1].max(), 300),
-    )
-    grid = np.c_[xx.ravel(), yy.ravel()]
-
-    # Strategy: uniform
-    pipe = pipelines["uniform"]
-    pipe.fit(X)
-    grid_encoded = pipe.transform(grid)
-    horizontal_uniform = grid_encoded[:, 0].reshape(xx.shape)
-    vertical_uniform = grid_encoded[:, 1].reshape(xx.shape)
-
-    # Strategy: quantile
-    pipe = pipelines["quantile"]
-    pipe.fit(X)
-    grid_encoded = pipe.transform(grid)
-    horizontal_quantile = grid_encoded[:, 0].reshape(xx.shape)
-    vertical_quantile = grid_encoded[:, 1].reshape(xx.shape)
-
-    # Strategy: kmeans
-    pipe = pipelines["kmeans"]
-    pipe.fit(X)
-    grid_encoded = pipe.transform(grid)
-    horizontal_kmeans = grid_encoded[:, 0].reshape(xx.shape)
-    vertical_kmeans = grid_encoded[:, 1].reshape(xx.shape)
-
-    transformed_grids_1 = {
-        "uniform": {"xx": xx, "yy": yy, "horizontal": horizontal_uniform, "vertical": vertical_uniform},
-        "quantile": {"xx": xx, "yy": yy, "horizontal": horizontal_quantile, "vertical": vertical_quantile},
-        "kmeans": {"xx": xx, "yy": yy, "horizontal": horizontal_kmeans, "vertical": vertical_kmeans},
-    }
-    fig = _build_dataset_figure(X, transformed_grids_1, "sklearn")
-    figures["dataset_1"] = fig
-
-    # Dataset 2
-    X = X_list[2]
-    xx, yy = np.meshgrid(
-        np.linspace(X[:, 0].min(), X[:, 0].max(), 300),
-        np.linspace(X[:, 1].min(), X[:, 1].max(), 300),
-    )
-    grid = np.c_[xx.ravel(), yy.ravel()]
-
-    # Strategy: uniform
-    pipe = pipelines["uniform"]
-    pipe.fit(X)
-    grid_encoded = pipe.transform(grid)
-    horizontal_uniform = grid_encoded[:, 0].reshape(xx.shape)
-    vertical_uniform = grid_encoded[:, 1].reshape(xx.shape)
-
-    # Strategy: quantile
-    pipe = pipelines["quantile"]
-    pipe.fit(X)
-    grid_encoded = pipe.transform(grid)
-    horizontal_quantile = grid_encoded[:, 0].reshape(xx.shape)
-    vertical_quantile = grid_encoded[:, 1].reshape(xx.shape)
-
-    # Strategy: kmeans
-    pipe = pipelines["kmeans"]
-    pipe.fit(X)
-    grid_encoded = pipe.transform(grid)
-    horizontal_kmeans = grid_encoded[:, 0].reshape(xx.shape)
-    vertical_kmeans = grid_encoded[:, 1].reshape(xx.shape)
-
-    transformed_grids_2 = {
-        "uniform": {"xx": xx, "yy": yy, "horizontal": horizontal_uniform, "vertical": vertical_uniform},
-        "quantile": {"xx": xx, "yy": yy, "horizontal": horizontal_quantile, "vertical": vertical_quantile},
-        "kmeans": {"xx": xx, "yy": yy, "horizontal": horizontal_kmeans, "vertical": vertical_kmeans},
-    }
-    fig = _build_dataset_figure(X, transformed_grids_2, "sklearn")
-    figures["dataset_2"] = fig
+        figures[f"dataset_{ds_idx}"] = _build_dataset_figure(X, transformed_grids, "sklearn")
 
     return figures
 
@@ -314,121 +225,27 @@ def xorq_way(X_list, pipelines):
     """
     con = xo.connect()
     results = {}
-    import pandas as pd
 
-    # Unroll dataset processing (no for loops in sklearn_way/xorq_way)
+    for ds_idx, X in enumerate(X_list):
+        df = pd.DataFrame(X, columns=list(FEATURE_COLS))
+        data = con.register(df, f"dataset_{ds_idx}")
 
-    # Dataset 0
-    X = X_list[0]
-    df = pd.DataFrame(X, columns=list(FEATURE_COLS))
-    data = con.register(df, "dataset_0")
+        xx, yy = np.meshgrid(
+            np.linspace(X[:, 0].min(), X[:, 0].max(), 300),
+            np.linspace(X[:, 1].min(), X[:, 1].max(), 300),
+        )
+        grid = np.c_[xx.ravel(), yy.ravel()]
+        grid_df = pd.DataFrame(grid, columns=list(FEATURE_COLS))
+        grid_data = con.register(grid_df, f"grid_{ds_idx}")
 
-    # Create meshgrid
-    xx, yy = np.meshgrid(
-        np.linspace(X[:, 0].min(), X[:, 0].max(), 300),
-        np.linspace(X[:, 1].min(), X[:, 1].max(), 300),
-    )
-    grid = np.c_[xx.ravel(), yy.ravel()]
-    grid_df = pd.DataFrame(grid, columns=list(FEATURE_COLS))
-    grid_data = con.register(grid_df, "grid_0")
+        transformed_grids = {}
+        for strategy in STRATEGIES:
+            xorq_pipe = Pipeline.from_instance(pipelines[strategy])
+            fitted = xorq_pipe.fit(data, features=FEATURE_COLS, target=None)
+            grid_encoded = fitted.transform(grid_data)
+            transformed_grids[strategy] = {"xx": xx, "yy": yy, "grid_encoded": grid_encoded}
 
-    # Strategy: uniform
-    xorq_pipe_uniform = Pipeline.from_instance(pipelines["uniform"])
-    fitted_uniform = xorq_pipe_uniform.fit(data, features=FEATURE_COLS, target=None)
-    grid_encoded_uniform = fitted_uniform.transform(grid_data)
-
-    # Strategy: quantile
-    xorq_pipe_quantile = Pipeline.from_instance(pipelines["quantile"])
-    fitted_quantile = xorq_pipe_quantile.fit(data, features=FEATURE_COLS, target=None)
-    grid_encoded_quantile = fitted_quantile.transform(grid_data)
-
-    # Strategy: kmeans
-    xorq_pipe_kmeans = Pipeline.from_instance(pipelines["kmeans"])
-    fitted_kmeans = xorq_pipe_kmeans.fit(data, features=FEATURE_COLS, target=None)
-    grid_encoded_kmeans = fitted_kmeans.transform(grid_data)
-
-    results["dataset_0"] = {
-        "X": X,
-        "transformed_grids": {
-            "uniform": {"xx": xx, "yy": yy, "grid_encoded": grid_encoded_uniform},
-            "quantile": {"xx": xx, "yy": yy, "grid_encoded": grid_encoded_quantile},
-            "kmeans": {"xx": xx, "yy": yy, "grid_encoded": grid_encoded_kmeans},
-        },
-    }
-
-    # Dataset 1
-    X = X_list[1]
-    df = pd.DataFrame(X, columns=list(FEATURE_COLS))
-    data = con.register(df, "dataset_1")
-
-    xx, yy = np.meshgrid(
-        np.linspace(X[:, 0].min(), X[:, 0].max(), 300),
-        np.linspace(X[:, 1].min(), X[:, 1].max(), 300),
-    )
-    grid = np.c_[xx.ravel(), yy.ravel()]
-    grid_df = pd.DataFrame(grid, columns=list(FEATURE_COLS))
-    grid_data = con.register(grid_df, "grid_1")
-
-    # Strategy: uniform
-    xorq_pipe_uniform = Pipeline.from_instance(pipelines["uniform"])
-    fitted_uniform = xorq_pipe_uniform.fit(data, features=FEATURE_COLS, target=None)
-    grid_encoded_uniform = fitted_uniform.transform(grid_data)
-
-    # Strategy: quantile
-    xorq_pipe_quantile = Pipeline.from_instance(pipelines["quantile"])
-    fitted_quantile = xorq_pipe_quantile.fit(data, features=FEATURE_COLS, target=None)
-    grid_encoded_quantile = fitted_quantile.transform(grid_data)
-
-    # Strategy: kmeans
-    xorq_pipe_kmeans = Pipeline.from_instance(pipelines["kmeans"])
-    fitted_kmeans = xorq_pipe_kmeans.fit(data, features=FEATURE_COLS, target=None)
-    grid_encoded_kmeans = fitted_kmeans.transform(grid_data)
-
-    results["dataset_1"] = {
-        "X": X,
-        "transformed_grids": {
-            "uniform": {"xx": xx, "yy": yy, "grid_encoded": grid_encoded_uniform},
-            "quantile": {"xx": xx, "yy": yy, "grid_encoded": grid_encoded_quantile},
-            "kmeans": {"xx": xx, "yy": yy, "grid_encoded": grid_encoded_kmeans},
-        },
-    }
-
-    # Dataset 2
-    X = X_list[2]
-    df = pd.DataFrame(X, columns=list(FEATURE_COLS))
-    data = con.register(df, "dataset_2")
-
-    xx, yy = np.meshgrid(
-        np.linspace(X[:, 0].min(), X[:, 0].max(), 300),
-        np.linspace(X[:, 1].min(), X[:, 1].max(), 300),
-    )
-    grid = np.c_[xx.ravel(), yy.ravel()]
-    grid_df = pd.DataFrame(grid, columns=list(FEATURE_COLS))
-    grid_data = con.register(grid_df, "grid_2")
-
-    # Strategy: uniform
-    xorq_pipe_uniform = Pipeline.from_instance(pipelines["uniform"])
-    fitted_uniform = xorq_pipe_uniform.fit(data, features=FEATURE_COLS, target=None)
-    grid_encoded_uniform = fitted_uniform.transform(grid_data)
-
-    # Strategy: quantile
-    xorq_pipe_quantile = Pipeline.from_instance(pipelines["quantile"])
-    fitted_quantile = xorq_pipe_quantile.fit(data, features=FEATURE_COLS, target=None)
-    grid_encoded_quantile = fitted_quantile.transform(grid_data)
-
-    # Strategy: kmeans
-    xorq_pipe_kmeans = Pipeline.from_instance(pipelines["kmeans"])
-    fitted_kmeans = xorq_pipe_kmeans.fit(data, features=FEATURE_COLS, target=None)
-    grid_encoded_kmeans = fitted_kmeans.transform(grid_data)
-
-    results["dataset_2"] = {
-        "X": X,
-        "transformed_grids": {
-            "uniform": {"xx": xx, "yy": yy, "grid_encoded": grid_encoded_uniform},
-            "quantile": {"xx": xx, "yy": yy, "grid_encoded": grid_encoded_quantile},
-            "kmeans": {"xx": xx, "yy": yy, "grid_encoded": grid_encoded_kmeans},
-        },
-    }
+        results[f"dataset_{ds_idx}"] = {"X": X, "transformed_grids": transformed_grids}
 
     return results
 
@@ -514,13 +331,13 @@ def main():
     axes[0, 0].set_title("sklearn", fontsize=14, fontweight="bold", pad=10)
     axes[0, 1].set_title("xorq (deferred)", fontsize=14, fontweight="bold", pad=10)
 
-    plt.suptitle(
+    fig.suptitle(
         "KBinsDiscretizer Strategies: sklearn vs xorq", fontsize=16, fontweight="bold"
     )
-    plt.tight_layout()
+    fig.tight_layout()
     out = "imgs/discretization_strategies.png"
-    plt.savefig(out, dpi=150)
-    plt.close()
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
     print(f"Plot saved to {out}")
 
 

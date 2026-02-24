@@ -29,6 +29,7 @@ from sklearn.discriminant_analysis import (
 )
 from sklearn.inspection import DecisionBoundaryDisplay
 from sklearn.pipeline import Pipeline as SklearnPipeline
+from toolz import curry
 from xorq.expr.ml.pipeline_lib import Pipeline
 
 from xorq_gallery.utils import (
@@ -45,6 +46,14 @@ from xorq_gallery.utils import (
 RANDOM_STATE = 0
 N_SAMPLES = 300
 N_SAMPLES_ISOTROPIC = 1_000  # First dataset uses more samples
+
+# Feature columns
+feature_cols = ("x0", "x1")
+target_col = "y"
+pred_col = "pred"
+
+# Dataset names
+dataset_names = ("isotropic", "shared", "different")
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +169,14 @@ def plot_result(estimator, X, y, ax):
     y_pred = estimator.predict(X)
     X_right, y_right = X[y == y_pred], y[y == y_pred]
     X_wrong, y_wrong = X[y != y_pred], y[y != y_pred]
-    ax.scatter(X_right[:, 0], X_right[:, 1], c=y_right, s=20, cmap=cmap, alpha=0.5)
+    ax.scatter(
+        X_right[:, 0],
+        X_right[:, 1],
+        c=y_right,
+        s=20,
+        cmap=cmap,
+        alpha=0.5,
+    )
     ax.scatter(
         X_wrong[:, 0],
         X_wrong[:, 1],
@@ -194,81 +210,25 @@ def plot_result(estimator, X, y, ax):
     ax.set(xticks=[], yticks=[])
 
 
-def _build_lda_plot_isotropic(df):
-    """Build LDA plot for isotropic dataset."""
-    X_data = df[["x0", "x1"]].values
-    y_data = df["y"].values
-    lda_est = LinearDiscriminantAnalysis(solver="svd", store_covariance=True)
-    lda_est.fit(X_data, y_data)
+@curry
+def _build_classifier_plot(df, classifier_class, title):
+    """Build decision boundary plot for a given classifier.
+
+    This curried function handles both LDA and QDA plotting with identical logic.
+    """
+    X_data = df[list(feature_cols)].values
+    y_data = df[target_col].values
+
+    estimator = classifier_class(
+        solver="svd" if classifier_class == LinearDiscriminantAnalysis else None,
+        store_covariance=True,
+    )
+    estimator.fit(X_data, y_data)
+
     fig, ax = plt.subplots(figsize=(5, 5))
-    plot_result(lda_est, X_data, y_data, ax)
-    ax.set_title("LDA")
-    plt.tight_layout()
-    return fig
-
-
-def _build_qda_plot_isotropic(df):
-    """Build QDA plot for isotropic dataset."""
-    X_data = df[["x0", "x1"]].values
-    y_data = df["y"].values
-    qda_est = QuadraticDiscriminantAnalysis(store_covariance=True)
-    qda_est.fit(X_data, y_data)
-    fig, ax = plt.subplots(figsize=(5, 5))
-    plot_result(qda_est, X_data, y_data, ax)
-    ax.set_title("QDA")
-    plt.tight_layout()
-    return fig
-
-
-def _build_lda_plot_shared(df):
-    """Build LDA plot for shared dataset."""
-    X_data = df[["x0", "x1"]].values
-    y_data = df["y"].values
-    lda_est = LinearDiscriminantAnalysis(solver="svd", store_covariance=True)
-    lda_est.fit(X_data, y_data)
-    fig, ax = plt.subplots(figsize=(5, 5))
-    plot_result(lda_est, X_data, y_data, ax)
-    ax.set_title("LDA")
-    plt.tight_layout()
-    return fig
-
-
-def _build_qda_plot_shared(df):
-    """Build QDA plot for shared dataset."""
-    X_data = df[["x0", "x1"]].values
-    y_data = df["y"].values
-    qda_est = QuadraticDiscriminantAnalysis(store_covariance=True)
-    qda_est.fit(X_data, y_data)
-    fig, ax = plt.subplots(figsize=(5, 5))
-    plot_result(qda_est, X_data, y_data, ax)
-    ax.set_title("QDA")
-    plt.tight_layout()
-    return fig
-
-
-def _build_lda_plot_different(df):
-    """Build LDA plot for different dataset."""
-    X_data = df[["x0", "x1"]].values
-    y_data = df["y"].values
-    lda_est = LinearDiscriminantAnalysis(solver="svd", store_covariance=True)
-    lda_est.fit(X_data, y_data)
-    fig, ax = plt.subplots(figsize=(5, 5))
-    plot_result(lda_est, X_data, y_data, ax)
-    ax.set_title("LDA")
-    plt.tight_layout()
-    return fig
-
-
-def _build_qda_plot_different(df):
-    """Build QDA plot for different dataset."""
-    X_data = df[["x0", "x1"]].values
-    y_data = df["y"].values
-    qda_est = QuadraticDiscriminantAnalysis(store_covariance=True)
-    qda_est.fit(X_data, y_data)
-    fig, ax = plt.subplots(figsize=(5, 5))
-    plot_result(qda_est, X_data, y_data, ax)
-    ax.set_title("QDA")
-    plt.tight_layout()
+    plot_result(estimator, X_data, y_data, ax)
+    ax.set_title(title)
+    fig.tight_layout()
     return fig
 
 
@@ -282,69 +242,66 @@ def sklearn_way(datasets):
     with covariance ellipsoids."""
 
     # Dataset 0: isotropic
-    ds_name_0 = "isotropic"
-    X_0, y_0 = datasets[ds_name_0]
-    lda_0 = LinearDiscriminantAnalysis(solver="svd", store_covariance=True)
-    qda_0 = QuadraticDiscriminantAnalysis(store_covariance=True)
-    lda_0.fit(X_0, y_0)
-    qda_0.fit(X_0, y_0)
-    result_0 = {
-        "lda": lda_0,
-        "qda": qda_0,
-        "X": X_0,
-        "y": y_0,
-        "lda_means": lda_0.means_.copy(),
-        "lda_cov": lda_0.covariance_.copy(),
-        "qda_means": qda_0.means_.copy(),
-        "qda_cov": [c.copy() for c in qda_0.covariance_],
+    X_isotropic, y_isotropic = datasets["isotropic"]
+    lda_isotropic = LinearDiscriminantAnalysis(solver="svd", store_covariance=True)
+    qda_isotropic = QuadraticDiscriminantAnalysis(store_covariance=True)
+    lda_isotropic.fit(X_isotropic, y_isotropic)
+    qda_isotropic.fit(X_isotropic, y_isotropic)
+    result_isotropic = {
+        "lda": lda_isotropic,
+        "qda": qda_isotropic,
+        "X": X_isotropic,
+        "y": y_isotropic,
+        "lda_means": lda_isotropic.means_.copy(),
+        "lda_cov": lda_isotropic.covariance_.copy(),
+        "qda_means": qda_isotropic.means_.copy(),
+        "qda_cov": [c.copy() for c in qda_isotropic.covariance_],
     }
-    print(f"sklearn: {ds_name_0:15s} | LDA fitted | means shape: {lda_0.means_.shape}")
-    print(f"sklearn: {ds_name_0:15s} | QDA fitted | means shape: {qda_0.means_.shape}")
+    print(f"sklearn: isotropic      | LDA fitted | means shape: {lda_isotropic.means_.shape}")
+    print(f"sklearn: isotropic      | QDA fitted | means shape: {qda_isotropic.means_.shape}")
 
     # Dataset 1: shared
-    ds_name_1 = "shared"
-    X_1, y_1 = datasets[ds_name_1]
-    lda_1 = LinearDiscriminantAnalysis(solver="svd", store_covariance=True)
-    qda_1 = QuadraticDiscriminantAnalysis(store_covariance=True)
-    lda_1.fit(X_1, y_1)
-    qda_1.fit(X_1, y_1)
-    result_1 = {
-        "lda": lda_1,
-        "qda": qda_1,
-        "X": X_1,
-        "y": y_1,
-        "lda_means": lda_1.means_.copy(),
-        "lda_cov": lda_1.covariance_.copy(),
-        "qda_means": qda_1.means_.copy(),
-        "qda_cov": [c.copy() for c in qda_1.covariance_],
+    X_shared, y_shared = datasets["shared"]
+    lda_shared = LinearDiscriminantAnalysis(solver="svd", store_covariance=True)
+    qda_shared = QuadraticDiscriminantAnalysis(store_covariance=True)
+    lda_shared.fit(X_shared, y_shared)
+    qda_shared.fit(X_shared, y_shared)
+    result_shared = {
+        "lda": lda_shared,
+        "qda": qda_shared,
+        "X": X_shared,
+        "y": y_shared,
+        "lda_means": lda_shared.means_.copy(),
+        "lda_cov": lda_shared.covariance_.copy(),
+        "qda_means": qda_shared.means_.copy(),
+        "qda_cov": [c.copy() for c in qda_shared.covariance_],
     }
-    print(f"sklearn: {ds_name_1:15s} | LDA fitted | means shape: {lda_1.means_.shape}")
-    print(f"sklearn: {ds_name_1:15s} | QDA fitted | means shape: {qda_1.means_.shape}")
+    print(f"sklearn: shared         | LDA fitted | means shape: {lda_shared.means_.shape}")
+    print(f"sklearn: shared         | QDA fitted | means shape: {qda_shared.means_.shape}")
 
     # Dataset 2: different
-    ds_name_2 = "different"
-    X_2, y_2 = datasets[ds_name_2]
-    lda_2 = LinearDiscriminantAnalysis(solver="svd", store_covariance=True)
-    qda_2 = QuadraticDiscriminantAnalysis(store_covariance=True)
-    lda_2.fit(X_2, y_2)
-    qda_2.fit(X_2, y_2)
-    result_2 = {
-        "lda": lda_2,
-        "qda": qda_2,
-        "X": X_2,
-        "y": y_2,
-        "lda_means": lda_2.means_.copy(),
-        "lda_cov": lda_2.covariance_.copy(),
-        "qda_means": qda_2.means_.copy(),
-        "qda_cov": [c.copy() for c in qda_2.covariance_],
+    X_different, y_different = datasets["different"]
+    lda_different = LinearDiscriminantAnalysis(solver="svd", store_covariance=True)
+    qda_different = QuadraticDiscriminantAnalysis(store_covariance=True)
+    lda_different.fit(X_different, y_different)
+    qda_different.fit(X_different, y_different)
+    result_different = {
+        "lda": lda_different,
+        "qda": qda_different,
+        "X": X_different,
+        "y": y_different,
+        "lda_means": lda_different.means_.copy(),
+        "lda_cov": lda_different.covariance_.copy(),
+        "qda_means": qda_different.means_.copy(),
+        "qda_cov": [c.copy() for c in qda_different.covariance_],
     }
-    print(f"sklearn: {ds_name_2:15s} | LDA fitted | means shape: {lda_2.means_.shape}")
-    print(f"sklearn: {ds_name_2:15s} | QDA fitted | means shape: {qda_2.means_.shape}")
+    print(f"sklearn: different      | LDA fitted | means shape: {lda_different.means_.shape}")
+    print(f"sklearn: different      | QDA fitted | means shape: {qda_different.means_.shape}")
 
     return {
-        ds_name_0: result_0,
-        ds_name_1: result_1,
-        ds_name_2: result_2,
+        "isotropic": result_isotropic,
+        "shared": result_shared,
+        "different": result_different,
     }
 
 
@@ -362,96 +319,117 @@ def xorq_way(datasets):
     con = xo.connect()
 
     # Dataset 0: isotropic
-    ds_name_0 = "isotropic"
-    X_0, y_0 = datasets[ds_name_0]
-    df_0 = pd.DataFrame(X_0, columns=["x0", "x1"])
-    df_0["y"] = y_0
-    table_0 = con.register(df_0, f"data_{ds_name_0}")
+    X_isotropic, y_isotropic = datasets["isotropic"]
+    df_isotropic = pd.DataFrame(X_isotropic, columns=list(feature_cols))
+    df_isotropic[target_col] = y_isotropic
+    table_isotropic = con.register(df_isotropic, "data_isotropic")
 
     # LDA for dataset 0
-    lda_sklearn_0 = SklearnPipeline([
+    lda_sklearn_isotropic = SklearnPipeline([
         ("lda", LinearDiscriminantAnalysis(solver="svd", store_covariance=True))
     ])
-    lda_pipe_0 = Pipeline.from_instance(lda_sklearn_0)
-    lda_fitted_0 = lda_pipe_0.fit(table_0, features=("x0", "x1"), target="y")
-    lda_preds_0 = lda_fitted_0.predict(table_0, name="pred")
+    lda_pipe_isotropic = Pipeline.from_instance(lda_sklearn_isotropic)
+    lda_fitted_isotropic = lda_pipe_isotropic.fit(
+        table_isotropic,
+        features=feature_cols,
+        target=target_col,
+    )
+    lda_preds_isotropic = lda_fitted_isotropic.predict(table_isotropic, name=pred_col)
 
     # QDA for dataset 0
-    qda_sklearn_0 = SklearnPipeline([
+    qda_sklearn_isotropic = SklearnPipeline([
         ("qda", QuadraticDiscriminantAnalysis(store_covariance=True))
     ])
-    qda_pipe_0 = Pipeline.from_instance(qda_sklearn_0)
-    qda_fitted_0 = qda_pipe_0.fit(table_0, features=("x0", "x1"), target="y")
-    qda_preds_0 = qda_fitted_0.predict(table_0, name="pred")
+    qda_pipe_isotropic = Pipeline.from_instance(qda_sklearn_isotropic)
+    qda_fitted_isotropic = qda_pipe_isotropic.fit(
+        table_isotropic,
+        features=feature_cols,
+        target=target_col,
+    )
+    qda_preds_isotropic = qda_fitted_isotropic.predict(table_isotropic, name=pred_col)
 
-    result_0 = {
-        "table": table_0,
-        "lda_preds": lda_preds_0,
-        "qda_preds": qda_preds_0,
+    result_isotropic = {
+        "table": table_isotropic,
+        "lda_preds": lda_preds_isotropic,
+        "qda_preds": qda_preds_isotropic,
     }
 
     # Dataset 1: shared
-    ds_name_1 = "shared"
-    X_1, y_1 = datasets[ds_name_1]
-    df_1 = pd.DataFrame(X_1, columns=["x0", "x1"])
-    df_1["y"] = y_1
-    table_1 = con.register(df_1, f"data_{ds_name_1}")
+    X_shared, y_shared = datasets["shared"]
+    df_shared = pd.DataFrame(X_shared, columns=list(feature_cols))
+    df_shared[target_col] = y_shared
+    table_shared = con.register(df_shared, "data_shared")
 
     # LDA for dataset 1
-    lda_sklearn_1 = SklearnPipeline([
+    lda_sklearn_shared = SklearnPipeline([
         ("lda", LinearDiscriminantAnalysis(solver="svd", store_covariance=True))
     ])
-    lda_pipe_1 = Pipeline.from_instance(lda_sklearn_1)
-    lda_fitted_1 = lda_pipe_1.fit(table_1, features=("x0", "x1"), target="y")
-    lda_preds_1 = lda_fitted_1.predict(table_1, name="pred")
+    lda_pipe_shared = Pipeline.from_instance(lda_sklearn_shared)
+    lda_fitted_shared = lda_pipe_shared.fit(
+        table_shared,
+        features=feature_cols,
+        target=target_col,
+    )
+    lda_preds_shared = lda_fitted_shared.predict(table_shared, name=pred_col)
 
     # QDA for dataset 1
-    qda_sklearn_1 = SklearnPipeline([
+    qda_sklearn_shared = SklearnPipeline([
         ("qda", QuadraticDiscriminantAnalysis(store_covariance=True))
     ])
-    qda_pipe_1 = Pipeline.from_instance(qda_sklearn_1)
-    qda_fitted_1 = qda_pipe_1.fit(table_1, features=("x0", "x1"), target="y")
-    qda_preds_1 = qda_fitted_1.predict(table_1, name="pred")
+    qda_pipe_shared = Pipeline.from_instance(qda_sklearn_shared)
+    qda_fitted_shared = qda_pipe_shared.fit(
+        table_shared,
+        features=feature_cols,
+        target=target_col,
+    )
+    qda_preds_shared = qda_fitted_shared.predict(table_shared, name=pred_col)
 
-    result_1 = {
-        "table": table_1,
-        "lda_preds": lda_preds_1,
-        "qda_preds": qda_preds_1,
+    result_shared = {
+        "table": table_shared,
+        "lda_preds": lda_preds_shared,
+        "qda_preds": qda_preds_shared,
     }
 
     # Dataset 2: different
-    ds_name_2 = "different"
-    X_2, y_2 = datasets[ds_name_2]
-    df_2 = pd.DataFrame(X_2, columns=["x0", "x1"])
-    df_2["y"] = y_2
-    table_2 = con.register(df_2, f"data_{ds_name_2}")
+    X_different, y_different = datasets["different"]
+    df_different = pd.DataFrame(X_different, columns=list(feature_cols))
+    df_different[target_col] = y_different
+    table_different = con.register(df_different, "data_different")
 
     # LDA for dataset 2
-    lda_sklearn_2 = SklearnPipeline([
+    lda_sklearn_different = SklearnPipeline([
         ("lda", LinearDiscriminantAnalysis(solver="svd", store_covariance=True))
     ])
-    lda_pipe_2 = Pipeline.from_instance(lda_sklearn_2)
-    lda_fitted_2 = lda_pipe_2.fit(table_2, features=("x0", "x1"), target="y")
-    lda_preds_2 = lda_fitted_2.predict(table_2, name="pred")
+    lda_pipe_different = Pipeline.from_instance(lda_sklearn_different)
+    lda_fitted_different = lda_pipe_different.fit(
+        table_different,
+        features=feature_cols,
+        target=target_col,
+    )
+    lda_preds_different = lda_fitted_different.predict(table_different, name=pred_col)
 
     # QDA for dataset 2
-    qda_sklearn_2 = SklearnPipeline([
+    qda_sklearn_different = SklearnPipeline([
         ("qda", QuadraticDiscriminantAnalysis(store_covariance=True))
     ])
-    qda_pipe_2 = Pipeline.from_instance(qda_sklearn_2)
-    qda_fitted_2 = qda_pipe_2.fit(table_2, features=("x0", "x1"), target="y")
-    qda_preds_2 = qda_fitted_2.predict(table_2, name="pred")
+    qda_pipe_different = Pipeline.from_instance(qda_sklearn_different)
+    qda_fitted_different = qda_pipe_different.fit(
+        table_different,
+        features=feature_cols,
+        target=target_col,
+    )
+    qda_preds_different = qda_fitted_different.predict(table_different, name=pred_col)
 
-    result_2 = {
-        "table": table_2,
-        "lda_preds": lda_preds_2,
-        "qda_preds": qda_preds_2,
+    result_different = {
+        "table": table_different,
+        "lda_preds": lda_preds_different,
+        "qda_preds": qda_preds_different,
     }
 
     return {
-        ds_name_0: result_0,
-        ds_name_1: result_1,
-        ds_name_2: result_2,
+        "isotropic": result_isotropic,
+        "shared": result_shared,
+        "different": result_different,
     }
 
 
@@ -471,129 +449,107 @@ def main():
     print("\n=== XORQ WAY ===")
     xo_results = xorq_way(datasets)
 
-    # Execute deferred plots and assert numerical equivalence
+    # Assert numerical equivalence
     print("\n=== ASSERTIONS ===")
 
-    # Dataset 0: isotropic
-    ds_name_0 = "isotropic"
-    sk_lda_means_0 = sk_results[ds_name_0]["lda_means"]
-    sk_qda_means_0 = sk_results[ds_name_0]["qda_means"]
-    X_0, y_0 = datasets[ds_name_0]
-    lda_check_0 = LinearDiscriminantAnalysis(solver="svd", store_covariance=True)
-    qda_check_0 = QuadraticDiscriminantAnalysis(store_covariance=True)
-    lda_check_0.fit(X_0, y_0)
-    qda_check_0.fit(X_0, y_0)
-    np.testing.assert_allclose(sk_lda_means_0, lda_check_0.means_, rtol=1e-5)
-    np.testing.assert_allclose(sk_qda_means_0, qda_check_0.means_, rtol=1e-5)
-    print(f"  {ds_name_0:15s} | LDA/QDA means match")
+    # Build DataFrame of means for comparison
+    sklearn_means_data = []
+    for ds_name in dataset_names:
+        X, y = datasets[ds_name]
+        lda_check = LinearDiscriminantAnalysis(solver="svd", store_covariance=True)
+        qda_check = QuadraticDiscriminantAnalysis(store_covariance=True)
+        lda_check.fit(X, y)
+        qda_check.fit(X, y)
 
-    # Dataset 1: shared
-    ds_name_1 = "shared"
-    sk_lda_means_1 = sk_results[ds_name_1]["lda_means"]
-    sk_qda_means_1 = sk_results[ds_name_1]["qda_means"]
-    X_1, y_1 = datasets[ds_name_1]
-    lda_check_1 = LinearDiscriminantAnalysis(solver="svd", store_covariance=True)
-    qda_check_1 = QuadraticDiscriminantAnalysis(store_covariance=True)
-    lda_check_1.fit(X_1, y_1)
-    qda_check_1.fit(X_1, y_1)
-    np.testing.assert_allclose(sk_lda_means_1, lda_check_1.means_, rtol=1e-5)
-    np.testing.assert_allclose(sk_qda_means_1, qda_check_1.means_, rtol=1e-5)
-    print(f"  {ds_name_1:15s} | LDA/QDA means match")
+        sklearn_means_data.append({
+            "dataset": ds_name,
+            "classifier": "LDA",
+            "mean_0_0": lda_check.means_[0, 0],
+            "mean_0_1": lda_check.means_[0, 1],
+            "mean_1_0": lda_check.means_[1, 0],
+            "mean_1_1": lda_check.means_[1, 1],
+        })
+        sklearn_means_data.append({
+            "dataset": ds_name,
+            "classifier": "QDA",
+            "mean_0_0": qda_check.means_[0, 0],
+            "mean_0_1": qda_check.means_[0, 1],
+            "mean_1_0": qda_check.means_[1, 0],
+            "mean_1_1": qda_check.means_[1, 1],
+        })
 
-    # Dataset 2: different
-    ds_name_2 = "different"
-    sk_lda_means_2 = sk_results[ds_name_2]["lda_means"]
-    sk_qda_means_2 = sk_results[ds_name_2]["qda_means"]
-    X_2, y_2 = datasets[ds_name_2]
-    lda_check_2 = LinearDiscriminantAnalysis(solver="svd", store_covariance=True)
-    qda_check_2 = QuadraticDiscriminantAnalysis(store_covariance=True)
-    lda_check_2.fit(X_2, y_2)
-    qda_check_2.fit(X_2, y_2)
-    np.testing.assert_allclose(sk_lda_means_2, lda_check_2.means_, rtol=1e-5)
-    np.testing.assert_allclose(sk_qda_means_2, qda_check_2.means_, rtol=1e-5)
-    print(f"  {ds_name_2:15s} | LDA/QDA means match")
+        # Individual assertions for verification
+        sk_lda_means = sk_results[ds_name]["lda_means"]
+        sk_qda_means = sk_results[ds_name]["qda_means"]
+        np.testing.assert_allclose(sk_lda_means, lda_check.means_, rtol=1e-5)
+        np.testing.assert_allclose(sk_qda_means, qda_check.means_, rtol=1e-5)
+        print(f"  {ds_name:15s} | LDA/QDA means match")
+
+    sklearn_means_df = pd.DataFrame(sklearn_means_data)
 
     print("Assertions passed: sklearn and xorq produce identical results.")
 
     # Build sklearn composite plot (3 rows x 2 cols)
     fig_sk, axes_sk = plt.subplots(3, 2, figsize=(10, 15))
 
-    # Row 0: isotropic
-    result_0 = sk_results[ds_name_0]
-    X_0, y_0 = result_0["X"], result_0["y"]
-    lda_est_0, qda_est_0 = result_0["lda"], result_0["qda"]
-    plot_result(lda_est_0, X_0, y_0, axes_sk[0, 0])
-    plot_result(qda_est_0, X_0, y_0, axes_sk[0, 1])
-    axes_sk[0, 0].set_ylabel("Isotropic covariance\n", fontsize=10, fontweight="bold")
+    # Row labels for different covariance structures
+    row_labels = (
+        "Isotropic covariance\n",
+        "Shared covariance\n",
+        "Different covariances\n",
+    )
 
-    # Row 1: shared
-    result_1 = sk_results[ds_name_1]
-    X_1, y_1 = result_1["X"], result_1["y"]
-    lda_est_1, qda_est_1 = result_1["lda"], result_1["qda"]
-    plot_result(lda_est_1, X_1, y_1, axes_sk[1, 0])
-    plot_result(qda_est_1, X_1, y_1, axes_sk[1, 1])
-    axes_sk[1, 0].set_ylabel("Shared covariance\n", fontsize=10, fontweight="bold")
-
-    # Row 2: different
-    result_2 = sk_results[ds_name_2]
-    X_2, y_2 = result_2["X"], result_2["y"]
-    lda_est_2, qda_est_2 = result_2["lda"], result_2["qda"]
-    plot_result(lda_est_2, X_2, y_2, axes_sk[2, 0])
-    plot_result(qda_est_2, X_2, y_2, axes_sk[2, 1])
-    axes_sk[2, 0].set_ylabel("Different covariances\n", fontsize=10, fontweight="bold")
+    # Generate sklearn plots
+    for row, ds_name in enumerate(dataset_names):
+        result = sk_results[ds_name]
+        X, y = result["X"], result["y"]
+        lda_est, qda_est = result["lda"], result["qda"]
+        plot_result(lda_est, X, y, axes_sk[row, 0])
+        plot_result(qda_est, X, y, axes_sk[row, 1])
+        axes_sk[row, 0].set_ylabel(row_labels[row], fontsize=10, fontweight="bold")
 
     axes_sk[0, 0].set_title("Linear Discriminant Analysis", fontsize=12)
     axes_sk[0, 1].set_title("Quadratic Discriminant Analysis", fontsize=12)
-    plt.suptitle("LDA vs QDA: sklearn", fontsize=14, y=0.995)
-    plt.tight_layout()
+    fig_sk.suptitle("LDA vs QDA: sklearn", fontsize=14, y=0.995)
+    fig_sk.tight_layout()
     out_sk = "imgs/plot_lda_qda_sklearn.png"
-    plt.savefig(out_sk, dpi=150, bbox_inches="tight")
-    plt.close()
+    fig_sk.savefig(out_sk, dpi=150, bbox_inches="tight")
+    plt.close(fig_sk)
     print(f"\nsklearn plot saved to {out_sk}")
 
-    # Build xorq composite plot - execute deferred plots in main()
     fig_xo, axes_xo = plt.subplots(3, 2, figsize=(10, 15))
 
-    # Row 0: isotropic
-    lda_png_0 = deferred_matplotlib_plot(xo_results[ds_name_0]["table"], _build_lda_plot_isotropic, name="lda_plot").execute()
-    qda_png_0 = deferred_matplotlib_plot(xo_results[ds_name_0]["table"], _build_qda_plot_isotropic, name="qda_plot").execute()
-    lda_img_0 = load_plot_bytes(lda_png_0)
-    qda_img_0 = load_plot_bytes(qda_png_0)
-    axes_xo[0, 0].imshow(lda_img_0)
-    axes_xo[0, 0].axis("off")
-    axes_xo[0, 1].imshow(qda_img_0)
-    axes_xo[0, 1].axis("off")
-    axes_xo[0, 0].set_ylabel("Isotropic covariance\n", fontsize=10, fontweight="bold")
+    classifier_configs = (
+        (LinearDiscriminantAnalysis, "LDA"),
+        (QuadraticDiscriminantAnalysis, "QDA"),
+    )
 
-    # Row 1: shared
-    lda_png_1 = deferred_matplotlib_plot(xo_results[ds_name_1]["table"], _build_lda_plot_shared, name="lda_plot").execute()
-    qda_png_1 = deferred_matplotlib_plot(xo_results[ds_name_1]["table"], _build_qda_plot_shared, name="qda_plot").execute()
-    lda_img_1 = load_plot_bytes(lda_png_1)
-    qda_img_1 = load_plot_bytes(qda_png_1)
-    axes_xo[1, 0].imshow(lda_img_1)
-    axes_xo[1, 0].axis("off")
-    axes_xo[1, 1].imshow(qda_img_1)
-    axes_xo[1, 1].axis("off")
-    axes_xo[1, 0].set_ylabel("Shared covariance\n", fontsize=10, fontweight="bold")
+    for row, ds_name in enumerate(dataset_names):
+        table = xo_results[ds_name]["table"]
 
-    # Row 2: different
-    lda_png_2 = deferred_matplotlib_plot(xo_results[ds_name_2]["table"], _build_lda_plot_different, name="lda_plot").execute()
-    qda_png_2 = deferred_matplotlib_plot(xo_results[ds_name_2]["table"], _build_qda_plot_different, name="qda_plot").execute()
-    lda_img_2 = load_plot_bytes(lda_png_2)
-    qda_img_2 = load_plot_bytes(qda_png_2)
-    axes_xo[2, 0].imshow(lda_img_2)
-    axes_xo[2, 0].axis("off")
-    axes_xo[2, 1].imshow(qda_img_2)
-    axes_xo[2, 1].axis("off")
-    axes_xo[2, 0].set_ylabel("Different covariances\n", fontsize=10, fontweight="bold")
+        for col, (classifier_class, clf_name) in enumerate(classifier_configs):
+            plot_fn = _build_classifier_plot(
+                classifier_class=classifier_class,
+                title=clf_name,
+            )
+            png_bytes = deferred_matplotlib_plot(
+                table,
+                plot_fn,
+                name=f"{clf_name.lower()}_plot",
+            ).execute()
+            img = load_plot_bytes(png_bytes)
+            axes_xo[row, col].imshow(img)
+            axes_xo[row, col].axis("off")
+
+        axes_xo[row, 0].set_ylabel(row_labels[row], fontsize=10, fontweight="bold")
 
     axes_xo[0, 0].set_title("Linear Discriminant Analysis", fontsize=12)
     axes_xo[0, 1].set_title("Quadratic Discriminant Analysis", fontsize=12)
-    plt.suptitle("LDA vs QDA: xorq", fontsize=14, y=0.995)
-    plt.tight_layout()
+    fig_xo.suptitle("LDA vs QDA: xorq", fontsize=14, y=0.995)
+    fig_xo.tight_layout()
     out_xo = "imgs/plot_lda_qda_xorq.png"
-    plt.savefig(out_xo, dpi=150, bbox_inches="tight")
-    plt.close()
+    fig_xo.savefig(out_xo, dpi=150, bbox_inches="tight")
+    plt.close(fig_xo)
     print(f"xorq plot saved to {out_xo}")
 
     # Composite side-by-side
@@ -609,11 +565,14 @@ def main():
     axes[1].set_title("xorq", fontsize=14)
     axes[1].axis("off")
 
-    plt.suptitle("Linear and Quadratic Discriminant Analysis: sklearn vs xorq", fontsize=16)
-    plt.tight_layout()
+    fig.suptitle(
+        "Linear and Quadratic Discriminant Analysis: sklearn vs xorq",
+        fontsize=16,
+    )
+    fig.tight_layout()
     out = "imgs/plot_lda_qda.png"
-    plt.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close()
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
     print(f"Composite plot saved to {out}")
 
 

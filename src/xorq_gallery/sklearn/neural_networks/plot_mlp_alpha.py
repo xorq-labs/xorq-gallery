@@ -26,10 +26,12 @@ from sklearn.datasets import make_circles, make_classification, make_moons
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier
-from sklearn.pipeline import make_pipeline
+from sklearn.pipeline import Pipeline as SklearnPipeline
 from sklearn.preprocessing import StandardScaler
+from toolz import curry
 from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
+from xorq.ibis_yaml.utils import freeze
 
 from xorq_gallery.utils import (
     deferred_matplotlib_plot,
@@ -87,21 +89,20 @@ def _load_data():
 
 def _build_classifiers():
     """Return dict of alpha values -> sklearn Pipeline instances."""
-    classifiers = {}
-    for alpha in ALPHAS:
-        clf = make_pipeline(
-            StandardScaler(),
-            MLPClassifier(
+    return {
+        alpha: SklearnPipeline([
+            ("standardscaler", StandardScaler()),
+            ("mlpclassifier", MLPClassifier(
                 solver="lbfgs",
                 alpha=alpha,
                 random_state=RANDOM_STATE_MLP,
                 max_iter=2000,
                 early_stopping=True,
                 hidden_layer_sizes=[10, 10],
-            ),
-        )
-        classifiers[alpha] = clf
-    return classifiers
+            )),
+        ])
+        for alpha in ALPHAS
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +150,29 @@ def _plot_decision_boundary(ax, X, y, clf, title, x_min, x_max, y_min, y_max, sc
         )
 
 
+@curry
+def _build_decision_boundary_plot(df, X_train, y_train, X_test, y_test, bounds, clf_copy, alpha_val):
+    """Build decision boundary plot from materialized predictions.
+
+    Array args are passed as tuples (for xorq hashability) and
+    converted back to numpy arrays inside this function.
+    """
+    X_train = np.array(X_train)
+    y_train = np.array(y_train)
+    X_test = np.array(X_test)
+    y_test = np.array(y_test)
+    fitted_clf = clf_copy.fit(X_train, y_train)
+    score_val = fitted_clf.score(X_test, y_test)
+    X_combined = np.vstack([X_train, X_test])
+    y_combined = np.concatenate([y_train, y_test])
+    fig, ax = plt.subplots(figsize=(5, 4))
+    _plot_decision_boundary(
+        ax, X_combined, y_combined, fitted_clf, f"alpha {alpha_val:.2f}", *bounds, score=score_val,
+    )
+    fig.tight_layout()
+    return fig
+
+
 # =========================================================================
 # SKLEARN WAY -- eager fit/predict, decision boundary plots
 # =========================================================================
@@ -158,213 +182,39 @@ def sklearn_way(datasets):
     """Eager sklearn: fit MLP classifiers with varying alpha on three datasets,
     compute accuracy, generate decision boundary plots."""
 
-    # Moons dataset
-    X_moons, y_moons = datasets["moons"]
-    X_train_moons, X_test_moons, y_train_moons, y_test_moons = train_test_split(
-        X_moons, y_moons, test_size=TEST_SIZE, random_state=RANDOM_STATE_SPLIT
-    )
-    x_min_moons, x_max_moons = X_moons[:, 0].min() - 0.5, X_moons[:, 0].max() + 0.5
-    y_min_moons, y_max_moons = X_moons[:, 1].min() - 0.5, X_moons[:, 1].max() + 0.5
-
-    # Circles dataset
-    X_circles, y_circles = datasets["circles"]
-    X_train_circles, X_test_circles, y_train_circles, y_test_circles = train_test_split(
-        X_circles, y_circles, test_size=TEST_SIZE, random_state=RANDOM_STATE_SPLIT
-    )
-    x_min_circles, x_max_circles = X_circles[:, 0].min() - 0.5, X_circles[:, 0].max() + 0.5
-    y_min_circles, y_max_circles = X_circles[:, 1].min() - 0.5, X_circles[:, 1].max() + 0.5
-
-    # Linearly separable dataset
-    X_linearly, y_linearly = datasets["linearly_separable"]
-    X_train_linearly, X_test_linearly, y_train_linearly, y_test_linearly = train_test_split(
-        X_linearly, y_linearly, test_size=TEST_SIZE, random_state=RANDOM_STATE_SPLIT
-    )
-    x_min_linearly, x_max_linearly = X_linearly[:, 0].min() - 0.5, X_linearly[:, 0].max() + 0.5
-    y_min_linearly, y_max_linearly = X_linearly[:, 1].min() - 0.5, X_linearly[:, 1].max() + 0.5
-
-    # Fit all models - flatten the nested loops
-    # Build fresh classifiers for each fit to avoid mutation issues
     results = {}
 
-    # Moons - alpha 0
-    alpha_0 = ALPHAS[0]
-    clf_moons_0 = make_pipeline(
-        StandardScaler(),
-        MLPClassifier(solver="lbfgs", alpha=alpha_0, random_state=RANDOM_STATE_MLP, max_iter=2000, early_stopping=True, hidden_layer_sizes=[10, 10]),
-    )
-    clf_moons_0.fit(X_train_moons, y_train_moons)
-    score_moons_0 = clf_moons_0.score(X_test_moons, y_test_moons)
-    print(f"  sklearn: moons               | alpha={alpha_0:.2f} | score = {score_moons_0:.3f}")
+    for ds_name, (X, y) in datasets.items():
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE_SPLIT
+        )
+        x_min, x_max = X[:, 0].min() - 0.5, X[:, 0].max() + 0.5
+        y_min, y_max = X[:, 1].min() - 0.5, X[:, 1].max() + 0.5
+        bounds = (x_min, x_max, y_min, y_max)
 
-    # Moons - alpha 1
-    alpha_1 = ALPHAS[1]
-    clf_moons_1 = make_pipeline(
-        StandardScaler(),
-        MLPClassifier(solver="lbfgs", alpha=alpha_1, random_state=RANDOM_STATE_MLP, max_iter=2000, early_stopping=True, hidden_layer_sizes=[10, 10]),
-    )
-    clf_moons_1.fit(X_train_moons, y_train_moons)
-    score_moons_1 = clf_moons_1.score(X_test_moons, y_test_moons)
-    print(f"  sklearn: moons               | alpha={alpha_1:.2f} | score = {score_moons_1:.3f}")
-
-    # Moons - alpha 2
-    alpha_2 = ALPHAS[2]
-    clf_moons_2 = make_pipeline(
-        StandardScaler(),
-        MLPClassifier(solver="lbfgs", alpha=alpha_2, random_state=RANDOM_STATE_MLP, max_iter=2000, early_stopping=True, hidden_layer_sizes=[10, 10]),
-    )
-    clf_moons_2.fit(X_train_moons, y_train_moons)
-    score_moons_2 = clf_moons_2.score(X_test_moons, y_test_moons)
-    print(f"  sklearn: moons               | alpha={alpha_2:.2f} | score = {score_moons_2:.3f}")
-
-    # Moons - alpha 3
-    alpha_3 = ALPHAS[3]
-    clf_moons_3 = make_pipeline(
-        StandardScaler(),
-        MLPClassifier(solver="lbfgs", alpha=alpha_3, random_state=RANDOM_STATE_MLP, max_iter=2000, early_stopping=True, hidden_layer_sizes=[10, 10]),
-    )
-    clf_moons_3.fit(X_train_moons, y_train_moons)
-    score_moons_3 = clf_moons_3.score(X_test_moons, y_test_moons)
-    print(f"  sklearn: moons               | alpha={alpha_3:.2f} | score = {score_moons_3:.3f}")
-
-    # Moons - alpha 4
-    alpha_4 = ALPHAS[4]
-    clf_moons_4 = make_pipeline(
-        StandardScaler(),
-        MLPClassifier(solver="lbfgs", alpha=alpha_4, random_state=RANDOM_STATE_MLP, max_iter=2000, early_stopping=True, hidden_layer_sizes=[10, 10]),
-    )
-    clf_moons_4.fit(X_train_moons, y_train_moons)
-    score_moons_4 = clf_moons_4.score(X_test_moons, y_test_moons)
-    print(f"  sklearn: moons               | alpha={alpha_4:.2f} | score = {score_moons_4:.3f}")
-
-    # Circles - alpha 0
-    clf_circles_0 = make_pipeline(
-        StandardScaler(),
-        MLPClassifier(solver="lbfgs", alpha=alpha_0, random_state=RANDOM_STATE_MLP, max_iter=2000, early_stopping=True, hidden_layer_sizes=[10, 10]),
-    )
-    clf_circles_0.fit(X_train_circles, y_train_circles)
-    score_circles_0 = clf_circles_0.score(X_test_circles, y_test_circles)
-    print(f"  sklearn: circles             | alpha={alpha_0:.2f} | score = {score_circles_0:.3f}")
-
-    # Circles - alpha 1
-    clf_circles_1 = make_pipeline(
-        StandardScaler(),
-        MLPClassifier(solver="lbfgs", alpha=alpha_1, random_state=RANDOM_STATE_MLP, max_iter=2000, early_stopping=True, hidden_layer_sizes=[10, 10]),
-    )
-    clf_circles_1.fit(X_train_circles, y_train_circles)
-    score_circles_1 = clf_circles_1.score(X_test_circles, y_test_circles)
-    print(f"  sklearn: circles             | alpha={alpha_1:.2f} | score = {score_circles_1:.3f}")
-
-    # Circles - alpha 2
-    clf_circles_2 = make_pipeline(
-        StandardScaler(),
-        MLPClassifier(solver="lbfgs", alpha=alpha_2, random_state=RANDOM_STATE_MLP, max_iter=2000, early_stopping=True, hidden_layer_sizes=[10, 10]),
-    )
-    clf_circles_2.fit(X_train_circles, y_train_circles)
-    score_circles_2 = clf_circles_2.score(X_test_circles, y_test_circles)
-    print(f"  sklearn: circles             | alpha={alpha_2:.2f} | score = {score_circles_2:.3f}")
-
-    # Circles - alpha 3
-    clf_circles_3 = make_pipeline(
-        StandardScaler(),
-        MLPClassifier(solver="lbfgs", alpha=alpha_3, random_state=RANDOM_STATE_MLP, max_iter=2000, early_stopping=True, hidden_layer_sizes=[10, 10]),
-    )
-    clf_circles_3.fit(X_train_circles, y_train_circles)
-    score_circles_3 = clf_circles_3.score(X_test_circles, y_test_circles)
-    print(f"  sklearn: circles             | alpha={alpha_3:.2f} | score = {score_circles_3:.3f}")
-
-    # Circles - alpha 4
-    clf_circles_4 = make_pipeline(
-        StandardScaler(),
-        MLPClassifier(solver="lbfgs", alpha=alpha_4, random_state=RANDOM_STATE_MLP, max_iter=2000, early_stopping=True, hidden_layer_sizes=[10, 10]),
-    )
-    clf_circles_4.fit(X_train_circles, y_train_circles)
-    score_circles_4 = clf_circles_4.score(X_test_circles, y_test_circles)
-    print(f"  sklearn: circles             | alpha={alpha_4:.2f} | score = {score_circles_4:.3f}")
-
-    # Linearly separable - alpha 0
-    clf_linearly_0 = make_pipeline(
-        StandardScaler(),
-        MLPClassifier(solver="lbfgs", alpha=alpha_0, random_state=RANDOM_STATE_MLP, max_iter=2000, early_stopping=True, hidden_layer_sizes=[10, 10]),
-    )
-    clf_linearly_0.fit(X_train_linearly, y_train_linearly)
-    score_linearly_0 = clf_linearly_0.score(X_test_linearly, y_test_linearly)
-    print(f"  sklearn: linearly_separable  | alpha={alpha_0:.2f} | score = {score_linearly_0:.3f}")
-
-    # Linearly separable - alpha 1
-    clf_linearly_1 = make_pipeline(
-        StandardScaler(),
-        MLPClassifier(solver="lbfgs", alpha=alpha_1, random_state=RANDOM_STATE_MLP, max_iter=2000, early_stopping=True, hidden_layer_sizes=[10, 10]),
-    )
-    clf_linearly_1.fit(X_train_linearly, y_train_linearly)
-    score_linearly_1 = clf_linearly_1.score(X_test_linearly, y_test_linearly)
-    print(f"  sklearn: linearly_separable  | alpha={alpha_1:.2f} | score = {score_linearly_1:.3f}")
-
-    # Linearly separable - alpha 2
-    clf_linearly_2 = make_pipeline(
-        StandardScaler(),
-        MLPClassifier(solver="lbfgs", alpha=alpha_2, random_state=RANDOM_STATE_MLP, max_iter=2000, early_stopping=True, hidden_layer_sizes=[10, 10]),
-    )
-    clf_linearly_2.fit(X_train_linearly, y_train_linearly)
-    score_linearly_2 = clf_linearly_2.score(X_test_linearly, y_test_linearly)
-    print(f"  sklearn: linearly_separable  | alpha={alpha_2:.2f} | score = {score_linearly_2:.3f}")
-
-    # Linearly separable - alpha 3
-    clf_linearly_3 = make_pipeline(
-        StandardScaler(),
-        MLPClassifier(solver="lbfgs", alpha=alpha_3, random_state=RANDOM_STATE_MLP, max_iter=2000, early_stopping=True, hidden_layer_sizes=[10, 10]),
-    )
-    clf_linearly_3.fit(X_train_linearly, y_train_linearly)
-    score_linearly_3 = clf_linearly_3.score(X_test_linearly, y_test_linearly)
-    print(f"  sklearn: linearly_separable  | alpha={alpha_3:.2f} | score = {score_linearly_3:.3f}")
-
-    # Linearly separable - alpha 4
-    clf_linearly_4 = make_pipeline(
-        StandardScaler(),
-        MLPClassifier(solver="lbfgs", alpha=alpha_4, random_state=RANDOM_STATE_MLP, max_iter=2000, early_stopping=True, hidden_layer_sizes=[10, 10]),
-    )
-    clf_linearly_4.fit(X_train_linearly, y_train_linearly)
-    score_linearly_4 = clf_linearly_4.score(X_test_linearly, y_test_linearly)
-    print(f"  sklearn: linearly_separable  | alpha={alpha_4:.2f} | score = {score_linearly_4:.3f}")
-
-    # Store results
-    results["moons"] = {
-        alpha_0: {"clf": clf_moons_0, "score": score_moons_0, "X": X_moons, "y": y_moons,
-                  "bounds": (x_min_moons, x_max_moons, y_min_moons, y_max_moons)},
-        alpha_1: {"clf": clf_moons_1, "score": score_moons_1, "X": X_moons, "y": y_moons,
-                  "bounds": (x_min_moons, x_max_moons, y_min_moons, y_max_moons)},
-        alpha_2: {"clf": clf_moons_2, "score": score_moons_2, "X": X_moons, "y": y_moons,
-                  "bounds": (x_min_moons, x_max_moons, y_min_moons, y_max_moons)},
-        alpha_3: {"clf": clf_moons_3, "score": score_moons_3, "X": X_moons, "y": y_moons,
-                  "bounds": (x_min_moons, x_max_moons, y_min_moons, y_max_moons)},
-        alpha_4: {"clf": clf_moons_4, "score": score_moons_4, "X": X_moons, "y": y_moons,
-                  "bounds": (x_min_moons, x_max_moons, y_min_moons, y_max_moons)},
-    }
-
-    results["circles"] = {
-        alpha_0: {"clf": clf_circles_0, "score": score_circles_0, "X": X_circles, "y": y_circles,
-                  "bounds": (x_min_circles, x_max_circles, y_min_circles, y_max_circles)},
-        alpha_1: {"clf": clf_circles_1, "score": score_circles_1, "X": X_circles, "y": y_circles,
-                  "bounds": (x_min_circles, x_max_circles, y_min_circles, y_max_circles)},
-        alpha_2: {"clf": clf_circles_2, "score": score_circles_2, "X": X_circles, "y": y_circles,
-                  "bounds": (x_min_circles, x_max_circles, y_min_circles, y_max_circles)},
-        alpha_3: {"clf": clf_circles_3, "score": score_circles_3, "X": X_circles, "y": y_circles,
-                  "bounds": (x_min_circles, x_max_circles, y_min_circles, y_max_circles)},
-        alpha_4: {"clf": clf_circles_4, "score": score_circles_4, "X": X_circles, "y": y_circles,
-                  "bounds": (x_min_circles, x_max_circles, y_min_circles, y_max_circles)},
-    }
-
-    results["linearly_separable"] = {
-        alpha_0: {"clf": clf_linearly_0, "score": score_linearly_0, "X": X_linearly, "y": y_linearly,
-                  "bounds": (x_min_linearly, x_max_linearly, y_min_linearly, y_max_linearly)},
-        alpha_1: {"clf": clf_linearly_1, "score": score_linearly_1, "X": X_linearly, "y": y_linearly,
-                  "bounds": (x_min_linearly, x_max_linearly, y_min_linearly, y_max_linearly)},
-        alpha_2: {"clf": clf_linearly_2, "score": score_linearly_2, "X": X_linearly, "y": y_linearly,
-                  "bounds": (x_min_linearly, x_max_linearly, y_min_linearly, y_max_linearly)},
-        alpha_3: {"clf": clf_linearly_3, "score": score_linearly_3, "X": X_linearly, "y": y_linearly,
-                  "bounds": (x_min_linearly, x_max_linearly, y_min_linearly, y_max_linearly)},
-        alpha_4: {"clf": clf_linearly_4, "score": score_linearly_4, "X": X_linearly, "y": y_linearly,
-                  "bounds": (x_min_linearly, x_max_linearly, y_min_linearly, y_max_linearly)},
-    }
+        results[ds_name] = {}
+        for alpha in ALPHAS:
+            clf = SklearnPipeline([
+                ("standardscaler", StandardScaler()),
+                ("mlpclassifier", MLPClassifier(
+                    solver="lbfgs",
+                    alpha=alpha,
+                    random_state=RANDOM_STATE_MLP,
+                    max_iter=2000,
+                    early_stopping=True,
+                    hidden_layer_sizes=[10, 10]
+                )),
+            ])
+            clf.fit(X_train, y_train)
+            score = clf.score(X_test, y_test)
+            print(f"  sklearn: {ds_name:20s} | alpha={alpha:.2f} | score = {score:.3f}")
+            results[ds_name][alpha] = {
+                "clf": clf,
+                "score": score,
+                "X": X,
+                "y": y,
+                "bounds": bounds,
+            }
 
     return results
 
@@ -381,355 +231,46 @@ def xorq_way(datasets):
     Returns dict of dataset_name -> dict of alpha -> {preds: expr, metrics: expr, plot_data: dict}.
     """
     con = xo.connect()
-
-    # Build fresh classifiers for xorq to avoid hashing issues
-    xorq_classifiers = _build_classifiers()
-
-    # Moons dataset
-    X_moons, y_moons = datasets["moons"]
-    X_train_moons, X_test_moons, y_train_moons, y_test_moons = train_test_split(
-        X_moons, y_moons, test_size=TEST_SIZE, random_state=RANDOM_STATE_SPLIT
-    )
-    train_df_moons = pd.DataFrame(X_train_moons, columns=["x0", "x1"])
-    train_df_moons["y"] = y_train_moons
-    test_df_moons = pd.DataFrame(X_test_moons, columns=["x0", "x1"])
-    test_df_moons["y"] = y_test_moons
-    train_table_moons = con.register(train_df_moons, "train_moons")
-    test_table_moons = con.register(test_df_moons, "test_moons")
-    x_min_moons, x_max_moons = X_moons[:, 0].min() - 0.5, X_moons[:, 0].max() + 0.5
-    y_min_moons, y_max_moons = X_moons[:, 1].min() - 0.5, X_moons[:, 1].max() + 0.5
-
-    # Circles dataset
-    X_circles, y_circles = datasets["circles"]
-    X_train_circles, X_test_circles, y_train_circles, y_test_circles = train_test_split(
-        X_circles, y_circles, test_size=TEST_SIZE, random_state=RANDOM_STATE_SPLIT
-    )
-    train_df_circles = pd.DataFrame(X_train_circles, columns=["x0", "x1"])
-    train_df_circles["y"] = y_train_circles
-    test_df_circles = pd.DataFrame(X_test_circles, columns=["x0", "x1"])
-    test_df_circles["y"] = y_test_circles
-    train_table_circles = con.register(train_df_circles, "train_circles")
-    test_table_circles = con.register(test_df_circles, "test_circles")
-    x_min_circles, x_max_circles = X_circles[:, 0].min() - 0.5, X_circles[:, 0].max() + 0.5
-    y_min_circles, y_max_circles = X_circles[:, 1].min() - 0.5, X_circles[:, 1].max() + 0.5
-
-    # Linearly separable dataset
-    X_linearly, y_linearly = datasets["linearly_separable"]
-    X_train_linearly, X_test_linearly, y_train_linearly, y_test_linearly = train_test_split(
-        X_linearly, y_linearly, test_size=TEST_SIZE, random_state=RANDOM_STATE_SPLIT
-    )
-    train_df_linearly = pd.DataFrame(X_train_linearly, columns=["x0", "x1"])
-    train_df_linearly["y"] = y_train_linearly
-    test_df_linearly = pd.DataFrame(X_test_linearly, columns=["x0", "x1"])
-    test_df_linearly["y"] = y_test_linearly
-    train_table_linearly = con.register(train_df_linearly, "train_linearly")
-    test_table_linearly = con.register(test_df_linearly, "test_linearly")
-    x_min_linearly, x_max_linearly = X_linearly[:, 0].min() - 0.5, X_linearly[:, 0].max() + 0.5
-    y_min_linearly, y_max_linearly = X_linearly[:, 1].min() - 0.5, X_linearly[:, 1].max() + 0.5
-
     make_metric = deferred_sklearn_metric(target="y", pred="pred")
+    results = {}
 
-    # Fit all models - flatten the nested loops
-    alpha_0 = ALPHAS[0]
-    alpha_1 = ALPHAS[1]
-    alpha_2 = ALPHAS[2]
-    alpha_3 = ALPHAS[3]
-    alpha_4 = ALPHAS[4]
+    for ds_name, (X, y) in datasets.items():
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE_SPLIT
+        )
 
-    # Moons - alpha 0
-    pipe_moons_0 = Pipeline.from_instance(xorq_classifiers[alpha_0])
-    fitted_moons_0 = pipe_moons_0.fit(train_table_moons, features=("x0", "x1"), target="y")
-    preds_moons_0 = fitted_moons_0.predict(test_table_moons, name="pred")
-    metrics_moons_0 = preds_moons_0.agg(score=make_metric(metric=accuracy_score))
+        train_df = pd.DataFrame(X_train, columns=["x0", "x1"])
+        train_df["y"] = y_train
+        test_df = pd.DataFrame(X_test, columns=["x0", "x1"])
+        test_df["y"] = y_test
+        train_table = con.register(train_df, f"train_{ds_name}")
+        test_table = con.register(test_df, f"test_{ds_name}")
 
-    # Moons - alpha 1
-    pipe_moons_1 = Pipeline.from_instance(xorq_classifiers[alpha_1])
-    fitted_moons_1 = pipe_moons_1.fit(train_table_moons, features=("x0", "x1"), target="y")
-    preds_moons_1 = fitted_moons_1.predict(test_table_moons, name="pred")
-    metrics_moons_1 = preds_moons_1.agg(score=make_metric(metric=accuracy_score))
+        x_min, x_max = X[:, 0].min() - 0.5, X[:, 0].max() + 0.5
+        y_min, y_max = X[:, 1].min() - 0.5, X[:, 1].max() + 0.5
+        bounds = (x_min, x_max, y_min, y_max)
 
-    # Moons - alpha 2
-    pipe_moons_2 = Pipeline.from_instance(xorq_classifiers[alpha_2])
-    fitted_moons_2 = pipe_moons_2.fit(train_table_moons, features=("x0", "x1"), target="y")
-    preds_moons_2 = fitted_moons_2.predict(test_table_moons, name="pred")
-    metrics_moons_2 = preds_moons_2.agg(score=make_metric(metric=accuracy_score))
+        results[ds_name] = {}
+        classifiers = _build_classifiers()
+        for alpha in ALPHAS:
+            xorq_pipe = Pipeline.from_instance(classifiers[alpha])
+            fitted = xorq_pipe.fit(train_table, features=("x0", "x1"), target="y")
+            preds = fitted.predict(test_table, name="pred")
+            metrics = preds.agg(score=make_metric(metric=accuracy_score))
 
-    # Moons - alpha 3
-    pipe_moons_3 = Pipeline.from_instance(xorq_classifiers[alpha_3])
-    fitted_moons_3 = pipe_moons_3.fit(train_table_moons, features=("x0", "x1"), target="y")
-    preds_moons_3 = fitted_moons_3.predict(test_table_moons, name="pred")
-    metrics_moons_3 = preds_moons_3.agg(score=make_metric(metric=accuracy_score))
-
-    # Moons - alpha 4
-    pipe_moons_4 = Pipeline.from_instance(xorq_classifiers[alpha_4])
-    fitted_moons_4 = pipe_moons_4.fit(train_table_moons, features=("x0", "x1"), target="y")
-    preds_moons_4 = fitted_moons_4.predict(test_table_moons, name="pred")
-    metrics_moons_4 = preds_moons_4.agg(score=make_metric(metric=accuracy_score))
-
-    # Circles - alpha 0
-    pipe_circles_0 = Pipeline.from_instance(xorq_classifiers[alpha_0])
-    fitted_circles_0 = pipe_circles_0.fit(train_table_circles, features=("x0", "x1"), target="y")
-    preds_circles_0 = fitted_circles_0.predict(test_table_circles, name="pred")
-    metrics_circles_0 = preds_circles_0.agg(score=make_metric(metric=accuracy_score))
-
-    # Circles - alpha 1
-    pipe_circles_1 = Pipeline.from_instance(xorq_classifiers[alpha_1])
-    fitted_circles_1 = pipe_circles_1.fit(train_table_circles, features=("x0", "x1"), target="y")
-    preds_circles_1 = fitted_circles_1.predict(test_table_circles, name="pred")
-    metrics_circles_1 = preds_circles_1.agg(score=make_metric(metric=accuracy_score))
-
-    # Circles - alpha 2
-    pipe_circles_2 = Pipeline.from_instance(xorq_classifiers[alpha_2])
-    fitted_circles_2 = pipe_circles_2.fit(train_table_circles, features=("x0", "x1"), target="y")
-    preds_circles_2 = fitted_circles_2.predict(test_table_circles, name="pred")
-    metrics_circles_2 = preds_circles_2.agg(score=make_metric(metric=accuracy_score))
-
-    # Circles - alpha 3
-    pipe_circles_3 = Pipeline.from_instance(xorq_classifiers[alpha_3])
-    fitted_circles_3 = pipe_circles_3.fit(train_table_circles, features=("x0", "x1"), target="y")
-    preds_circles_3 = fitted_circles_3.predict(test_table_circles, name="pred")
-    metrics_circles_3 = preds_circles_3.agg(score=make_metric(metric=accuracy_score))
-
-    # Circles - alpha 4
-    pipe_circles_4 = Pipeline.from_instance(xorq_classifiers[alpha_4])
-    fitted_circles_4 = pipe_circles_4.fit(train_table_circles, features=("x0", "x1"), target="y")
-    preds_circles_4 = fitted_circles_4.predict(test_table_circles, name="pred")
-    metrics_circles_4 = preds_circles_4.agg(score=make_metric(metric=accuracy_score))
-
-    # Linearly separable - alpha 0
-    pipe_linearly_0 = Pipeline.from_instance(xorq_classifiers[alpha_0])
-    fitted_linearly_0 = pipe_linearly_0.fit(train_table_linearly, features=("x0", "x1"), target="y")
-    preds_linearly_0 = fitted_linearly_0.predict(test_table_linearly, name="pred")
-    metrics_linearly_0 = preds_linearly_0.agg(score=make_metric(metric=accuracy_score))
-
-    # Linearly separable - alpha 1
-    pipe_linearly_1 = Pipeline.from_instance(xorq_classifiers[alpha_1])
-    fitted_linearly_1 = pipe_linearly_1.fit(train_table_linearly, features=("x0", "x1"), target="y")
-    preds_linearly_1 = fitted_linearly_1.predict(test_table_linearly, name="pred")
-    metrics_linearly_1 = preds_linearly_1.agg(score=make_metric(metric=accuracy_score))
-
-    # Linearly separable - alpha 2
-    pipe_linearly_2 = Pipeline.from_instance(xorq_classifiers[alpha_2])
-    fitted_linearly_2 = pipe_linearly_2.fit(train_table_linearly, features=("x0", "x1"), target="y")
-    preds_linearly_2 = fitted_linearly_2.predict(test_table_linearly, name="pred")
-    metrics_linearly_2 = preds_linearly_2.agg(score=make_metric(metric=accuracy_score))
-
-    # Linearly separable - alpha 3
-    pipe_linearly_3 = Pipeline.from_instance(xorq_classifiers[alpha_3])
-    fitted_linearly_3 = pipe_linearly_3.fit(train_table_linearly, features=("x0", "x1"), target="y")
-    preds_linearly_3 = fitted_linearly_3.predict(test_table_linearly, name="pred")
-    metrics_linearly_3 = preds_linearly_3.agg(score=make_metric(metric=accuracy_score))
-
-    # Linearly separable - alpha 4
-    pipe_linearly_4 = Pipeline.from_instance(xorq_classifiers[alpha_4])
-    fitted_linearly_4 = pipe_linearly_4.fit(train_table_linearly, features=("x0", "x1"), target="y")
-    preds_linearly_4 = fitted_linearly_4.predict(test_table_linearly, name="pred")
-    metrics_linearly_4 = preds_linearly_4.agg(score=make_metric(metric=accuracy_score))
-
-    # Store results with plot data (needed for deferred_matplotlib_plot in main())
-    results = {
-        "moons": {
-            alpha_0: {
-                "preds": preds_moons_0,
-                "metrics": metrics_moons_0,
+            results[ds_name][alpha] = {
+                "preds": preds,
+                "metrics": metrics,
                 "plot_data": {
-                    "X_train": X_train_moons,
-                    "y_train": y_train_moons,
-                    "X_test": X_test_moons,
-                    "y_test": y_test_moons,
-                    "bounds": (x_min_moons, x_max_moons, y_min_moons, y_max_moons),
-                    "clf": xorq_classifiers[alpha_0],
-                    "alpha": alpha_0,
+                    "X_train": X_train,
+                    "y_train": y_train,
+                    "X_test": X_test,
+                    "y_test": y_test,
+                    "bounds": bounds,
+                    "clf": classifiers[alpha],
+                    "alpha": alpha,
                 },
-            },
-            alpha_1: {
-                "preds": preds_moons_1,
-                "metrics": metrics_moons_1,
-                "plot_data": {
-                    "X_train": X_train_moons,
-                    "y_train": y_train_moons,
-                    "X_test": X_test_moons,
-                    "y_test": y_test_moons,
-                    "bounds": (x_min_moons, x_max_moons, y_min_moons, y_max_moons),
-                    "clf": xorq_classifiers[alpha_1],
-                    "alpha": alpha_1,
-                },
-            },
-            alpha_2: {
-                "preds": preds_moons_2,
-                "metrics": metrics_moons_2,
-                "plot_data": {
-                    "X_train": X_train_moons,
-                    "y_train": y_train_moons,
-                    "X_test": X_test_moons,
-                    "y_test": y_test_moons,
-                    "bounds": (x_min_moons, x_max_moons, y_min_moons, y_max_moons),
-                    "clf": xorq_classifiers[alpha_2],
-                    "alpha": alpha_2,
-                },
-            },
-            alpha_3: {
-                "preds": preds_moons_3,
-                "metrics": metrics_moons_3,
-                "plot_data": {
-                    "X_train": X_train_moons,
-                    "y_train": y_train_moons,
-                    "X_test": X_test_moons,
-                    "y_test": y_test_moons,
-                    "bounds": (x_min_moons, x_max_moons, y_min_moons, y_max_moons),
-                    "clf": xorq_classifiers[alpha_3],
-                    "alpha": alpha_3,
-                },
-            },
-            alpha_4: {
-                "preds": preds_moons_4,
-                "metrics": metrics_moons_4,
-                "plot_data": {
-                    "X_train": X_train_moons,
-                    "y_train": y_train_moons,
-                    "X_test": X_test_moons,
-                    "y_test": y_test_moons,
-                    "bounds": (x_min_moons, x_max_moons, y_min_moons, y_max_moons),
-                    "clf": xorq_classifiers[alpha_4],
-                    "alpha": alpha_4,
-                },
-            },
-        },
-        "circles": {
-            alpha_0: {
-                "preds": preds_circles_0,
-                "metrics": metrics_circles_0,
-                "plot_data": {
-                    "X_train": X_train_circles,
-                    "y_train": y_train_circles,
-                    "X_test": X_test_circles,
-                    "y_test": y_test_circles,
-                    "bounds": (x_min_circles, x_max_circles, y_min_circles, y_max_circles),
-                    "clf": xorq_classifiers[alpha_0],
-                    "alpha": alpha_0,
-                },
-            },
-            alpha_1: {
-                "preds": preds_circles_1,
-                "metrics": metrics_circles_1,
-                "plot_data": {
-                    "X_train": X_train_circles,
-                    "y_train": y_train_circles,
-                    "X_test": X_test_circles,
-                    "y_test": y_test_circles,
-                    "bounds": (x_min_circles, x_max_circles, y_min_circles, y_max_circles),
-                    "clf": xorq_classifiers[alpha_1],
-                    "alpha": alpha_1,
-                },
-            },
-            alpha_2: {
-                "preds": preds_circles_2,
-                "metrics": metrics_circles_2,
-                "plot_data": {
-                    "X_train": X_train_circles,
-                    "y_train": y_train_circles,
-                    "X_test": X_test_circles,
-                    "y_test": y_test_circles,
-                    "bounds": (x_min_circles, x_max_circles, y_min_circles, y_max_circles),
-                    "clf": xorq_classifiers[alpha_2],
-                    "alpha": alpha_2,
-                },
-            },
-            alpha_3: {
-                "preds": preds_circles_3,
-                "metrics": metrics_circles_3,
-                "plot_data": {
-                    "X_train": X_train_circles,
-                    "y_train": y_train_circles,
-                    "X_test": X_test_circles,
-                    "y_test": y_test_circles,
-                    "bounds": (x_min_circles, x_max_circles, y_min_circles, y_max_circles),
-                    "clf": xorq_classifiers[alpha_3],
-                    "alpha": alpha_3,
-                },
-            },
-            alpha_4: {
-                "preds": preds_circles_4,
-                "metrics": metrics_circles_4,
-                "plot_data": {
-                    "X_train": X_train_circles,
-                    "y_train": y_train_circles,
-                    "X_test": X_test_circles,
-                    "y_test": y_test_circles,
-                    "bounds": (x_min_circles, x_max_circles, y_min_circles, y_max_circles),
-                    "clf": xorq_classifiers[alpha_4],
-                    "alpha": alpha_4,
-                },
-            },
-        },
-        "linearly_separable": {
-            alpha_0: {
-                "preds": preds_linearly_0,
-                "metrics": metrics_linearly_0,
-                "plot_data": {
-                    "X_train": X_train_linearly,
-                    "y_train": y_train_linearly,
-                    "X_test": X_test_linearly,
-                    "y_test": y_test_linearly,
-                    "bounds": (x_min_linearly, x_max_linearly, y_min_linearly, y_max_linearly),
-                    "clf": xorq_classifiers[alpha_0],
-                    "alpha": alpha_0,
-                },
-            },
-            alpha_1: {
-                "preds": preds_linearly_1,
-                "metrics": metrics_linearly_1,
-                "plot_data": {
-                    "X_train": X_train_linearly,
-                    "y_train": y_train_linearly,
-                    "X_test": X_test_linearly,
-                    "y_test": y_test_linearly,
-                    "bounds": (x_min_linearly, x_max_linearly, y_min_linearly, y_max_linearly),
-                    "clf": xorq_classifiers[alpha_1],
-                    "alpha": alpha_1,
-                },
-            },
-            alpha_2: {
-                "preds": preds_linearly_2,
-                "metrics": metrics_linearly_2,
-                "plot_data": {
-                    "X_train": X_train_linearly,
-                    "y_train": y_train_linearly,
-                    "X_test": X_test_linearly,
-                    "y_test": y_test_linearly,
-                    "bounds": (x_min_linearly, x_max_linearly, y_min_linearly, y_max_linearly),
-                    "clf": xorq_classifiers[alpha_2],
-                    "alpha": alpha_2,
-                },
-            },
-            alpha_3: {
-                "preds": preds_linearly_3,
-                "metrics": metrics_linearly_3,
-                "plot_data": {
-                    "X_train": X_train_linearly,
-                    "y_train": y_train_linearly,
-                    "X_test": X_test_linearly,
-                    "y_test": y_test_linearly,
-                    "bounds": (x_min_linearly, x_max_linearly, y_min_linearly, y_max_linearly),
-                    "clf": xorq_classifiers[alpha_3],
-                    "alpha": alpha_3,
-                },
-            },
-            alpha_4: {
-                "preds": preds_linearly_4,
-                "metrics": metrics_linearly_4,
-                "plot_data": {
-                    "X_train": X_train_linearly,
-                    "y_train": y_train_linearly,
-                    "X_test": X_test_linearly,
-                    "y_test": y_test_linearly,
-                    "bounds": (x_min_linearly, x_max_linearly, y_min_linearly, y_max_linearly),
-                    "clf": xorq_classifiers[alpha_4],
-                    "alpha": alpha_4,
-                },
-            },
-        },
-    }
+            }
 
     return results
 
@@ -792,11 +333,11 @@ def main():
             if j == 0:
                 ax.set_ylabel(ds_name, fontsize=10, fontweight="bold")
 
-    plt.suptitle("MLP Regularization: sklearn", fontsize=14, y=0.995)
-    plt.tight_layout()
+    fig_sk.suptitle("MLP Regularization: sklearn", fontsize=14, y=0.995)
+    fig_sk.tight_layout()
     out_sk = "imgs/plot_mlp_alpha_sklearn.png"
-    plt.savefig(out_sk, dpi=150, bbox_inches="tight")
-    plt.close()
+    fig_sk.savefig(out_sk, dpi=150, bbox_inches="tight")
+    plt.close(fig_sk)
     print(f"sklearn plot saved to {out_sk}")
 
     # Create xorq plot - deferred_matplotlib_plot happens here in main()
@@ -812,39 +353,17 @@ def main():
             plot_data = result["plot_data"]
 
             # Build plot function with captured variables
-            def _build_plot(
-                df,
-                X_train=plot_data["X_train"],
-                y_train=plot_data["y_train"],
-                X_test=plot_data["X_test"],
-                y_test=plot_data["y_test"],
+            plot_func = _build_decision_boundary_plot(
+                X_train=freeze(plot_data["X_train"].tolist()),
+                y_train=freeze(plot_data["y_train"].tolist()),
+                X_test=freeze(plot_data["X_test"].tolist()),
+                y_test=freeze(plot_data["y_test"].tolist()),
                 bounds=plot_data["bounds"],
                 clf_copy=plot_data["clf"],
                 alpha_val=plot_data["alpha"],
-            ):
-                """Build decision boundary plot from materialized predictions."""
-                # Refit sklearn_clf for plotting (needed for decision boundary)
-                fitted_clf = clf_copy.fit(X_train, y_train)
-                score_val = fitted_clf.score(X_test, y_test)
+            )
 
-                # Combine train and test for visualization
-                X_combined = np.vstack([X_train, X_test])
-                y_combined = np.concatenate([y_train, y_test])
-
-                fig, ax = plt.subplots(figsize=(5, 4))
-                _plot_decision_boundary(
-                    ax,
-                    X_combined,
-                    y_combined,
-                    fitted_clf,
-                    f"alpha {alpha_val:.2f}",
-                    *bounds,
-                    score=score_val,
-                )
-                plt.tight_layout()
-                return fig
-
-            plot_expr = deferred_matplotlib_plot(preds_expr, _build_plot)
+            plot_expr = deferred_matplotlib_plot(preds_expr, plot_func)
             png_bytes = plot_expr.execute()
             img = load_plot_bytes(png_bytes)
             ax.imshow(img)
@@ -854,11 +373,11 @@ def main():
             if j == 0:
                 ax.set_ylabel(ds_name, fontsize=10, fontweight="bold")
 
-    plt.suptitle("MLP Regularization: xorq", fontsize=14, y=0.995)
-    plt.tight_layout()
+    fig_xo.suptitle("MLP Regularization: xorq", fontsize=14, y=0.995)
+    fig_xo.tight_layout()
     out_xo = "imgs/plot_mlp_alpha_xorq.png"
-    plt.savefig(out_xo, dpi=150, bbox_inches="tight")
-    plt.close()
+    fig_xo.savefig(out_xo, dpi=150, bbox_inches="tight")
+    plt.close(fig_xo)
     print(f"xorq plot saved to {out_xo}")
 
     # Composite side-by-side
@@ -874,11 +393,11 @@ def main():
     axes[1].set_title("xorq")
     axes[1].axis("off")
 
-    plt.suptitle("MLP Regularization: sklearn vs xorq", fontsize=16)
-    plt.tight_layout()
+    fig.suptitle("MLP Regularization: sklearn vs xorq", fontsize=16)
+    fig.tight_layout()
     out = "imgs/plot_mlp_alpha.png"
-    plt.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close()
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
     print(f"Composite plot saved to {out}")
 
 

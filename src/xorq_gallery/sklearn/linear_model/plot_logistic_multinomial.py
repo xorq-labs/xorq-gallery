@@ -14,6 +14,8 @@ Both produce identical accuracy scores and decision boundaries.
 Dataset: Synthetic 3-class overlapping blobs with linear transformation
 """
 
+from __future__ import annotations
+
 import os
 
 import matplotlib.pyplot as plt
@@ -37,9 +39,14 @@ from xorq_gallery.utils import fig_to_image
 # ---------------------------------------------------------------------------
 
 N_SAMPLES = 1000
-CENTERS = [[-5, 0], [0, 1.5], [5, -1]]
-TRANSFORMATION = [[0.4, 0.2], [-0.4, 1.2]]
+CENTERS = ((-5, 0), (0, 1.5), (5, -1))
+TRANSFORMATION = ((0.4, 0.2), (-0.4, 1.2))
 RANDOM_STATE = 40
+
+FEATURE_COLS = ("feature_0", "feature_1")
+TARGET_COL = "target"
+ROW_IDX = "row_idx"
+PRED_COL = "pred"
 
 
 # ---------------------------------------------------------------------------
@@ -55,9 +62,9 @@ def _load_data():
     X, y = make_blobs(n_samples=N_SAMPLES, centers=CENTERS, random_state=RANDOM_STATE)
     X = np.dot(X, TRANSFORMATION)
 
-    df = pd.DataFrame(X, columns=["feature_0", "feature_1"])
-    df["target"] = y
-    df["row_idx"] = range(len(df))
+    df = pd.DataFrame(X, columns=list(FEATURE_COLS))
+    df[TARGET_COL] = y
+    df[ROW_IDX] = range(len(df))
 
     return df
 
@@ -115,7 +122,7 @@ def _build_decision_boundary_plot(X, y, model_multi, model_ovr, acc_multi, acc_o
         ax.add_artist(legend)
         ax.set_title(title)
 
-    plt.tight_layout()
+    fig.tight_layout()
     return fig
 
 
@@ -195,10 +202,8 @@ def _build_hyperplane_plot(X, y, model_multi, model_ovr):
         ax.legend(all_handles, all_labels, title="Classes")
         ax.set_title(title)
 
-    plt.tight_layout()
+    fig.tight_layout()
     return fig
-
-
 
 
 # =========================================================================
@@ -215,8 +220,8 @@ def sklearn_way(df):
         Keys: "multinomial", "ovr"
         Values: dict with "model", "accuracy"
     """
-    X = df[["feature_0", "feature_1"]].values
-    y = df["target"].values
+    X = df[list(FEATURE_COLS)].values
+    y = df[TARGET_COL].values
 
     # Fit both models on the full dataset (matching sklearn example)
     model_multi = LogisticRegression(random_state=RANDOM_STATE).fit(X, y)
@@ -257,9 +262,6 @@ def xorq_way(df):
     con = xo.connect()
     data = con.register(df, "blobs")
 
-    feature_cols = ("feature_0", "feature_1")
-    target_col = "target"
-
     results = {}
 
     # Multinomial logistic regression
@@ -267,10 +269,10 @@ def xorq_way(df):
         ("multinomial", LogisticRegression(random_state=RANDOM_STATE))
     ])
     multi_pipe = Pipeline.from_instance(multi_sklearn_pipe)
-    multi_fitted = multi_pipe.fit(data, features=feature_cols, target=target_col)
-    multi_preds = multi_fitted.predict(data, name="pred")
+    multi_fitted = multi_pipe.fit(data, features=FEATURE_COLS, target=TARGET_COL)
+    multi_preds = multi_fitted.predict(data, name=PRED_COL)
 
-    make_metric_multi = deferred_sklearn_metric(target=target_col, pred="pred")
+    make_metric_multi = deferred_sklearn_metric(target=TARGET_COL, pred=PRED_COL)
     multi_metrics = multi_preds.agg(acc=make_metric_multi(metric=accuracy_score))
 
     results["multinomial"] = {
@@ -286,10 +288,10 @@ def xorq_way(df):
         ("ovr", OneVsRestClassifier(LogisticRegression(random_state=RANDOM_STATE)))
     ])
     ovr_pipe = Pipeline.from_instance(ovr_sklearn_pipe)
-    ovr_fitted = ovr_pipe.fit(data_ovr, features=feature_cols, target=target_col)
-    ovr_preds = ovr_fitted.predict(data_ovr, name="pred")
+    ovr_fitted = ovr_pipe.fit(data_ovr, features=FEATURE_COLS, target=TARGET_COL)
+    ovr_preds = ovr_fitted.predict(data_ovr, name=PRED_COL)
 
-    make_metric_ovr = deferred_sklearn_metric(target=target_col, pred="pred")
+    make_metric_ovr = deferred_sklearn_metric(target=TARGET_COL, pred=PRED_COL)
     ovr_metrics = ovr_preds.agg(acc=make_metric_ovr(metric=accuracy_score))
 
     results["ovr"] = {
@@ -340,8 +342,8 @@ def main():
 
     # Extract fitted models from xorq pipelines for plotting
     # Note: For visualization we refit on the data (similar to classifier_comparison)
-    X = df[["feature_0", "feature_1"]].values
-    y = df["target"].values
+    X = df[list(FEATURE_COLS)].values
+    y = df[TARGET_COL].values
 
     xo_model_multi = LogisticRegression(random_state=RANDOM_STATE).fit(X, y)
     xo_model_ovr = OneVsRestClassifier(LogisticRegression(random_state=RANDOM_STATE)).fit(X, y)
@@ -377,11 +379,11 @@ def main():
     axes[1].imshow(fig_to_image(xo_decision_fig))
     axes[1].axis("off")
 
-    plt.suptitle("Decision Boundaries: sklearn vs xorq", fontsize=16)
-    plt.tight_layout()
+    fig.suptitle("Decision Boundaries: sklearn vs xorq", fontsize=16)
+    fig.tight_layout()
     out_decision = "imgs/logistic_multinomial_decision.png"
-    plt.savefig(out_decision, dpi=150)
-    plt.close()
+    fig.savefig(out_decision, dpi=150)
+    plt.close(fig)
     print(f"\nDecision boundary plot saved to {out_decision}")
 
     # Composite: hyperplanes sklearn (left) | xorq (right)
@@ -391,11 +393,11 @@ def main():
     axes[1].imshow(fig_to_image(xo_hyperplane_fig))
     axes[1].axis("off")
 
-    plt.suptitle("Hyperplanes: sklearn vs xorq", fontsize=16)
-    plt.tight_layout()
+    fig.suptitle("Hyperplanes: sklearn vs xorq", fontsize=16)
+    fig.tight_layout()
     out_hyperplane = "imgs/logistic_multinomial_hyperplane.png"
-    plt.savefig(out_hyperplane, dpi=150)
-    plt.close()
+    fig.savefig(out_hyperplane, dpi=150)
+    plt.close(fig)
     print(f"Hyperplane plot saved to {out_hyperplane}")
 
 
