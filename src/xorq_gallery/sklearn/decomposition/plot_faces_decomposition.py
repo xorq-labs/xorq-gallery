@@ -30,6 +30,7 @@ from sklearn.datasets import fetch_olivetti_faces
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from toolz import curry
 from xorq.expr.ml.pipeline_lib import Pipeline
+from xorq.ibis_yaml.utils import freeze
 
 from xorq_gallery.utils import (
     deferred_matplotlib_plot,
@@ -46,6 +47,7 @@ rng = RandomState(0)
 n_row, n_col = 2, 3
 n_components = n_row * n_col  # 6 components to display
 image_shape = (64, 64)
+ROW_IDX = "row_idx"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -90,6 +92,7 @@ def _load_data():
 
     # Combine into single DataFrame
     df = pd.concat([df, df_centered], axis=1)
+    df[ROW_IDX] = range(len(df))
 
     return df, pixel_cols, centered_cols
 
@@ -146,27 +149,15 @@ def plot_gallery(title, images, n_col=n_col, n_row=n_row, cmap=plt.cm.gray):
 
 
 @curry
-def _build_pca_plot(df_dummy, components):
-    """Build PCA plot for deferred execution."""
-    return plot_gallery("Eigenfaces - PCA using randomized SVD", components)
+def _build_component_plot(df_dummy, title, components_frozen):
+    """Build a gallery plot for any decomposition method.
 
-
-@curry
-def _build_nmf_plot(df_dummy, components):
-    """Build NMF plot for deferred execution."""
-    return plot_gallery("Non-negative components - NMF", components)
-
-
-@curry
-def _build_ica_plot(df_dummy, components):
-    """Build FastICA plot for deferred execution."""
-    return plot_gallery("Independent components - FastICA", components)
-
-
-@curry
-def _build_fa_plot(df_dummy, components):
-    """Build Factor Analysis plot for deferred execution."""
-    return plot_gallery("Factor Analysis (FA)", components)
+    components_frozen is passed as a freeze()-wrapped list so that
+    xorq's FrozenDict can hash it.  We convert back to a numpy array
+    for plotting.
+    """
+    components = np.array(components_frozen)
+    return plot_gallery(title, components)
 
 
 # =========================================================================
@@ -293,7 +284,8 @@ def xorq_way(df, pixel_cols, centered_cols):
 
     NOTE: xorq's Pipeline API doesn't expose a deferred way to access model attributes
     like `components_` or `cluster_centers_`. So we create deferred fits here, but
-    execution and component extraction happen in main() (following the separation pattern).
+    execution and component extraction happen in main() via
+    ``fitted_pipeline.fitted_steps[0].model`` (following the separation pattern).
 
     Parameters
     ----------
@@ -395,19 +387,25 @@ def xorq_way(df, pixel_cols, centered_cols):
         table, features=centered_cols, target=None
     )
 
-    # Clustering methods don't fit the Pipeline.from_instance pattern well
-    # (they're not transformers, they're predictors). Fit these eagerly in main().
-    # Store the specifications so main() can fit them eagerly.
-    results["kmeans_spec"] = {
-        "estimator": cluster.MiniBatchKMeans(
-            n_clusters=n_components,
-            tol=1e-3,
-            batch_size=20,
-            max_iter=50,
-            random_state=rng,
-        ),
-        "features": centered_cols,
-    }
+    # 6. MiniBatchKMeans (cluster centers as components)
+    print("xorq: Creating deferred MiniBatchKMeans pipeline...")
+    kmeans = cluster.MiniBatchKMeans(
+        n_clusters=n_components,
+        tol=1e-3,
+        batch_size=20,
+        max_iter=50,
+        random_state=rng,
+    )
+    kmeans_pipe = Pipeline.from_instance(SklearnPipeline([("kmeans", kmeans)]))
+    # NOTE: Pipeline.fit() raises "Can't infer target for a prediction step"
+    # when target is None and the last step has a predict method.
+    # MiniBatchKMeans has predict (it's a ClusterMixin), so Pipeline.fit
+    # requires *some* target column even though clustering never uses it.
+    # We pass ROW_IDX as a harmless dummy target; the underlying
+    # sklearn fit receives only the feature columns.
+    results["kmeans_fitted"] = kmeans_pipe.fit(
+        table, features=centered_cols, target=ROW_IDX
+    )
 
     return results
 
@@ -436,11 +434,16 @@ def main():
     def extract_components(fitted_pipeline, method_name):
         """Execute the fitted pipeline and extract components from the underlying sklearn model.
 
-        To materialize the fit, we call transform() which triggers execution.
-        Then we access the fitted model via fitted_steps[0].model.
+        To materialize the fit, we call transform() (or predict() for clustering)
+        which triggers execution.  Then we access the fitted model via
+        fitted_steps[0].model.
         """
-        # Execute transform to materialize the fit (result is discarded, we just need side effect)
-        _ = fitted_pipeline.transform(deferred_fitted["table"]).execute()
+        table = deferred_fitted["table"]
+        # Use predict() for predict-capable models (clustering), transform() otherwise
+        if fitted_pipeline.predict_step is not None:
+            _ = fitted_pipeline.predict(table).execute()
+        else:
+            _ = fitted_pipeline.transform(table).execute()
 
         # Access the fitted sklearn model from the first (and only) fitted step
         sklearn_model = fitted_pipeline.fitted_steps[0].model
@@ -481,14 +484,10 @@ def main():
         deferred_fitted["dict_pos_fitted"], "dict_pos"
     )
 
-    # KMeans: fit eagerly since it's a clustering method, not a transformer
-    # (xorq's Pipeline doesn't handle clustering methods well)
-    print("xorq: Fitting MiniBatchKMeans (eager, clustering method)...")
-    kmeans_spec = deferred_fitted["kmeans_spec"]
-    kmeans_est = kmeans_spec["estimator"]
-    faces_centered_data = df[list(kmeans_spec["features"])].values
-    kmeans_est.fit(faces_centered_data)
-    xo_results["kmeans"] = kmeans_est.cluster_centers_[:n_components].copy()
+    print("xorq: Extracting MiniBatchKMeans components...")
+    xo_results["kmeans"] = extract_components(
+        deferred_fitted["kmeans_fitted"], "kmeans"
+    )
 
     # ---- Compare components (informational only, no strict assertions) ----
     print("\n=== COMPONENT COMPARISON ===")
@@ -526,72 +525,53 @@ def main():
     con = deferred_fitted["con"]
     dummy_table = con.register(pd.DataFrame({"dummy": [1]}), "dummy")
 
-    # Execute deferred plots
+    # Execute deferred plots -- freeze() converts numpy arrays to hashable
+    # tuples so xorq's FrozenDict can store them in the UDAF config.
     print("=== Executing deferred plots ===")
-    pca_png = deferred_matplotlib_plot(
-        dummy_table, _build_pca_plot(components=xo_results["pca"]), name="pca_plot"
-    ).execute()
-    nmf_png = deferred_matplotlib_plot(
-        dummy_table, _build_nmf_plot(components=xo_results["nmf"]), name="nmf_plot"
-    ).execute()
-    ica_png = deferred_matplotlib_plot(
-        dummy_table, _build_ica_plot(components=xo_results["ica"]), name="ica_plot"
-    ).execute()
-    fa_png = deferred_matplotlib_plot(
-        dummy_table, _build_fa_plot(components=xo_results["fa"]), name="fa_plot"
-    ).execute()
+    plot_specs = {
+        "pca": "Eigenfaces - PCA using randomized SVD",
+        "nmf": "Non-negative components - NMF",
+        "ica": "Independent components - FastICA",
+        "fa": "Factor Analysis (FA)",
+    }
+    xo_pngs = {}
+    for key, title in plot_specs.items():
+        xo_pngs[key] = deferred_matplotlib_plot(
+            dummy_table,
+            _build_component_plot(
+                title=title,
+                components_frozen=freeze(xo_results[key].tolist()),
+            ),
+            name=f"{key}_plot",
+        ).execute()
 
-    # Build sklearn plots
-    sk_pca_fig = plot_gallery(
-        "Eigenfaces - PCA using randomized SVD", sk_results["pca"]
-    )
-    sk_nmf_fig = plot_gallery("Non-negative components - NMF", sk_results["nmf"])
-    sk_ica_fig = plot_gallery("Independent components - FastICA", sk_results["ica"])
-    sk_fa_fig = plot_gallery("Factor Analysis (FA)", sk_results["fa"])
+    # Build sklearn plots and load xorq plot bytes
+    sk_figs = {}
+    xo_imgs = {}
+    short_labels = {
+        "pca": "PCA",
+        "nmf": "NMF",
+        "ica": "FastICA",
+        "fa": "Factor Analysis",
+    }
+    for key, title in plot_specs.items():
+        sk_figs[key] = plot_gallery(title, sk_results[key])
+        xo_imgs[key] = load_plot_bytes(xo_pngs[key])
 
     # Composite: sklearn (left) | xorq (right) for 4 methods
-    pca_img_xo = load_plot_bytes(pca_png)
-    nmf_img_xo = load_plot_bytes(nmf_png)
-    ica_img_xo = load_plot_bytes(ica_png)
-    fa_img_xo = load_plot_bytes(fa_png)
+    keys = list(plot_specs.keys())
+    fig, axes = plt.subplots(len(keys), 2, figsize=(14, 20))
 
-    fig, axes = plt.subplots(4, 2, figsize=(14, 20))
+    for row, key in enumerate(keys):
+        label = short_labels[key]
 
-    # Row 0: PCA
-    axes[0, 0].imshow(fig_to_image(sk_pca_fig))
-    axes[0, 0].set_title("sklearn: PCA", fontsize=14)
-    axes[0, 0].axis("off")
+        axes[row, 0].imshow(fig_to_image(sk_figs[key]))
+        axes[row, 0].set_title(f"sklearn: {label}", fontsize=14)
+        axes[row, 0].axis("off")
 
-    axes[0, 1].imshow(pca_img_xo)
-    axes[0, 1].set_title("xorq: PCA", fontsize=14)
-    axes[0, 1].axis("off")
-
-    # Row 1: NMF
-    axes[1, 0].imshow(fig_to_image(sk_nmf_fig))
-    axes[1, 0].set_title("sklearn: NMF", fontsize=14)
-    axes[1, 0].axis("off")
-
-    axes[1, 1].imshow(nmf_img_xo)
-    axes[1, 1].set_title("xorq: NMF", fontsize=14)
-    axes[1, 1].axis("off")
-
-    # Row 2: ICA
-    axes[2, 0].imshow(fig_to_image(sk_ica_fig))
-    axes[2, 0].set_title("sklearn: FastICA", fontsize=14)
-    axes[2, 0].axis("off")
-
-    axes[2, 1].imshow(ica_img_xo)
-    axes[2, 1].set_title("xorq: FastICA", fontsize=14)
-    axes[2, 1].axis("off")
-
-    # Row 3: Factor Analysis
-    axes[3, 0].imshow(fig_to_image(sk_fa_fig))
-    axes[3, 0].set_title("sklearn: Factor Analysis", fontsize=14)
-    axes[3, 0].axis("off")
-
-    axes[3, 1].imshow(fa_img_xo)
-    axes[3, 1].set_title("xorq: Factor Analysis", fontsize=14)
-    axes[3, 1].axis("off")
+        axes[row, 1].imshow(xo_imgs[key])
+        axes[row, 1].set_title(f"xorq: {label}", fontsize=14)
+        axes[row, 1].axis("off")
 
     fig.suptitle("Faces Dataset Decompositions: sklearn vs xorq", fontsize=16)
     fig.tight_layout()
@@ -601,10 +581,8 @@ def main():
     print(f"\nComposite plot saved to {out}")
 
     # Close individual figures
-    plt.close(sk_pca_fig)
-    plt.close(sk_nmf_fig)
-    plt.close(sk_ica_fig)
-    plt.close(sk_fa_fig)
+    for f in sk_figs.values():
+        plt.close(f)
 
 
 if __name__ in ("__main__", "__pytest_main__"):
