@@ -9,6 +9,7 @@ dependencies = [
     "matplotlib",
     "pandas",
     "numpy",
+    "pooch",
     "toolz>=1.1.0",
 ]
 

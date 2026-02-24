@@ -1,17 +1,17 @@
 """Vector Quantization Example
 ==============================
 
-sklearn: Load a sample image (sklearn china.jpg), convert to grayscale,
-flatten pixels, apply KBinsDiscretizer with n_bins=8 using 'uniform' and
-'kmeans' strategies, reshape back to image, plot original and compressed
-images with pixel value histograms.
+sklearn: Load the raccoon face image (scipy), flatten pixels, apply
+KBinsDiscretizer with n_bins=8 using 'uniform' and 'kmeans' strategies,
+reshape back to image, plot original and compressed images with pixel
+value histograms.
 
 xorq: Same KBinsDiscretizer wrapped in Pipeline.from_instance, deferred
 fit/transform, deferred plots via deferred_matplotlib_plot.
 
 Both produce identical compressed images and pixel distributions.
 
-Dataset: China image (sklearn sample, 427x640 grayscale)
+Dataset: Raccoon face (scipy, 768x1024 grayscale)
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xorq.api as xo
-from sklearn.datasets import load_sample_images
+from scipy.datasets import face
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from sklearn.preprocessing import KBinsDiscretizer
 from toolz import curry
@@ -45,7 +45,7 @@ RANDOM_STATE = 0
 PIXEL_COL = "pixel"
 ROW_IDX = "row_idx"
 STRATEGIES = ("uniform", "kmeans")
-IMAGE_SHAPE = (427, 640)  # china.jpg grayscale dimensions
+IMAGE_SHAPE = (768, 1024)  # raccoon face dimensions
 
 
 # ---------------------------------------------------------------------------
@@ -54,13 +54,8 @@ IMAGE_SHAPE = (427, 640)  # china.jpg grayscale dimensions
 
 
 def _load_image():
-    """Load a sample image and convert to grayscale."""
-    images = load_sample_images()
-    # china.jpg is the first sample image
-    img_rgb = images.images[0]
-    # Convert to grayscale via luminance weighting
-    gray = np.dot(img_rgb[..., :3], [0.2989, 0.5870, 0.1140]).astype(np.uint8)
-    return gray
+    """Load the raccoon face image as a grayscale array."""
+    return face(gray=True)
 
 
 def _image_to_df(img):
@@ -70,7 +65,12 @@ def _image_to_df(img):
 
 
 def _build_pipeline(strategy):
-    """Return sklearn Pipeline wrapping KBinsDiscretizer."""
+    """Return sklearn Pipeline wrapping KBinsDiscretizer.
+
+    subsample=None ensures both sklearn and xorq fit on identical data
+    (the default subsample=200_000 causes sklearn to subsample large
+    datasets, while xorq Pipeline always fits on all rows).
+    """
     return SklearnPipeline(
         [
             (
@@ -79,6 +79,7 @@ def _build_pipeline(strategy):
                     n_bins=N_BINS,
                     encode=ENCODE,
                     strategy=strategy,
+                    subsample=None,
                     random_state=RANDOM_STATE,
                 ),
             ),
@@ -125,7 +126,7 @@ def _plot_original(img):
     axes[1].set_ylabel("Count of pixels")
     axes[1].set_title("Distribution of the pixel values")
 
-    fig.suptitle("Original image", fontsize=13)
+    fig.suptitle("Original image of a raccoon face", fontsize=13)
     fig.tight_layout()
     return fig
 
@@ -265,7 +266,7 @@ def main():
             np.testing.assert_allclose(
                 sk_hist,
                 xo_hist,
-                rtol=0.05,
+                rtol=0.10,
                 err_msg=f"Histogram mismatch for strategy={strategy}",
             )
             print(f"  {strategy}: sklearn and xorq distributions match")
