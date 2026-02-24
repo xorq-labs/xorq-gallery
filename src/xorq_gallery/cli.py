@@ -5,11 +5,18 @@ import runpy
 import click
 
 
-scripts = tuple(
-    p
-    for p in sorted(pathlib.Path(__file__).parent.glob("sklearn/*/plot_*.py"))
-    if p.name != "__init__.py"
+from xorq_gallery.sklearn import (
+    get_scripts_for_group,
+    groups,
+    scripts,
 )
+
+
+def _scripts_for_group(group_name):
+    try:
+        return get_scripts_for_group(group_name)
+    except ValueError:
+        raise click.BadParameter(f"no such group {group_name!r}", param_hint="group")
 
 
 def run_script(script, run_name="__main__"):
@@ -17,30 +24,50 @@ def run_script(script, run_name="__main__"):
     return runpy.run_path(str(script), run_name=run_name)
 
 
+def _complete_group(ctx, param, incomplete):
+    return [
+        click.shell_completion.CompletionItem(g.name)
+        for g in groups
+        if g.name.startswith(incomplete)
+    ]
+
+
+def _complete_script_name(ctx, param, incomplete):
+    group_name = ctx.params.get("group")
+    pool = _scripts_for_group(group_name) if group_name else scripts
+    return [
+        click.shell_completion.CompletionItem(s.stem)
+        for s in pool
+        if s.stem.startswith(incomplete)
+    ]
+
+
 @click.group()
 def cli():
     """xorq gallery: list and run example scripts."""
 
 
+@cli.command("list-groups")
+def list_groups():
+    """List available script groups."""
+    click.echo("\n".join(g.name for g in groups))
+
+
 @cli.command("list")
-def list_scripts():
+@click.option("--group", default=None, shell_complete=_complete_group, help="Filter by group.")
+def list_scripts(group):
     """List available scripts."""
-    click.echo("\n".join(script.stem for script in scripts))
-
-
-def _complete_script_name(ctx, param, incomplete):
-    return [
-        click.shell_completion.CompletionItem(s.stem)
-        for s in scripts
-        if s.stem.startswith(incomplete)
-    ]
+    pool = _scripts_for_group(group) if group else scripts
+    click.echo("\n".join(s.stem for s in pool))
 
 
 @cli.command("run")
 @click.argument("script_name", shell_complete=_complete_script_name)
-def run_one(script_name):
+@click.option("--group", default=None, shell_complete=_complete_group, help="Restrict search to a group.")
+def run_one(script_name, group):
     """Run a single script by name."""
-    script = next((s for s in scripts if s.stem == script_name), None)
+    pool = _scripts_for_group(group) if group else scripts
+    script = next((s for s in pool if s.stem == script_name), None)
     match script:
         case None:
             raise click.BadParameter(
@@ -51,9 +78,11 @@ def run_one(script_name):
 
 
 @cli.command("run-all")
-def run_all_scripts():
+@click.option("--group", default=None, shell_complete=_complete_group, help="Restrict to a group.")
+def run_all_scripts(group):
     """Run all scripts."""
-    for script in scripts:
+    pool = _scripts_for_group(group) if group else scripts
+    for script in pool:
         run_script(script)
 
 
