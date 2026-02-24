@@ -79,7 +79,12 @@ def _load_data():
 
 @curry
 def _plot_feature_importance(
-    df_unused, forward_features, backward_features, forward_score, backward_score, title_prefix
+    df_unused,
+    forward_features,
+    backward_features,
+    forward_score,
+    backward_score,
+    title_prefix,
 ):
     """Build feature selection comparison visualization.
 
@@ -116,8 +121,16 @@ def _plot_feature_importance(
         f"  Selected features: {', '.join(forward_features)}\n"
         f"  CV Score: {forward_score:.4f}"
     )
-    ax.text(0.1, 0.65, forward_text, ha="left", va="top", fontsize=12,
-            family="monospace", bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.5))
+    ax.text(
+        0.1,
+        0.65,
+        forward_text,
+        ha="left",
+        va="top",
+        fontsize=12,
+        family="monospace",
+        bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.5),
+    )
 
     # Backward selection results
     backward_text = (
@@ -125,14 +138,29 @@ def _plot_feature_importance(
         f"  Selected features: {', '.join(backward_features)}\n"
         f"  CV Score: {backward_score:.4f}"
     )
-    ax.text(0.1, 0.35, backward_text, ha="left", va="top", fontsize=12,
-            family="monospace", bbox=dict(boxstyle="round", facecolor="lightgreen", alpha=0.5))
+    ax.text(
+        0.1,
+        0.35,
+        backward_text,
+        ha="left",
+        va="top",
+        fontsize=12,
+        family="monospace",
+        bbox=dict(boxstyle="round", facecolor="lightgreen", alpha=0.5),
+    )
 
     # Comparison
     match = "✓" if set(forward_features) == set(backward_features) else "✗"
     comparison_text = f"Both methods selected same features: {match}"
-    ax.text(0.5, 0.05, comparison_text, ha="center", va="center", fontsize=12,
-            fontweight="bold")
+    ax.text(
+        0.5,
+        0.05,
+        comparison_text,
+        ha="center",
+        va="center",
+        fontsize=12,
+        fontweight="bold",
+    )
 
     fig.tight_layout()
     return fig
@@ -176,13 +204,17 @@ def sklearn_way(df):
 
     # Get selected feature indices and names
     forward_mask = sfs_forward.get_support()
-    forward_features = [feature_names[i] for i in range(len(feature_names)) if forward_mask[i]]
+    forward_features = [
+        feature_names[i] for i in range(len(feature_names)) if forward_mask[i]
+    ]
 
     # Score with cross-validation
     forward_scores = cross_val_score(ridge, X[:, forward_mask], y, cv=CV_SPLITTER)
     forward_score = np.mean(forward_scores)
 
-    print(f"    sklearn forward: selected {forward_features}, CV score = {forward_score:.4f}, time = {forward_time:.2f}s")
+    print(
+        f"    sklearn forward: selected {forward_features}, CV score = {forward_score:.4f}, time = {forward_time:.2f}s"
+    )
     results["forward"] = {
         "features": forward_features,
         "score": forward_score,
@@ -206,13 +238,17 @@ def sklearn_way(df):
 
     # Get selected feature indices and names
     backward_mask = sfs_backward.get_support()
-    backward_features = [feature_names[i] for i in range(len(feature_names)) if backward_mask[i]]
+    backward_features = [
+        feature_names[i] for i in range(len(feature_names)) if backward_mask[i]
+    ]
 
     # Score with cross-validation
     backward_scores = cross_val_score(ridge, X[:, backward_mask], y, cv=CV_SPLITTER)
     backward_score = np.mean(backward_scores)
 
-    print(f"    sklearn backward: selected {backward_features}, CV score = {backward_score:.4f}, time = {backward_time:.2f}s")
+    print(
+        f"    sklearn backward: selected {backward_features}, CV score = {backward_score:.4f}, time = {backward_time:.2f}s"
+    )
     results["backward"] = {
         "features": backward_features,
         "score": backward_score,
@@ -274,8 +310,12 @@ def xorq_way(df):
             SklearnPipeline([("ridge", Ridge(alpha=1.0, random_state=RANDOM_STATE))])
         )
         cv_result = deferred_cross_val_score(
-            ridge_pipe, table, selected_features, TARGET_COL,
-            cv=CV_SPLITTER, order_by=ROW_IDX,
+            ridge_pipe,
+            table,
+            selected_features,
+            TARGET_COL,
+            cv=CV_SPLITTER,
+            order_by=ROW_IDX,
         )
 
         results[direction] = {
@@ -326,11 +366,17 @@ def main():
     for direction in ("forward", "backward"):
         sk_features = set(sk_results[direction]["features"])
         xo_features = set(xo_results[direction]["features"])
-        assert sk_features == xo_features, f"{direction} selection features don't match!"
+        assert sk_features == xo_features, (
+            f"{direction} selection features don't match!"
+        )
         print(f"  {direction}: features match {sorted(sk_features)}")
 
-    sk_scores_df = pd.DataFrame({d: sk_results[d]["scores"] for d in ("forward", "backward")})
-    xo_scores_df = pd.DataFrame({d: xo_results[d]["scores"] for d in ("forward", "backward")})
+    sk_scores_df = pd.DataFrame(
+        {d: sk_results[d]["scores"] for d in ("forward", "backward")}
+    )
+    xo_scores_df = pd.DataFrame(
+        {d: xo_results[d]["scores"] for d in ("forward", "backward")}
+    )
     pd.testing.assert_frame_equal(sk_scores_df, xo_scores_df, rtol=1e-3)
     print("  Per-fold CV scores match for all directions.")
     print("Assertions passed.")
@@ -345,7 +391,7 @@ def main():
             forward_score=xo_results["forward"]["score"],
             backward_score=xo_results["backward"]["score"],
             title_prefix="xorq",
-        )
+        ),
     ).execute()
 
     # Build sklearn plot
@@ -371,7 +417,9 @@ def main():
     axes[1].set_title("xorq")
     axes[1].axis("off")
 
-    fig.suptitle("Sequential Feature Selection on Diabetes: sklearn vs xorq", fontsize=14)
+    fig.suptitle(
+        "Sequential Feature Selection on Diabetes: sklearn vs xorq", fontsize=14
+    )
     fig.tight_layout()
     out = "imgs/plot_select_from_model_diabetes.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")

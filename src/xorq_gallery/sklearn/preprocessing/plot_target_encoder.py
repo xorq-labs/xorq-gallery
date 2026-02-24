@@ -88,20 +88,43 @@ def _build_pipelines():
 
     categorical_preprocessors = (
         ("drop", "drop"),
-        ("ordinal", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)),
-        ("one_hot", OneHotEncoder(handle_unknown="ignore", max_categories=20, sparse_output=False)),
+        (
+            "ordinal",
+            OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1),
+        ),
+        (
+            "one_hot",
+            OneHotEncoder(
+                handle_unknown="ignore", max_categories=20, sparse_output=False
+            ),
+        ),
         ("target", TargetEncoder(target_type="continuous")),
     )
 
     pipelines = {
-        name: SklearnPipeline([
-            ("columntransformer", ColumnTransformer([
-                ("numerical", "passthrough", list(NUMERICAL_FEATURES)),
-                ("categorical", categorical_preprocessor, list(CATEGORICAL_FEATURES)),
-            ])),
-            ("histgradientboostingregressor", HistGradientBoostingRegressor(
-                random_state=RANDOM_STATE, max_iter=max_iter)),
-        ])
+        name: SklearnPipeline(
+            [
+                (
+                    "columntransformer",
+                    ColumnTransformer(
+                        [
+                            ("numerical", "passthrough", list(NUMERICAL_FEATURES)),
+                            (
+                                "categorical",
+                                categorical_preprocessor,
+                                list(CATEGORICAL_FEATURES),
+                            ),
+                        ]
+                    ),
+                ),
+                (
+                    "histgradientboostingregressor",
+                    HistGradientBoostingRegressor(
+                        random_state=RANDOM_STATE, max_iter=max_iter
+                    ),
+                ),
+            ]
+        )
         for name, categorical_preprocessor in categorical_preprocessors
     }
 
@@ -115,16 +138,28 @@ def _build_pipelines():
         [
             ("numerical", "passthrough", list(NUMERICAL_FEATURES)),
             ("high_cardinality", TargetEncoder(target_type="continuous"), high_card),
-            ("low_cardinality", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1), low_card),
+            (
+                "low_cardinality",
+                OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1),
+                low_card,
+            ),
         ],
         verbose_feature_names_out=False,
     )
     mixed_preprocessor.set_output(transform="pandas")
-    pipelines["mixed_target"] = SklearnPipeline([
-        ("columntransformer", mixed_preprocessor),
-        ("histgradientboostingregressor", HistGradientBoostingRegressor(
-            random_state=RANDOM_STATE, max_iter=max_iter, categorical_features=low_card)),
-    ])
+    pipelines["mixed_target"] = SklearnPipeline(
+        [
+            ("columntransformer", mixed_preprocessor),
+            (
+                "histgradientboostingregressor",
+                HistGradientBoostingRegressor(
+                    random_state=RANDOM_STATE,
+                    max_iter=max_iter,
+                    categorical_features=low_card,
+                ),
+            ),
+        ]
+    )
 
     return pipelines
 
@@ -137,7 +172,11 @@ def _build_pipelines():
 def _build_results_plot(results_df, title):
     """Bar plot comparing RMSE across encoding schemes."""
     fig, (ax1, ax2) = plt.subplots(
-        1, 2, figsize=(12, 6), sharey=True, constrained_layout=True,
+        1,
+        2,
+        figsize=(12, 6),
+        sharey=True,
+        constrained_layout=True,
     )
 
     xticks = range(len(results_df))
@@ -148,7 +187,10 @@ def _build_results_plot(results_df, title):
         std_col = f"rmse_{subset}_std"
         data = results_df[[mean_col, std_col]].sort_values(mean_col)
         ax.bar(
-            x=xticks, height=data[mean_col], yerr=data[std_col], width=0.9,
+            x=xticks,
+            height=data[mean_col],
+            yerr=data[std_col],
+            width=0.9,
             color=[name_to_color.get(name, "C0") for name in data.index],
         )
         ax.set(
@@ -179,24 +221,32 @@ def sklearn_way(df_sorted, pipelines):
     results = []
     for name, pipe in pipelines.items():
         result = cross_validate(
-            pipe, X, y,
+            pipe,
+            X,
+            y,
             scoring="neg_root_mean_squared_error",
             cv=CV_SPLITTER,
             return_train_score=True,
         )
         rmse_test = -result["test_score"]
         rmse_train = -result["train_score"]
-        results.append({
-            "preprocessor": name,
-            "rmse_test_mean": rmse_test.mean(),
-            "rmse_test_std": rmse_test.std(),
-            "rmse_train_mean": rmse_train.mean(),
-            "rmse_train_std": rmse_train.std(),
-            "test_scores": rmse_test,
-        })
-        print(f"  sklearn {name:15s}: RMSE test={rmse_test.mean():.4f}, train={rmse_train.mean():.4f}")
+        results.append(
+            {
+                "preprocessor": name,
+                "rmse_test_mean": rmse_test.mean(),
+                "rmse_test_std": rmse_test.std(),
+                "rmse_train_mean": rmse_train.mean(),
+                "rmse_train_std": rmse_train.std(),
+                "test_scores": rmse_test,
+            }
+        )
+        print(
+            f"  sklearn {name:15s}: RMSE test={rmse_test.mean():.4f}, train={rmse_train.mean():.4f}"
+        )
 
-    results_df = pd.DataFrame(results).set_index("preprocessor").sort_values("rmse_test_mean")
+    results_df = (
+        pd.DataFrame(results).set_index("preprocessor").sort_values("rmse_test_mean")
+    )
     return results_df
 
 
@@ -215,7 +265,10 @@ def xorq_way(data, pipelines):
     for name in XORQ_ENCODER_NAMES:
         xorq_pipe = Pipeline.from_instance(pipelines[name])
         cv_result = deferred_cross_val_score(
-            xorq_pipe, data, ALL_FEATURE_COLS, TARGET_COL,
+            xorq_pipe,
+            data,
+            ALL_FEATURE_COLS,
+            TARGET_COL,
             cv=CV_SPLITTER,
             scoring="neg_root_mean_squared_error",
             random_seed=RANDOM_STATE,
@@ -272,14 +325,18 @@ def main():
     xo_results = []
     for name in XORQ_ENCODER_NAMES:
         rmse = -xo_scores[name]
-        xo_results.append({
-            "preprocessor": name,
-            "rmse_test_mean": rmse.mean(),
-            "rmse_test_std": rmse.std(),
-            "rmse_train_mean": 0.0,
-            "rmse_train_std": 0.0,
-        })
-    xo_results_df = pd.DataFrame(xo_results).set_index("preprocessor").sort_values("rmse_test_mean")
+        xo_results.append(
+            {
+                "preprocessor": name,
+                "rmse_test_mean": rmse.mean(),
+                "rmse_test_std": rmse.std(),
+                "rmse_train_mean": 0.0,
+                "rmse_train_std": 0.0,
+            }
+        )
+    xo_results_df = (
+        pd.DataFrame(xo_results).set_index("preprocessor").sort_values("rmse_test_mean")
+    )
 
     sk_fig = _build_results_plot(sk_results, "sklearn - Target Encoder Comparison")
     xo_fig = _build_results_plot(xo_results_df, "xorq - Target Encoder Comparison")
@@ -292,7 +349,12 @@ def main():
     axes[1].set_title("xorq", fontsize=14, fontweight="bold")
     axes[1].axis("off")
 
-    fig.suptitle("Target Encoder Comparison: sklearn vs xorq", fontsize=16, fontweight="bold", y=0.98)
+    fig.suptitle(
+        "Target Encoder Comparison: sklearn vs xorq",
+        fontsize=16,
+        fontweight="bold",
+        y=0.98,
+    )
     fig.tight_layout()
     out = "imgs/plot_target_encoder.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")

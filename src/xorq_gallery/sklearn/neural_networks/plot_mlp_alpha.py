@@ -35,7 +35,6 @@ from xorq.ibis_yaml.utils import freeze
 
 from xorq_gallery.utils import (
     deferred_matplotlib_plot,
-    fig_to_image,
     load_plot_bytes,
 )
 
@@ -64,9 +63,7 @@ def _load_data():
     X_moons, y_moons = make_moons(noise=0.3, random_state=0)
 
     # Circles dataset
-    X_circles, y_circles = make_circles(
-        noise=0.2, factor=0.5, random_state=1
-    )
+    X_circles, y_circles = make_circles(noise=0.2, factor=0.5, random_state=1)
 
     # Linearly separable dataset
     X_linearly, y_linearly = make_classification(
@@ -90,17 +87,22 @@ def _load_data():
 def _build_classifiers():
     """Return dict of alpha values -> sklearn Pipeline instances."""
     return {
-        alpha: SklearnPipeline([
-            ("standardscaler", StandardScaler()),
-            ("mlpclassifier", MLPClassifier(
-                solver="lbfgs",
-                alpha=alpha,
-                random_state=RANDOM_STATE_MLP,
-                max_iter=2000,
-                early_stopping=True,
-                hidden_layer_sizes=[10, 10],
-            )),
-        ])
+        alpha: SklearnPipeline(
+            [
+                ("standardscaler", StandardScaler()),
+                (
+                    "mlpclassifier",
+                    MLPClassifier(
+                        solver="lbfgs",
+                        alpha=alpha,
+                        random_state=RANDOM_STATE_MLP,
+                        max_iter=2000,
+                        early_stopping=True,
+                        hidden_layer_sizes=[10, 10],
+                    ),
+                ),
+            ]
+        )
         for alpha in ALPHAS
     }
 
@@ -110,11 +112,11 @@ def _build_classifiers():
 # ---------------------------------------------------------------------------
 
 
-def _plot_decision_boundary(ax, X, y, clf, title, x_min, x_max, y_min, y_max, score=None):
+def _plot_decision_boundary(
+    ax, X, y, clf, title, x_min, x_max, y_min, y_max, score=None
+):
     """Plot decision boundary for a fitted sklearn classifier."""
-    xx, yy = np.meshgrid(
-        np.arange(x_min, x_max, H), np.arange(y_min, y_max, H)
-    )
+    xx, yy = np.meshgrid(np.arange(x_min, x_max, H), np.arange(y_min, y_max, H))
 
     # Compute decision function or predict_proba
     if hasattr(clf, "decision_function"):
@@ -151,7 +153,9 @@ def _plot_decision_boundary(ax, X, y, clf, title, x_min, x_max, y_min, y_max, sc
 
 
 @curry
-def _build_decision_boundary_plot(df, X_train, y_train, X_test, y_test, bounds, clf_copy, alpha_val):
+def _build_decision_boundary_plot(
+    df, X_train, y_train, X_test, y_test, bounds, clf_copy, alpha_val
+):
     """Build decision boundary plot from materialized predictions.
 
     Array args are passed as tuples (for xorq hashability) and
@@ -167,7 +171,13 @@ def _build_decision_boundary_plot(df, X_train, y_train, X_test, y_test, bounds, 
     y_combined = np.concatenate([y_train, y_test])
     fig, ax = plt.subplots(figsize=(5, 4))
     _plot_decision_boundary(
-        ax, X_combined, y_combined, fitted_clf, f"alpha {alpha_val:.2f}", *bounds, score=score_val,
+        ax,
+        X_combined,
+        y_combined,
+        fitted_clf,
+        f"alpha {alpha_val:.2f}",
+        *bounds,
+        score=score_val,
     )
     fig.tight_layout()
     return fig
@@ -194,17 +204,22 @@ def sklearn_way(datasets):
 
         results[ds_name] = {}
         for alpha in ALPHAS:
-            clf = SklearnPipeline([
-                ("standardscaler", StandardScaler()),
-                ("mlpclassifier", MLPClassifier(
-                    solver="lbfgs",
-                    alpha=alpha,
-                    random_state=RANDOM_STATE_MLP,
-                    max_iter=2000,
-                    early_stopping=True,
-                    hidden_layer_sizes=[10, 10]
-                )),
-            ])
+            clf = SklearnPipeline(
+                [
+                    ("standardscaler", StandardScaler()),
+                    (
+                        "mlpclassifier",
+                        MLPClassifier(
+                            solver="lbfgs",
+                            alpha=alpha,
+                            random_state=RANDOM_STATE_MLP,
+                            max_iter=2000,
+                            early_stopping=True,
+                            hidden_layer_sizes=[10, 10],
+                        ),
+                    ),
+                ]
+            )
             clf.fit(X_train, y_train)
             score = clf.score(X_test, y_test)
             print(f"  sklearn: {ds_name:20s} | alpha={alpha:.2f} | score = {score:.3f}")
@@ -298,7 +313,9 @@ def main():
             sk_score = sk_results[ds_name][alpha]["score"]
             xo_metrics_df = xo_results[ds_name][alpha]["metrics"].execute()
             xo_score = xo_metrics_df["score"].iloc[0]
-            print(f"  xorq:   {ds_name:20s} | alpha={alpha:.2f} | score = {xo_score:.3f}")
+            print(
+                f"  xorq:   {ds_name:20s} | alpha={alpha:.2f} | score = {xo_score:.3f}"
+            )
             # Use higher tolerance for MLPs due to stochastic nature
             np.testing.assert_allclose(sk_score, xo_score, rtol=0.03)
 
@@ -326,7 +343,16 @@ def main():
             x_min, x_max, y_min, y_max = result["bounds"]
 
             _plot_decision_boundary(
-                ax, X, y, clf, f"alpha {alpha:.2f}", x_min, x_max, y_min, y_max, score=score
+                ax,
+                X,
+                y,
+                clf,
+                f"alpha {alpha:.2f}",
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                score=score,
             )
 
             # Add row labels

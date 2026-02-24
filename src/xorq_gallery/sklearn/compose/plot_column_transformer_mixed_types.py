@@ -95,7 +95,9 @@ def _build_pipeline():
         ]
     )
 
-    categorical_transformer = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
+    categorical_transformer = OneHotEncoder(
+        handle_unknown="ignore", sparse_output=False
+    )
 
     preprocessor = ColumnTransformer(
         transformers=[
@@ -107,7 +109,10 @@ def _build_pipeline():
     return SklearnPipeline(
         steps=[
             ("preprocessor", preprocessor),
-            ("classifier", LogisticRegression(random_state=RANDOM_STATE, max_iter=1000)),
+            (
+                "classifier",
+                LogisticRegression(random_state=RANDOM_STATE, max_iter=1000),
+            ),
         ]
     )
 
@@ -211,7 +216,10 @@ def main():
     con = xo.connect()
     table = con.register(df, "titanic_data")
     train_data, test_data = xo.train_test_splits(
-        table, test_sizes=TEST_SIZE, unique_key=ROW_IDX, random_seed=RANDOM_STATE,
+        table,
+        test_sizes=TEST_SIZE,
+        unique_key=ROW_IDX,
+        random_seed=RANDOM_STATE,
     )
 
     # Sort for deterministic ordering
@@ -244,7 +252,9 @@ def main():
 
     # Plot
     print("\n=== PLOTTING ===")
-    xo_preds_executed = xo_results["predictions"].execute().sort_values(ROW_IDX).reset_index(drop=True)
+    xo_preds_executed = (
+        xo_results["predictions"].execute().sort_values(ROW_IDX).reset_index(drop=True)
+    )
 
     # sklearn confusion matrix
     sk_fig = _confusion_matrix_figure(
@@ -254,7 +264,8 @@ def main():
 
     # xorq deferred confusion matrix
     xo_plot_table = con.register(
-        xo_preds_executed[[Y_COL, PRED_COL]], "titanic_preds",
+        xo_preds_executed[[Y_COL, PRED_COL]],
+        "titanic_preds",
     )
     xo_png = deferred_matplotlib_plot(
         xo_plot_table,
@@ -273,7 +284,9 @@ def main():
 
     fig.suptitle(
         "Column Transformer with Mixed Types: sklearn vs xorq",
-        fontsize=16, fontweight="bold", y=0.98,
+        fontsize=16,
+        fontweight="bold",
+        y=0.98,
     )
     fig.tight_layout()
     out = "imgs/column_transformer_mixed_types.png"

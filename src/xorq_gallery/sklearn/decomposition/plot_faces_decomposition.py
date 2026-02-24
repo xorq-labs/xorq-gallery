@@ -202,10 +202,14 @@ def sklearn_way(df, pixel_cols, centered_cols):
 
     # 1. PCA using randomized SVD
     print("sklearn: Fitting PCA...")
-    pca = decomposition.PCA(n_components=n_components, svd_solver="randomized", whiten=True)
+    pca = decomposition.PCA(
+        n_components=n_components, svd_solver="randomized", whiten=True
+    )
     pca.fit(faces_centered)
     results["pca"] = pca.components_[:n_components].copy()
-    print(f"sklearn: PCA explained variance ratio sum: {pca.explained_variance_ratio_.sum():.3f}")
+    print(
+        f"sklearn: PCA explained variance ratio sum: {pca.explained_variance_ratio_.sum():.3f}"
+    )
 
     # 2. Non-negative Matrix Factorization (NMF)
     print("sklearn: Fitting NMF...")
@@ -224,7 +228,11 @@ def sklearn_way(df, pixel_cols, centered_cols):
     # 4. MiniBatchSparsePCA
     print("sklearn: Fitting MiniBatchSparsePCA...")
     sparse_pca = decomposition.MiniBatchSparsePCA(
-        n_components=n_components, alpha=0.1, max_iter=100, batch_size=3, random_state=rng
+        n_components=n_components,
+        alpha=0.1,
+        max_iter=100,
+        batch_size=3,
+        random_state=rng,
     )
     sparse_pca.fit(faces_centered)
     results["sparse_pca"] = sparse_pca.components_[:n_components].copy()
@@ -232,7 +240,11 @@ def sklearn_way(df, pixel_cols, centered_cols):
     # 5. MiniBatchDictionaryLearning
     print("sklearn: Fitting MiniBatchDictionaryLearning...")
     dict_learning = decomposition.MiniBatchDictionaryLearning(
-        n_components=n_components, alpha=0.1, max_iter=50, batch_size=3, random_state=rng
+        n_components=n_components,
+        alpha=0.1,
+        max_iter=50,
+        batch_size=3,
+        random_state=rng,
     )
     dict_learning.fit(faces_centered)
     results["dict_learning"] = dict_learning.components_[:n_components].copy()
@@ -308,7 +320,9 @@ def xorq_way(df, pixel_cols, centered_cols):
     # Transformer methods that work with Pipeline.from_instance (no target needed)
     # 1. PCA
     print("xorq: Creating deferred PCA pipeline...")
-    pca = decomposition.PCA(n_components=n_components, svd_solver="randomized", whiten=True)
+    pca = decomposition.PCA(
+        n_components=n_components, svd_solver="randomized", whiten=True
+    )
     pca_pipe = Pipeline.from_instance(SklearnPipeline([("pca", pca)]))
     results["pca_fitted"] = pca_pipe.fit(table, features=centered_cols, target=None)
 
@@ -329,18 +343,34 @@ def xorq_way(df, pixel_cols, centered_cols):
     # 4. MiniBatchSparsePCA
     print("xorq: Creating deferred MiniBatchSparsePCA pipeline...")
     sparse_pca = decomposition.MiniBatchSparsePCA(
-        n_components=n_components, alpha=0.1, max_iter=100, batch_size=3, random_state=rng
+        n_components=n_components,
+        alpha=0.1,
+        max_iter=100,
+        batch_size=3,
+        random_state=rng,
     )
-    sparse_pca_pipe = Pipeline.from_instance(SklearnPipeline([("sparse_pca", sparse_pca)]))
-    results["sparse_pca_fitted"] = sparse_pca_pipe.fit(table, features=centered_cols, target=None)
+    sparse_pca_pipe = Pipeline.from_instance(
+        SklearnPipeline([("sparse_pca", sparse_pca)])
+    )
+    results["sparse_pca_fitted"] = sparse_pca_pipe.fit(
+        table, features=centered_cols, target=None
+    )
 
     # 5. MiniBatchDictionaryLearning
     print("xorq: Creating deferred MiniBatchDictionaryLearning pipeline...")
     dict_learning = decomposition.MiniBatchDictionaryLearning(
-        n_components=n_components, alpha=0.1, max_iter=50, batch_size=3, random_state=rng
+        n_components=n_components,
+        alpha=0.1,
+        max_iter=50,
+        batch_size=3,
+        random_state=rng,
     )
-    dict_learning_pipe = Pipeline.from_instance(SklearnPipeline([("dict_learning", dict_learning)]))
-    results["dict_learning_fitted"] = dict_learning_pipe.fit(table, features=centered_cols, target=None)
+    dict_learning_pipe = Pipeline.from_instance(
+        SklearnPipeline([("dict_learning", dict_learning)])
+    )
+    results["dict_learning_fitted"] = dict_learning_pipe.fit(
+        table, features=centered_cols, target=None
+    )
 
     # 7. Factor Analysis
     print("xorq: Creating deferred FactorAnalysis pipeline...")
@@ -349,7 +379,9 @@ def xorq_way(df, pixel_cols, centered_cols):
     results["fa_fitted"] = fa_pipe.fit(table, features=centered_cols, target=None)
 
     # 8. Dictionary learning - positive dictionary
-    print("xorq: Creating deferred MiniBatchDictionaryLearning (positive dict) pipeline...")
+    print(
+        "xorq: Creating deferred MiniBatchDictionaryLearning (positive dict) pipeline..."
+    )
     dict_pos = decomposition.MiniBatchDictionaryLearning(
         n_components=n_components,
         alpha=0.1,
@@ -359,14 +391,20 @@ def xorq_way(df, pixel_cols, centered_cols):
         positive_dict=True,
     )
     dict_pos_pipe = Pipeline.from_instance(SklearnPipeline([("dict_pos", dict_pos)]))
-    results["dict_pos_fitted"] = dict_pos_pipe.fit(table, features=centered_cols, target=None)
+    results["dict_pos_fitted"] = dict_pos_pipe.fit(
+        table, features=centered_cols, target=None
+    )
 
     # Clustering methods don't fit the Pipeline.from_instance pattern well
     # (they're not transformers, they're predictors). Fit these eagerly in main().
     # Store the specifications so main() can fit them eagerly.
     results["kmeans_spec"] = {
         "estimator": cluster.MiniBatchKMeans(
-            n_clusters=n_components, tol=1e-3, batch_size=20, max_iter=50, random_state=rng
+            n_clusters=n_components,
+            tol=1e-3,
+            batch_size=20,
+            max_iter=50,
+            random_state=rng,
         ),
         "features": centered_cols,
     }
@@ -406,12 +444,14 @@ def main():
 
         # Access the fitted sklearn model from the first (and only) fitted step
         sklearn_model = fitted_pipeline.fitted_steps[0].model
-        if hasattr(sklearn_model, 'components_'):
+        if hasattr(sklearn_model, "components_"):
             return sklearn_model.components_[:n_components].copy()
-        elif hasattr(sklearn_model, 'cluster_centers_'):
+        elif hasattr(sklearn_model, "cluster_centers_"):
             return sklearn_model.cluster_centers_[:n_components].copy()
         else:
-            raise AttributeError(f"Model {method_name} has no components_ or cluster_centers_")
+            raise AttributeError(
+                f"Model {method_name} has no components_ or cluster_centers_"
+            )
 
     xo_results = {}
     print("xorq: Extracting PCA components...")
@@ -424,16 +464,22 @@ def main():
     xo_results["ica"] = extract_components(deferred_fitted["ica_fitted"], "ica")
 
     print("xorq: Extracting MiniBatchSparsePCA components...")
-    xo_results["sparse_pca"] = extract_components(deferred_fitted["sparse_pca_fitted"], "sparse_pca")
+    xo_results["sparse_pca"] = extract_components(
+        deferred_fitted["sparse_pca_fitted"], "sparse_pca"
+    )
 
     print("xorq: Extracting MiniBatchDictionaryLearning components...")
-    xo_results["dict_learning"] = extract_components(deferred_fitted["dict_learning_fitted"], "dict_learning")
+    xo_results["dict_learning"] = extract_components(
+        deferred_fitted["dict_learning_fitted"], "dict_learning"
+    )
 
     print("xorq: Extracting FactorAnalysis components...")
     xo_results["fa"] = extract_components(deferred_fitted["fa_fitted"], "fa")
 
     print("xorq: Extracting MiniBatchDictionaryLearning (positive dict) components...")
-    xo_results["dict_pos"] = extract_components(deferred_fitted["dict_pos_fitted"], "dict_pos")
+    xo_results["dict_pos"] = extract_components(
+        deferred_fitted["dict_pos_fitted"], "dict_pos"
+    )
 
     # KMeans: fit eagerly since it's a clustering method, not a transformer
     # (xorq's Pipeline doesn't handle clustering methods well)
@@ -447,7 +493,16 @@ def main():
     # ---- Compare components (informational only, no strict assertions) ----
     print("\n=== COMPONENT COMPARISON ===")
 
-    methods = ("pca", "nmf", "ica", "sparse_pca", "dict_learning", "kmeans", "fa", "dict_pos")
+    methods = (
+        "pca",
+        "nmf",
+        "ica",
+        "sparse_pca",
+        "dict_learning",
+        "kmeans",
+        "fa",
+        "dict_pos",
+    )
 
     for method in methods:
         # Compute differences for informational purposes
@@ -457,9 +512,13 @@ def main():
         print(f"{method.upper()}: max_diff={max_diff:.6f}, mean_diff={mean_diff:.6f}")
 
     print("\nNote: Some differences are expected due to:")
-    print("  - Stochastic algorithms (MiniBatch*, KMeans, FastICA) have inherent randomness")
+    print(
+        "  - Stochastic algorithms (MiniBatch*, KMeans, FastICA) have inherent randomness"
+    )
     print("  - xorq's data serialization may introduce floating point differences")
-    print("  - Non-convex optimization (NMF, FastICA) can converge to different local minima")
+    print(
+        "  - Non-convex optimization (NMF, FastICA) can converge to different local minima"
+    )
 
     print("\n=== Creating deferred plots ===")
 
@@ -470,28 +529,22 @@ def main():
     # Execute deferred plots
     print("=== Executing deferred plots ===")
     pca_png = deferred_matplotlib_plot(
-        dummy_table,
-        _build_pca_plot(components=xo_results["pca"]),
-        name="pca_plot"
+        dummy_table, _build_pca_plot(components=xo_results["pca"]), name="pca_plot"
     ).execute()
     nmf_png = deferred_matplotlib_plot(
-        dummy_table,
-        _build_nmf_plot(components=xo_results["nmf"]),
-        name="nmf_plot"
+        dummy_table, _build_nmf_plot(components=xo_results["nmf"]), name="nmf_plot"
     ).execute()
     ica_png = deferred_matplotlib_plot(
-        dummy_table,
-        _build_ica_plot(components=xo_results["ica"]),
-        name="ica_plot"
+        dummy_table, _build_ica_plot(components=xo_results["ica"]), name="ica_plot"
     ).execute()
     fa_png = deferred_matplotlib_plot(
-        dummy_table,
-        _build_fa_plot(components=xo_results["fa"]),
-        name="fa_plot"
+        dummy_table, _build_fa_plot(components=xo_results["fa"]), name="fa_plot"
     ).execute()
 
     # Build sklearn plots
-    sk_pca_fig = plot_gallery("Eigenfaces - PCA using randomized SVD", sk_results["pca"])
+    sk_pca_fig = plot_gallery(
+        "Eigenfaces - PCA using randomized SVD", sk_results["pca"]
+    )
     sk_nmf_fig = plot_gallery("Non-negative components - NMF", sk_results["nmf"])
     sk_ica_fig = plot_gallery("Independent components - FastICA", sk_results["ica"])
     sk_fa_fig = plot_gallery("Factor Analysis (FA)", sk_results["fa"])

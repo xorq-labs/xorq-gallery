@@ -103,9 +103,7 @@ def _plot_silhouette_analysis(
 
     y_lower = 10
     for i in range(n_clusters):
-        ith_cluster_silhouette_values = sample_silhouette_values[
-            cluster_labels == i
-        ]
+        ith_cluster_silhouette_values = sample_silhouette_values[cluster_labels == i]
         ith_cluster_silhouette_values.sort()
         size_cluster_i = ith_cluster_silhouette_values.shape[0]
         y_upper = y_lower + size_cluster_i
@@ -267,31 +265,41 @@ def xorq_way(df):
     table = con.register(df, "blobs")
 
     # KMeans for n_clusters = 2
-    sklearn_pipe_2 = SklearnPipeline([("kmeans", KMeans(n_clusters=2, random_state=10))])
+    sklearn_pipe_2 = SklearnPipeline(
+        [("kmeans", KMeans(n_clusters=2, random_state=10))]
+    )
     xorq_pipe_2 = Pipeline.from_instance(sklearn_pipe_2)
     fitted_2 = xorq_pipe_2.fit(table, features=FEATURES, target="true_label")
     preds_2 = fitted_2.predict(table, name="pred")
 
     # KMeans for n_clusters = 3
-    sklearn_pipe_3 = SklearnPipeline([("kmeans", KMeans(n_clusters=3, random_state=10))])
+    sklearn_pipe_3 = SklearnPipeline(
+        [("kmeans", KMeans(n_clusters=3, random_state=10))]
+    )
     xorq_pipe_3 = Pipeline.from_instance(sklearn_pipe_3)
     fitted_3 = xorq_pipe_3.fit(table, features=FEATURES, target="true_label")
     preds_3 = fitted_3.predict(table, name="pred")
 
     # KMeans for n_clusters = 4
-    sklearn_pipe_4 = SklearnPipeline([("kmeans", KMeans(n_clusters=4, random_state=10))])
+    sklearn_pipe_4 = SklearnPipeline(
+        [("kmeans", KMeans(n_clusters=4, random_state=10))]
+    )
     xorq_pipe_4 = Pipeline.from_instance(sklearn_pipe_4)
     fitted_4 = xorq_pipe_4.fit(table, features=FEATURES, target="true_label")
     preds_4 = fitted_4.predict(table, name="pred")
 
     # KMeans for n_clusters = 5
-    sklearn_pipe_5 = SklearnPipeline([("kmeans", KMeans(n_clusters=5, random_state=10))])
+    sklearn_pipe_5 = SklearnPipeline(
+        [("kmeans", KMeans(n_clusters=5, random_state=10))]
+    )
     xorq_pipe_5 = Pipeline.from_instance(sklearn_pipe_5)
     fitted_5 = xorq_pipe_5.fit(table, features=FEATURES, target="true_label")
     preds_5 = fitted_5.predict(table, name="pred")
 
     # KMeans for n_clusters = 6
-    sklearn_pipe_6 = SklearnPipeline([("kmeans", KMeans(n_clusters=6, random_state=10))])
+    sklearn_pipe_6 = SklearnPipeline(
+        [("kmeans", KMeans(n_clusters=6, random_state=10))]
+    )
     xorq_pipe_6 = Pipeline.from_instance(sklearn_pipe_6)
     fitted_6 = xorq_pipe_6.fit(table, features=FEATURES, target="true_label")
     preds_6 = fitted_6.predict(table, name="pred")
@@ -352,12 +360,20 @@ def main():
     # Assert numerical equivalence BEFORE plotting
     print("\n=== ASSERTIONS ===")
     print("Comparing silhouette scores (sklearn vs xorq):")
-    sk_silhouettes = pd.DataFrame({
-        "silhouette_avg": {n: sk_results[n]["silhouette_avg"] for n in RANGE_N_CLUSTERS}
-    })
-    xo_silhouettes = pd.DataFrame({
-        "silhouette_avg": {n: xo_silhouette_scores[n]["silhouette_avg"] for n in RANGE_N_CLUSTERS}
-    })
+    sk_silhouettes = pd.DataFrame(
+        {
+            "silhouette_avg": {
+                n: sk_results[n]["silhouette_avg"] for n in RANGE_N_CLUSTERS
+            }
+        }
+    )
+    xo_silhouettes = pd.DataFrame(
+        {
+            "silhouette_avg": {
+                n: xo_silhouette_scores[n]["silhouette_avg"] for n in RANGE_N_CLUSTERS
+            }
+        }
+    )
     pd.testing.assert_frame_equal(sk_silhouettes, xo_silhouettes, rtol=1e-5)
     print("Assertions passed: sklearn and xorq silhouette scores match.")
 
@@ -415,7 +431,7 @@ def main():
         plt.close(xo_fig)
         print(f"Saved: {out}")
 
-    print(f"\nAll composite plots saved to imgs/")
+    print("\nAll composite plots saved to imgs/")
 
 
 if __name__ in ("__main__", "__pytest_main__"):

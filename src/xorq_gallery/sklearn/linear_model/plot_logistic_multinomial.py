@@ -225,7 +225,9 @@ def sklearn_way(df):
 
     # Fit both models on the full dataset (matching sklearn example)
     model_multi = LogisticRegression(random_state=RANDOM_STATE).fit(X, y)
-    model_ovr = OneVsRestClassifier(LogisticRegression(random_state=RANDOM_STATE)).fit(X, y)
+    model_ovr = OneVsRestClassifier(LogisticRegression(random_state=RANDOM_STATE)).fit(
+        X, y
+    )
 
     # Evaluate on full dataset (matching sklearn example)
     acc_multi = model_multi.score(X, y)
@@ -265,9 +267,9 @@ def xorq_way(df):
     results = {}
 
     # Multinomial logistic regression
-    multi_sklearn_pipe = SklearnPipeline([
-        ("multinomial", LogisticRegression(random_state=RANDOM_STATE))
-    ])
+    multi_sklearn_pipe = SklearnPipeline(
+        [("multinomial", LogisticRegression(random_state=RANDOM_STATE))]
+    )
     multi_pipe = Pipeline.from_instance(multi_sklearn_pipe)
     multi_fitted = multi_pipe.fit(data, features=FEATURE_COLS, target=TARGET_COL)
     multi_preds = multi_fitted.predict(data, name=PRED_COL)
@@ -284,9 +286,9 @@ def xorq_way(df):
     con_ovr = xo.connect()
     data_ovr = con_ovr.register(df, "blobs_ovr")
 
-    ovr_sklearn_pipe = SklearnPipeline([
-        ("ovr", OneVsRestClassifier(LogisticRegression(random_state=RANDOM_STATE)))
-    ])
+    ovr_sklearn_pipe = SklearnPipeline(
+        [("ovr", OneVsRestClassifier(LogisticRegression(random_state=RANDOM_STATE)))]
+    )
     ovr_pipe = Pipeline.from_instance(ovr_sklearn_pipe)
     ovr_fitted = ovr_pipe.fit(data_ovr, features=FEATURE_COLS, target=TARGET_COL)
     ovr_preds = ovr_fitted.predict(data_ovr, name=PRED_COL)
@@ -346,7 +348,9 @@ def main():
     y = df[TARGET_COL].values
 
     xo_model_multi = LogisticRegression(random_state=RANDOM_STATE).fit(X, y)
-    xo_model_ovr = OneVsRestClassifier(LogisticRegression(random_state=RANDOM_STATE)).fit(X, y)
+    xo_model_ovr = OneVsRestClassifier(
+        LogisticRegression(random_state=RANDOM_STATE)
+    ).fit(X, y)
 
     # Build sklearn plots
     sk_decision_fig = _build_decision_boundary_plot(

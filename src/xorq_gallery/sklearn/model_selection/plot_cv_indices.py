@@ -80,8 +80,9 @@ def _generate_data():
 
     # Generate uneven class distribution
     percentiles_classes = [0.1, 0.3, 0.6]
-    y = np.hstack([[ii] * int(N_POINTS * perc)
-                   for ii, perc in enumerate(percentiles_classes)])
+    y = np.hstack(
+        [[ii] * int(N_POINTS * perc) for ii, perc in enumerate(percentiles_classes)]
+    )
 
     # Generate uneven group distribution
     group_prior = rng.dirichlet([2] * 10)
@@ -155,13 +156,11 @@ def _plot_cv_indices(cv, X, y, groups, n_splits, lw=10):
 
     # Plot the data classes and groups at the end
     ax.scatter(
-        range(len(X)), [ii + 1.5] * len(X),
-        c=y, marker="_", lw=lw, cmap=CMAP_DATA
+        range(len(X)), [ii + 1.5] * len(X), c=y, marker="_", lw=lw, cmap=CMAP_DATA
     )
 
     ax.scatter(
-        range(len(X)), [ii + 2.5] * len(X),
-        c=groups, marker="_", lw=lw, cmap=CMAP_DATA
+        range(len(X)), [ii + 2.5] * len(X), c=groups, marker="_", lw=lw, cmap=CMAP_DATA
     )
 
     # Formatting
@@ -240,13 +239,16 @@ def _plot_all_cv_strategies(X, y, groups, n_splits):
 
         # Plot the data classes and groups at the end
         ax.scatter(
-            range(len(X)), [ii + 1.5] * len(X),
-            c=y, marker="_", lw=10, cmap=CMAP_DATA
+            range(len(X)), [ii + 1.5] * len(X), c=y, marker="_", lw=10, cmap=CMAP_DATA
         )
 
         ax.scatter(
-            range(len(X)), [ii + 2.5] * len(X),
-            c=groups, marker="_", lw=10, cmap=CMAP_DATA
+            range(len(X)),
+            [ii + 2.5] * len(X),
+            c=groups,
+            marker="_",
+            lw=10,
+            cmap=CMAP_DATA,
         )
 
         # Formatting
@@ -295,7 +297,9 @@ def sklearn_way(data_dict):
     splits = list(cv.split(X=X, y=y, groups=None))
 
     print(f"Number of splits: {len(splits)}")
-    print(f"First split train size: {len(splits[0][0])}, test size: {len(splits[0][1])}")
+    print(
+        f"First split train size: {len(splits[0][0])}, test size: {len(splits[0][1])}"
+    )
 
     # Generate plot for KFold
     fig_kfold = _plot_cv_indices(cv, X, y, groups, N_SPLITS)
@@ -351,7 +355,7 @@ def xorq_way(data_dict):
     df = data_dict["df"]
     X = data_dict["X"]
     y = data_dict["y"]
-    groups = data_dict["groups"]
+    # groups = data_dict["groups"]  # Not used in xorq path (no GroupKFold support)
 
     # Register data
     table = con.register(df, "cv_data")
@@ -363,7 +367,9 @@ def xorq_way(data_dict):
     splits = list(cv.split(X=X, y=y, groups=None))
 
     print(f"Number of splits: {len(splits)}")
-    print(f"First split train size: {len(splits[0][0])}, test size: {len(splits[0][1])}")
+    print(
+        f"First split train size: {len(splits[0][0])}, test size: {len(splits[0][1])}"
+    )
 
     return {
         "splits": splits,
@@ -397,16 +403,20 @@ def main():
 
     assert len(sk_splits) == len(xo_splits), "Number of splits must match"
 
-    sk_split_df = pd.DataFrame({
-        f"fold_{i}_{role}": pd.Series(indices)
-        for i, (train, test) in enumerate(sk_splits)
-        for role, indices in [("train", train), ("test", test)]
-    })
-    xo_split_df = pd.DataFrame({
-        f"fold_{i}_{role}": pd.Series(indices)
-        for i, (train, test) in enumerate(xo_splits)
-        for role, indices in [("train", train), ("test", test)]
-    })
+    sk_split_df = pd.DataFrame(
+        {
+            f"fold_{i}_{role}": pd.Series(indices)
+            for i, (train, test) in enumerate(sk_splits)
+            for role, indices in [("train", train), ("test", test)]
+        }
+    )
+    xo_split_df = pd.DataFrame(
+        {
+            f"fold_{i}_{role}": pd.Series(indices)
+            for i, (train, test) in enumerate(xo_splits)
+            for role, indices in [("train", train), ("test", test)]
+        }
+    )
     pd.testing.assert_frame_equal(sk_split_df, xo_split_df)
     print("Assertions passed: sklearn and xorq CV splits are identical.")
 

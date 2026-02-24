@@ -30,7 +30,6 @@ from xorq.expr.ml.pipeline_lib import Pipeline
 
 from xorq_gallery.utils import (
     fig_to_image,
-    load_plot_bytes,
 )
 
 
@@ -128,29 +127,37 @@ def _build_models():
         Dict of model_name -> sklearn estimator instance
     """
     # Base estimators
-    linear_ridge = SklearnPipeline([
-        ("standardscaler", StandardScaler()),
-        ("ridgecv", RidgeCV()),
-    ])
+    linear_ridge = SklearnPipeline(
+        [
+            ("standardscaler", StandardScaler()),
+            ("ridgecv", RidgeCV()),
+        ]
+    )
 
-    spline_ridge = SklearnPipeline([
-        ("splinetransformer", SplineTransformer(n_knots=6, degree=3)),
-        ("polynomialfeatures", PolynomialFeatures(interaction_only=True)),
-        ("ridgecv", RidgeCV()),
-    ])
+    spline_ridge = SklearnPipeline(
+        [
+            ("splinetransformer", SplineTransformer(n_knots=6, degree=3)),
+            ("polynomialfeatures", PolynomialFeatures(interaction_only=True)),
+            ("ridgecv", RidgeCV()),
+        ]
+    )
 
     hgbt = HistGradientBoostingRegressor(random_state=0)
 
     # Create fresh instances for StackingRegressor
-    stack_linear_ridge = SklearnPipeline([
-        ("standardscaler", StandardScaler()),
-        ("ridgecv", RidgeCV()),
-    ])
-    stack_spline_ridge = SklearnPipeline([
-        ("splinetransformer", SplineTransformer(n_knots=6, degree=3)),
-        ("polynomialfeatures", PolynomialFeatures(interaction_only=True)),
-        ("ridgecv", RidgeCV()),
-    ])
+    stack_linear_ridge = SklearnPipeline(
+        [
+            ("standardscaler", StandardScaler()),
+            ("ridgecv", RidgeCV()),
+        ]
+    )
+    stack_spline_ridge = SklearnPipeline(
+        [
+            ("splinetransformer", SplineTransformer(n_knots=6, degree=3)),
+            ("polynomialfeatures", PolynomialFeatures(interaction_only=True)),
+            ("ridgecv", RidgeCV()),
+        ]
+    )
     stack_hgbt = HistGradientBoostingRegressor(random_state=0)
 
     estimators = [
@@ -242,9 +249,7 @@ def sklearn_way(df, models):
     # Fit all models on full dataset - smart flattening with comprehension
     model_names = ["Linear Ridge", "Spline Ridge", "HGBT", "Stacking"]
     fitted_models = {name: models[name].fit(X, y) for name in model_names}
-    predictions = {
-        name: fitted_models[name].predict(x_plot) for name in model_names
-    }
+    predictions = {name: fitted_models[name].predict(x_plot) for name in model_names}
 
     for name in model_names:
         print(f"  sklearn: {name:20s} fitted and predicted")
@@ -285,7 +290,9 @@ def xorq_way(df, models, x_plot):
     spline_ridge_preds = spline_ridge_fitted.predict(plot_data, name=PRED_COL)
 
     # HGBT
-    hgbt_pipe = Pipeline.from_instance(SklearnPipeline([("histgradientboostingregressor", models["HGBT"])]))
+    hgbt_pipe = Pipeline.from_instance(
+        SklearnPipeline([("histgradientboostingregressor", models["HGBT"])])
+    )
     hgbt_fitted = hgbt_pipe.fit(data, features=FEATURE_COLS, target=TARGET_COL)
     hgbt_preds = hgbt_fitted.predict(plot_data, name=PRED_COL)
 
@@ -294,11 +301,11 @@ def xorq_way(df, models, x_plot):
         estimators=models["Stacking"].estimators,
         final_estimator=models["Stacking"].final_estimator,
     )
-    stacking_pipeline = SklearnPipeline([("stackingregressorwrapper", wrapped_stacking)])
-    stacking_pipe = Pipeline.from_instance(stacking_pipeline)
-    stacking_fitted = stacking_pipe.fit(
-        data, features=FEATURE_COLS, target=TARGET_COL
+    stacking_pipeline = SklearnPipeline(
+        [("stackingregressorwrapper", wrapped_stacking)]
     )
+    stacking_pipe = Pipeline.from_instance(stacking_pipeline)
+    stacking_fitted = stacking_pipe.fit(data, features=FEATURE_COLS, target=TARGET_COL)
     stacking_preds = stacking_fitted.predict(plot_data, name=PRED_COL)
 
     return {

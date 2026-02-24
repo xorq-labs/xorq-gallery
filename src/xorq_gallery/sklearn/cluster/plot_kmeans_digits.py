@@ -108,10 +108,7 @@ def _plot_pca_clusters(reduced_data, kmeans_fitted, n_digits, h=0.02):
     y_min = reduced_data[:, 1].min() - 1
     y_max = reduced_data[:, 1].max() + 1
 
-    xx, yy = np.meshgrid(
-        np.arange(x_min, x_max, h),
-        np.arange(y_min, y_max, h)
-    )
+    xx, yy = np.meshgrid(np.arange(x_min, x_max, h), np.arange(y_min, y_max, h))
 
     # Obtain labels for each point in mesh
     Z = kmeans_fitted.predict(np.c_[xx.ravel(), yy.ravel()])
@@ -127,12 +124,7 @@ def _plot_pca_clusters(reduced_data, kmeans_fitted, n_digits, h=0.02):
         origin="lower",
     )
 
-    ax.plot(
-        reduced_data[:, 0],
-        reduced_data[:, 1],
-        "k.",
-        markersize=2
-    )
+    ax.plot(reduced_data[:, 0], reduced_data[:, 1], "k.", markersize=2)
 
     # Plot centroids as white X
     centroids = kmeans_fitted.cluster_centers_
@@ -174,12 +166,7 @@ def _build_pca_plot(df):
     reduced_data = PCA(n_components=2).fit_transform(data)
 
     # Refit KMeans on reduced data for visualization
-    kmeans_viz = KMeans(
-        init="k-means++",
-        n_clusters=n_digits,
-        n_init=4,
-        random_state=0
-    )
+    kmeans_viz = KMeans(init="k-means++", n_clusters=n_digits, n_init=4, random_state=0)
     kmeans_viz.fit(reduced_data)
 
     return _plot_pca_clusters(reduced_data, kmeans_viz, n_digits)
@@ -210,7 +197,9 @@ def _bench_k_means(kmeans, name, data, labels):
         Benchmark results including metrics and fitted estimator
     """
     t0 = time()
-    estimator = SklearnPipeline([("standardscaler", StandardScaler()), ("kmeans", kmeans)]).fit(data)
+    estimator = SklearnPipeline(
+        [("standardscaler", StandardScaler()), ("kmeans", kmeans)]
+    ).fit(data)
     fit_time = time() - t0
 
     # Basic results
@@ -218,8 +207,7 @@ def _bench_k_means(kmeans, name, data, labels):
 
     # Clustering metrics
     results += [
-        metric_fn(labels, estimator[-1].labels_)
-        for metric_fn in CLUSTERING_METRICS
+        metric_fn(labels, estimator[-1].labels_) for metric_fn in CLUSTERING_METRICS
     ]
 
     # Silhouette score
@@ -267,57 +255,29 @@ def sklearn_way(dataset):
     print("init\t\ttime\tinertia\thomo\tcompl\tv-meas\tARI\tAMI\tsilhouette")
 
     # k-means++ initialization
-    kmeans_kpp = KMeans(
-        init="k-means++",
-        n_clusters=n_digits,
-        n_init=4,
-        random_state=0
-    )
+    kmeans_kpp = KMeans(init="k-means++", n_clusters=n_digits, n_init=4, random_state=0)
     res_kpp = _bench_k_means(
-        kmeans=kmeans_kpp,
-        name="k-means++",
-        data=data,
-        labels=labels
+        kmeans=kmeans_kpp, name="k-means++", data=data, labels=labels
     )
 
     # Random initialization
-    kmeans_rand = KMeans(
-        init="random",
-        n_clusters=n_digits,
-        n_init=4,
-        random_state=0
-    )
+    kmeans_rand = KMeans(init="random", n_clusters=n_digits, n_init=4, random_state=0)
     res_rand = _bench_k_means(
-        kmeans=kmeans_rand,
-        name="random",
-        data=data,
-        labels=labels
+        kmeans=kmeans_rand, name="random", data=data, labels=labels
     )
 
     # PCA-based initialization
     pca = PCA(n_components=n_digits).fit(data)
-    kmeans_pca = KMeans(
-        init=pca.components_,
-        n_clusters=n_digits,
-        n_init=1
-    )
+    kmeans_pca = KMeans(init=pca.components_, n_clusters=n_digits, n_init=1)
     res_pca = _bench_k_means(
-        kmeans=kmeans_pca,
-        name="PCA-based",
-        data=data,
-        labels=labels
+        kmeans=kmeans_pca, name="PCA-based", data=data, labels=labels
     )
 
     print(82 * "_")
 
     # Create PCA visualization (use k-means++ on reduced data)
     reduced_data = PCA(n_components=2).fit_transform(data)
-    kmeans_viz = KMeans(
-        init="k-means++",
-        n_clusters=n_digits,
-        n_init=4,
-        random_state=0
-    )
+    kmeans_viz = KMeans(init="k-means++", n_clusters=n_digits, n_init=4, random_state=0)
     kmeans_viz.fit(reduced_data)
 
     return {
@@ -349,8 +309,7 @@ def xorq_way(dataset):
     # Register full dataset with labels
     # Use 'f' prefix for feature columns to avoid numeric-only names
     df = pd.DataFrame(
-        data,
-        columns=[f"{FEATURE_PREFIX}{i}" for i in range(data.shape[1])]
+        data, columns=[f"{FEATURE_PREFIX}{i}" for i in range(data.shape[1])]
     )
     df[LABEL_COL] = labels
     table = con.register(df, "digits")
@@ -361,30 +320,44 @@ def xorq_way(dataset):
     make_metric = deferred_sklearn_metric(target=LABEL_COL, pred=PRED_COL)
 
     # k-means++ initialization
-    sklearn_pipe_kpp = SklearnPipeline([
-        ("standardscaler", StandardScaler()),
-        ("kmeans", KMeans(init="k-means++", n_clusters=n_digits, n_init=4, random_state=0)),
-    ])
+    sklearn_pipe_kpp = SklearnPipeline(
+        [
+            ("standardscaler", StandardScaler()),
+            (
+                "kmeans",
+                KMeans(init="k-means++", n_clusters=n_digits, n_init=4, random_state=0),
+            ),
+        ]
+    )
     xorq_pipe_kpp = Pipeline.from_instance(sklearn_pipe_kpp)
     fitted_kpp = xorq_pipe_kpp.fit(table, features=features, target=LABEL_COL)
     preds_kpp = fitted_kpp.predict(table, name=PRED_COL)
-    metrics_kpp = preds_kpp.agg(**{
-        metric_name: make_metric(metric=metric_fn)
-        for metric_name, metric_fn in zip(METRIC_NAMES, CLUSTERING_METRICS)
-    })
+    metrics_kpp = preds_kpp.agg(
+        **{
+            metric_name: make_metric(metric=metric_fn)
+            for metric_name, metric_fn in zip(METRIC_NAMES, CLUSTERING_METRICS)
+        }
+    )
 
     # Random initialization
-    sklearn_pipe_rand = SklearnPipeline([
-        ("standardscaler", StandardScaler()),
-        ("kmeans", KMeans(init="random", n_clusters=n_digits, n_init=4, random_state=0)),
-    ])
+    sklearn_pipe_rand = SklearnPipeline(
+        [
+            ("standardscaler", StandardScaler()),
+            (
+                "kmeans",
+                KMeans(init="random", n_clusters=n_digits, n_init=4, random_state=0),
+            ),
+        ]
+    )
     xorq_pipe_rand = Pipeline.from_instance(sklearn_pipe_rand)
     fitted_rand = xorq_pipe_rand.fit(table, features=features, target=LABEL_COL)
     preds_rand = fitted_rand.predict(table, name=PRED_COL)
-    metrics_rand = preds_rand.agg(**{
-        metric_name: make_metric(metric=metric_fn)
-        for metric_name, metric_fn in zip(METRIC_NAMES, CLUSTERING_METRICS)
-    })
+    metrics_rand = preds_rand.agg(
+        **{
+            metric_name: make_metric(metric=metric_fn)
+            for metric_name, metric_fn in zip(METRIC_NAMES, CLUSTERING_METRICS)
+        }
+    )
 
     # Note: PCA-based init passes pca.components_ (a numpy ndarray) as the
     # `init` parameter to KMeans.  xorq's Pipeline stores model parameters in
@@ -452,23 +425,19 @@ def main():
             sk_value = sk_res[metric_name]
             xo_value = xo_metrics_df[metric_name].iloc[0]
             print(
-                f"  {metric_name:12s} - "
-                f"sklearn: {sk_value:.3f}, "
-                f"xorq: {xo_value:.3f}"
+                f"  {metric_name:12s} - sklearn: {sk_value:.3f}, xorq: {xo_value:.3f}"
             )
 
-        sklearn_metrics_data.append({
-            "init": init_method,
-            **{name: sk_res[name] for name in METRIC_NAMES}
-        })
+        sklearn_metrics_data.append(
+            {"init": init_method, **{name: sk_res[name] for name in METRIC_NAMES}}
+        )
 
-        xorq_metrics_data.append({
-            "init": init_method,
-            **{
-                name: xo_metrics_df[name].iloc[0]
-                for name in METRIC_NAMES
+        xorq_metrics_data.append(
+            {
+                "init": init_method,
+                **{name: xo_metrics_df[name].iloc[0] for name in METRIC_NAMES},
             }
-        })
+        )
 
     # Create DataFrames for comparison
     sklearn_metrics_df = pd.DataFrame(sklearn_metrics_data).set_index("init")
@@ -476,15 +445,12 @@ def main():
 
     # Single assertion comparing all metrics
     pd.testing.assert_frame_equal(
-        sklearn_metrics_df,
-        xorq_metrics_df,
-        rtol=1e-2,
-        check_dtype=False
+        sklearn_metrics_df, xorq_metrics_df, rtol=1e-2, check_dtype=False
     )
 
     # Also print PCA-based sklearn results for reference
     sk_res_pca = sk_results["PCA-based"]
-    print(f"\nPCA-based (sklearn only):")
+    print("\nPCA-based (sklearn only):")
     for metric_name in METRIC_NAMES:
         print(f"  {metric_name:12s} - sklearn: {sk_res_pca[metric_name]:.3f}")
 
@@ -494,16 +460,11 @@ def main():
     )
 
     print("\n=== PLOTTING ===")
-    xo_png = deferred_matplotlib_plot(
-        xo_results["table"],
-        _build_pca_plot
-    ).execute()
+    xo_png = deferred_matplotlib_plot(xo_results["table"], _build_pca_plot).execute()
 
     # Build sklearn plot
     sk_fig = _plot_pca_clusters(
-        sk_results["reduced_data"],
-        sk_results["kmeans_viz"],
-        dataset["n_digits"]
+        sk_results["reduced_data"], sk_results["kmeans_viz"], dataset["n_digits"]
     )
 
     # Composite: sklearn (left) | xorq (right)
@@ -519,10 +480,7 @@ def main():
     axes[1].set_title("xorq")
     axes[1].axis("off")
 
-    fig.suptitle(
-        "K-Means Clustering on Digits: sklearn vs xorq",
-        fontsize=14
-    )
+    fig.suptitle("K-Means Clustering on Digits: sklearn vs xorq", fontsize=14)
     fig.tight_layout()
     out = "imgs/plot_kmeans_digits.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")

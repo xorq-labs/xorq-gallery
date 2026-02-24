@@ -52,7 +52,7 @@ lagged_features_ns = (
     ("lagged_count_2h", 2),
     ("lagged_count_3h", 3),
     ("lagged_count_1d", 24),
-    ("lagged_count_7d", 24*7),
+    ("lagged_count_7d", 24 * 7),
 )
 
 # ---------------------------------------------------------------------------
@@ -66,8 +66,7 @@ def _load_data():
     )
     df = bike_sharing.frame
     return (
-        df
-        .astype({name: float for name in ("count", "temp", "humidity", "windspeed")})
+        df.astype({name: float for name in ("count", "temp", "humidity", "windspeed")})
         .astype({name: int for name in ("hour", "weekday", "month")})
         .assign(**{ROW_IDX: range(len(df))})
     )
@@ -115,10 +114,12 @@ def sklearn_way(df):
     # Engineer lagged features with pandas
     ldf = (
         df[list(("count", ROW_IDX) + calendar_features + weather_features)]
-        .assign(**{
-            lagged_feature: lambda d, n=n: d["count"].shift(n)
-            for lagged_feature, n in lagged_features_ns
-        })
+        .assign(
+            **{
+                lagged_feature: lambda d, n=n: d["count"].shift(n)
+                for lagged_feature, n in lagged_features_ns
+            }
+        )
         .dropna()
     )
 
@@ -160,14 +161,12 @@ def xorq_way(df):
 
     # Lagged features via ibis window functions
     lagged_features = list(lagged_feature for lagged_feature, _ in lagged_features_ns)
-    data_with_lags = (
-        data
-        .mutate(**{
+    data_with_lags = data.mutate(
+        **{
             lagged_feature: data[target].lag(n).over(order_by=ROW_IDX)
             for (lagged_feature, n) in lagged_features_ns
-        })
-        .drop_null(subset=lagged_features)
-    )
+        }
+    ).drop_null(subset=lagged_features)
 
     all_features = tuple(lagged_features) + calendar_features + weather_features
 

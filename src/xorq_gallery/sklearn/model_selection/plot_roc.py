@@ -64,10 +64,12 @@ def _load_data():
 
 def _build_pipeline():
     """Return sklearn Pipeline with StandardScaler and SVC for binary classification."""
-    return SklearnPipeline([
-        ("scaler", StandardScaler()),
-        ("svc", SVC(kernel="linear", probability=True, random_state=RANDOM_STATE)),
-    ])
+    return SklearnPipeline(
+        [
+            ("scaler", StandardScaler()),
+            ("svc", SVC(kernel="linear", probability=True, random_state=RANDOM_STATE)),
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +77,9 @@ def _build_pipeline():
 # ---------------------------------------------------------------------------
 
 
-def _plot_roc_curves(fpr_dict, tpr_dict, roc_auc_dict, n_classes, class_names, title_prefix=""):
+def _plot_roc_curves(
+    fpr_dict, tpr_dict, roc_auc_dict, n_classes, class_names, title_prefix=""
+):
     """Plot ROC curves for each class and micro-average."""
     fig, ax = plt.subplots(figsize=(8, 6))
     colors = plt.get_cmap("tab10")
@@ -183,19 +187,25 @@ def xorq_way(train_data, test_data, feature_cols, n_classes):
         pred_col_i = f"scores_{i}"
 
         # Add binarized target column: 1 if target == i, else 0
-        train_i = train_data.mutate(**{target_col_i: (train_data.target == i).cast(int)})
+        train_i = train_data.mutate(
+            **{target_col_i: (train_data.target == i).cast(int)}
+        )
         test_i = test_data.mutate(**{target_col_i: (test_data.target == i).cast(int)})
 
         # Build fresh pipeline for each class
         pipeline = _build_pipeline()
         xorq_pipe = Pipeline.from_instance(pipeline)
-        fitted = xorq_pipe.fit(train_i, features=tuple(feature_cols), target=target_col_i)
+        fitted = xorq_pipe.fit(
+            train_i, features=tuple(feature_cols), target=target_col_i
+        )
         proba_expr = fitted.predict_proba(test_i, name=pred_col_i)
 
         # Deferred AUC from ROC curve
         make_roc_auc = toolz.compose(
             deferred_auc_from_curve,
-            deferred_sklearn_metric(target=target_col_i, pred=pred_col_i, metric=roc_curve),
+            deferred_sklearn_metric(
+                target=target_col_i, pred=pred_col_i, metric=roc_curve
+            ),
         )
         metrics_expr = proba_expr.agg(**{f"roc_auc_{i}": make_roc_auc})
 
@@ -260,10 +270,19 @@ def main():
         xo_deferred[i]["proba_df"] = proba_df
 
     # Compute micro-average
-    y_test_all = np.column_stack([xo_deferred[i]["proba_df"][f"target_{i}"].values for i in range(n_classes)])
-    y_score_all = np.column_stack([np.array([p[1] for p in xo_deferred[i]["proba_df"][f"scores_{i}"]]) for i in range(n_classes)])
+    y_test_all = np.column_stack(
+        [xo_deferred[i]["proba_df"][f"target_{i}"].values for i in range(n_classes)]
+    )
+    y_score_all = np.column_stack(
+        [
+            np.array([p[1] for p in xo_deferred[i]["proba_df"][f"scores_{i}"]])
+            for i in range(n_classes)
+        ]
+    )
 
-    fpr_xo["micro"], tpr_xo["micro"], _ = roc_curve(y_test_all.ravel(), y_score_all.ravel())
+    fpr_xo["micro"], tpr_xo["micro"], _ = roc_curve(
+        y_test_all.ravel(), y_score_all.ravel()
+    )
     roc_auc_xo["micro"] = auc(fpr_xo["micro"], tpr_xo["micro"])
     print(f"  xorq:    {'micro-average':15s} | AUC = {roc_auc_xo['micro']:.4f}")
 
@@ -276,7 +295,7 @@ def main():
             sk_results["roc_auc"][i],
             roc_auc_xo[i],
             rtol=0.05,
-            err_msg=f"Class {i} AUC mismatch"
+            err_msg=f"Class {i} AUC mismatch",
         )
 
     # Assert micro-average AUC matches
@@ -284,7 +303,7 @@ def main():
         sk_results["roc_auc"]["micro"],
         roc_auc_xo["micro"],
         rtol=0.05,
-        err_msg="Micro-average AUC mismatch"
+        err_msg="Micro-average AUC mismatch",
     )
     print("Assertions passed: sklearn and xorq ROC AUC values match.")
 
@@ -295,17 +314,12 @@ def main():
         sk_results["roc_auc"],
         n_classes,
         class_names,
-        "sklearn: "
+        "sklearn: ",
     )
 
     # Build xorq plot
     xo_fig = _plot_roc_curves(
-        fpr_xo,
-        tpr_xo,
-        roc_auc_xo,
-        n_classes,
-        class_names,
-        "xorq: "
+        fpr_xo, tpr_xo, roc_auc_xo, n_classes, class_names, "xorq: "
     )
 
     # Composite side-by-side

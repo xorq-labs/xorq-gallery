@@ -36,10 +36,7 @@ from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
 
 from xorq_gallery.utils import (
-    deferred_matplotlib_plot,
-    deferred_sequential_split,
     fig_to_image,
-    load_plot_bytes,
 )
 
 
@@ -110,64 +107,75 @@ def _build_classifiers():
     return (
         (
             "Nearest Neighbors",
-            SklearnPipeline([
-                ("scaler", StandardScaler()),
-                ("clf", KNeighborsClassifier(3))
-            ])
+            SklearnPipeline(
+                [("scaler", StandardScaler()), ("clf", KNeighborsClassifier(3))]
+            ),
         ),
         (
             "Linear SVM",
-            SklearnPipeline([
-                ("scaler", StandardScaler()),
-                ("clf", SVC(kernel="linear", C=0.025))
-            ])
+            SklearnPipeline(
+                [("scaler", StandardScaler()), ("clf", SVC(kernel="linear", C=0.025))]
+            ),
         ),
         (
             "RBF SVM",
-            SklearnPipeline([
-                ("scaler", StandardScaler()),
-                ("clf", SVC(gamma=2, C=1))
-            ])
+            SklearnPipeline([("scaler", StandardScaler()), ("clf", SVC(gamma=2, C=1))]),
         ),
         (
             "Decision Tree",
-            SklearnPipeline([
-                ("scaler", StandardScaler()),
-                ("clf", DecisionTreeClassifier(max_depth=5, random_state=RANDOM_STATE))
-            ])
+            SklearnPipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    (
+                        "clf",
+                        DecisionTreeClassifier(max_depth=5, random_state=RANDOM_STATE),
+                    ),
+                ]
+            ),
         ),
         (
             "Random Forest",
-            SklearnPipeline([
-                ("scaler", StandardScaler()),
-                ("clf", RandomForestClassifier(
-                    max_depth=5,
-                    n_estimators=10,
-                    max_features=1,
-                    random_state=RANDOM_STATE
-                ))
-            ])
+            SklearnPipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    (
+                        "clf",
+                        RandomForestClassifier(
+                            max_depth=5,
+                            n_estimators=10,
+                            max_features=1,
+                            random_state=RANDOM_STATE,
+                        ),
+                    ),
+                ]
+            ),
         ),
         (
             "Neural Net",
-            SklearnPipeline([
-                ("scaler", StandardScaler()),
-                ("clf", MLPClassifier(alpha=1, max_iter=1000, random_state=RANDOM_STATE))
-            ])
+            SklearnPipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    (
+                        "clf",
+                        MLPClassifier(
+                            alpha=1, max_iter=1000, random_state=RANDOM_STATE
+                        ),
+                    ),
+                ]
+            ),
         ),
         (
             "AdaBoost",
-            SklearnPipeline([
-                ("scaler", StandardScaler()),
-                ("clf", AdaBoostClassifier(random_state=RANDOM_STATE))
-            ])
+            SklearnPipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    ("clf", AdaBoostClassifier(random_state=RANDOM_STATE)),
+                ]
+            ),
         ),
         (
             "Naive Bayes",
-            SklearnPipeline([
-                ("scaler", StandardScaler()),
-                ("clf", GaussianNB())
-            ])
+            SklearnPipeline([("scaler", StandardScaler()), ("clf", GaussianNB())]),
         ),
     )
 
@@ -179,10 +187,7 @@ def _build_classifiers():
 
 def _plot_decision_boundary(ax, X, y, clf, title, x_min, x_max, y_min, y_max):
     """Plot decision boundary for a fitted sklearn classifier."""
-    xx, yy = np.meshgrid(
-        np.arange(x_min, x_max, H),
-        np.arange(y_min, y_max, H)
-    )
+    xx, yy = np.meshgrid(np.arange(x_min, x_max, H), np.arange(y_min, y_max, H))
     Z = clf.predict(np.c_[xx.ravel(), yy.ravel()])
     Z = Z.reshape(xx.shape)
 
@@ -229,6 +234,7 @@ def sklearn_way(datasets, classifiers):
         for clf_name, clf_template in classifiers:
             # Clone the pipeline for this fit
             from sklearn.base import clone
+
             clf = clone(clf_template)
 
             clf.fit(X_train, y_train)
@@ -327,20 +333,24 @@ def main():
         for clf_name in CLASSIFIER_NAMES:
             # sklearn results
             sk_acc = sk_results[ds_name][clf_name]["acc"]
-            sklearn_rows.append({
-                "dataset": ds_name,
-                "classifier": clf_name,
-                "accuracy": sk_acc,
-            })
+            sklearn_rows.append(
+                {
+                    "dataset": ds_name,
+                    "classifier": clf_name,
+                    "accuracy": sk_acc,
+                }
+            )
 
             # xorq results (execute deferred)
             xo_metrics_df = xo_results[ds_name][clf_name].execute()
             xo_acc = xo_metrics_df["acc"].iloc[0]
-            xorq_rows.append({
-                "dataset": ds_name,
-                "classifier": clf_name,
-                "accuracy": xo_acc,
-            })
+            xorq_rows.append(
+                {
+                    "dataset": ds_name,
+                    "classifier": clf_name,
+                    "accuracy": xo_acc,
+                }
+            )
             print(f"  xorq:   {ds_name:20s} | {clf_name:20s} | acc = {xo_acc:.3f}")
 
     # Build DataFrames for comparison
@@ -410,7 +420,15 @@ def main():
             # Get full dataset for boundary
             X, y = datasets[ds_name]
             _plot_decision_boundary(
-                ax, X, y, clf, f"{clf_name}\nacc={xo_acc:.2f}", x_min, x_max, y_min, y_max
+                ax,
+                X,
+                y,
+                clf,
+                f"{clf_name}\nacc={xo_acc:.2f}",
+                x_min,
+                x_max,
+                y_min,
+                y_max,
             )
 
             # Add row labels
@@ -434,7 +452,9 @@ def main():
     axes[1].set_title("xorq", fontsize=14, fontweight="bold", pad=10)
     axes[1].axis("off")
 
-    fig.suptitle("Classifier Comparison: sklearn vs xorq", fontsize=16, fontweight="bold")
+    fig.suptitle(
+        "Classifier Comparison: sklearn vs xorq", fontsize=16, fontweight="bold"
+    )
     fig.tight_layout()
     out = "imgs/plot_classifier_comparison.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")

@@ -25,17 +25,13 @@ import pandas as pd
 import xorq.api as xo
 from sklearn.linear_model import LinearRegression, QuantileRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from toolz import curry
 from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
 
 from xorq_gallery.utils import (
-    deferred_matplotlib_plot,
-    deferred_sequential_split,
     fig_to_image,
-    load_plot_bytes,
 )
 
 
@@ -254,23 +250,17 @@ def xorq_way(df, dataset_type="normal"):
     target_col = f"y_{dataset_type}"
 
     # Fit quantile regressors - flat, no loops
-    qr_05_sklearn = SklearnPipeline(
-        [("qr", QuantileRegressor(quantile=0.05, alpha=0))]
-    )
+    qr_05_sklearn = SklearnPipeline([("qr", QuantileRegressor(quantile=0.05, alpha=0))])
     qr_05_pipe = Pipeline.from_instance(qr_05_sklearn)
     qr_05_fitted = qr_05_pipe.fit(data, features=FEATURE_COLS, target=target_col)
     preds_05 = qr_05_fitted.predict(data, name="pred_q05")
 
-    qr_50_sklearn = SklearnPipeline(
-        [("qr", QuantileRegressor(quantile=0.5, alpha=0))]
-    )
+    qr_50_sklearn = SklearnPipeline([("qr", QuantileRegressor(quantile=0.5, alpha=0))])
     qr_50_pipe = Pipeline.from_instance(qr_50_sklearn)
     qr_50_fitted = qr_50_pipe.fit(data, features=FEATURE_COLS, target=target_col)
     preds_50 = qr_50_fitted.predict(data, name="pred_q50")
 
-    qr_95_sklearn = SklearnPipeline(
-        [("qr", QuantileRegressor(quantile=0.95, alpha=0))]
-    )
+    qr_95_sklearn = SklearnPipeline([("qr", QuantileRegressor(quantile=0.95, alpha=0))])
     qr_95_pipe = Pipeline.from_instance(qr_95_sklearn)
     qr_95_fitted = qr_95_pipe.fit(data, features=FEATURE_COLS, target=target_col)
     preds_95 = qr_95_fitted.predict(data, name="pred_q95")
@@ -288,7 +278,9 @@ def xorq_way(df, dataset_type="normal"):
         [("qr", QuantileRegressor(quantile=0.5, alpha=0))]
     )
     qr_median_pipe = Pipeline.from_instance(qr_median_sklearn)
-    qr_median_fitted = qr_median_pipe.fit(data, features=FEATURE_COLS, target=target_col)
+    qr_median_fitted = qr_median_pipe.fit(
+        data, features=FEATURE_COLS, target=target_col
+    )
     qr_median_preds = qr_median_fitted.predict(data, name="pred_qr")
 
     # Metrics
@@ -374,9 +366,8 @@ def main():
         xo_plot_df["pred_q95"] = xo_predictions[0.95]
 
         # Compute out_bounds flag for xorq predictions
-        xo_out_bounds = (
-            (xo_predictions[0.05] >= xo_plot_df[target_col].values)
-            | (xo_predictions[0.95] <= xo_plot_df[target_col].values)
+        xo_out_bounds = (xo_predictions[0.05] >= xo_plot_df[target_col].values) | (
+            xo_predictions[0.95] <= xo_plot_df[target_col].values
         )
         xo_plot_df["out_bounds"] = xo_out_bounds.astype(int)
 

@@ -30,7 +30,6 @@ from xorq.ibis_yaml.utils import freeze
 
 from xorq_gallery.utils import (
     deferred_matplotlib_plot,
-    fig_to_image,
     load_plot_bytes,
 )
 
@@ -137,7 +136,9 @@ def _build_svm_kernel_plot(pred_df, kernel, X_data, y_data, pipe_template):
     fitted_pipe = pipe_template.fit(X_data, y_data)
     fitted_clf = fitted_pipe.named_steps["svc"]
     fig, ax = plt.subplots(figsize=(6, 5))
-    _plot_decision_boundary(ax, fitted_clf, X_data, y_data, kernel, X_MIN, X_MAX, Y_MIN, Y_MAX)
+    _plot_decision_boundary(
+        ax, fitted_clf, X_data, y_data, kernel, X_MIN, X_MAX, Y_MIN, Y_MAX
+    )
     fig.tight_layout()
     return fig
 
@@ -160,7 +161,9 @@ def sklearn_way(df):
     for kernel in KERNELS:
         clf = svm.SVC(kernel=kernel, gamma=GAMMA)
         clf.fit(X, y)
-        print(f"  sklearn: kernel={kernel:8s} | n_support={len(clf.support_vectors_):2d}")
+        print(
+            f"  sklearn: kernel={kernel:8s} | n_support={len(clf.support_vectors_):2d}"
+        )
         results[kernel] = {
             "clf": clf,
             "support_vectors": clf.support_vectors_,
@@ -244,7 +247,9 @@ def main():
     for i, kernel in enumerate(KERNELS):
         # Top row: sklearn
         clf = sk_results[kernel]["clf"]
-        _plot_decision_boundary(axes[0, i], clf, X, y, kernel, X_MIN, X_MAX, Y_MIN, Y_MAX)
+        _plot_decision_boundary(
+            axes[0, i], clf, X, y, kernel, X_MIN, X_MAX, Y_MIN, Y_MAX
+        )
         if i == 0:
             axes[0, i].set_ylabel("sklearn", fontsize=12, fontweight="bold")
 

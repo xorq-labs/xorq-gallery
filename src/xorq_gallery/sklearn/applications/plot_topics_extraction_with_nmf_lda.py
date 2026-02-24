@@ -87,7 +87,9 @@ def plot_top_words(model, feature_names, n_top, title):
 @curry
 def _build_topics_figure(_df, model, feature_names, pipe_name):
     """Return a UDAF-compatible plotting function for topic extraction results."""
-    return plot_top_words(model, np.array(feature_names), n_top_words, f"xorq - {pipe_name}")
+    return plot_top_words(
+        model, np.array(feature_names), n_top_words, f"xorq - {pipe_name}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -189,13 +191,14 @@ def xorq_way(texts, targets, pipelines):
 
         plot_expr_pairs += (
             (
-                name, 
+                name,
                 deferred_matplotlib_plot(
-                    data, _build_topics_figure(
+                    data,
+                    _build_topics_figure(
                         model=decomp,
                         feature_names=tuple(feature_names),
                         pipe_name=name,
-                    )
+                    ),
                 ),
             ),
         )
@@ -222,7 +225,7 @@ def main():
 
     # For each method: build sklearn figure natively, execute xorq deferred,
     # composite side by side
-    for (name, plot_expr) in plot_expr_pairs:
+    for name, plot_expr in plot_expr_pairs:
         # Execute xorq deferred plot
         xo_png = plot_expr.execute()
 

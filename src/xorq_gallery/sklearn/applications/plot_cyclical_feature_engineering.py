@@ -61,17 +61,18 @@ def _load_data():
     )
     df = bike_sharing.frame
     return (
-        df
-        .assign(**{
-            weather_col: (
-                df[weather_col]
-                .astype(object)
-                .replace(to_replace="heavy_rain", value="rain")
-                .astype("category")
-            ),
-            y_col: df[y_col].div(df[y_col].max()),
-            ROW_IDX: range(len(df)),
-        })
+        df.assign(
+            **{
+                weather_col: (
+                    df[weather_col]
+                    .astype(object)
+                    .replace(to_replace="heavy_rain", value="rain")
+                    .astype("category")
+                ),
+                y_col: df[y_col].div(df[y_col].max()),
+                ROW_IDX: range(len(df)),
+            }
+        )
         .astype({col: int for col in ("hour", "weekday", "month")})
         .astype({col: float for col in ("temp", "feel_temp", "humidity", "windspeed")})
     )
@@ -187,13 +188,17 @@ def sklearn_way(df, pipelines):
     results = {}
     for name, pipe in zip(MODEL_NAMES, pipelines):
         result = cross_validate(
-            pipe, X, y,
+            pipe,
+            X,
+            y,
             cv=CV_SPLITTER,
             scoring="neg_mean_absolute_error",
         )
         mae_scores = -result["test_score"]
         results[name] = mae_scores
-        print(f"  sklearn {name:15s}: MAE={mae_scores.mean():.4f} (+/-{mae_scores.std():.4f})")
+        print(
+            f"  sklearn {name:15s}: MAE={mae_scores.mean():.4f} (+/-{mae_scores.std():.4f})"
+        )
 
     return results
 
@@ -213,8 +218,12 @@ def xorq_way(data, pipelines):
     for name, sk_pipe in zip(MODEL_NAMES, pipelines):
         xorq_pipe = Pipeline.from_instance(sk_pipe)
         cv_result = deferred_cross_val_score(
-            xorq_pipe, data, all_feature_cols, y_col,
-            cv=CV_SPLITTER, order_by=ROW_IDX,
+            xorq_pipe,
+            data,
+            all_feature_cols,
+            y_col,
+            cv=CV_SPLITTER,
+            order_by=ROW_IDX,
             scoring="neg_mean_absolute_error",
         )
         results[name] = cv_result
@@ -246,10 +255,7 @@ def main():
     xo_deferred = xorq_way(table, xo_pipelines)
 
     # Execute deferred CV scores
-    xo_scores = {
-        name: -xo_deferred[name].execute()
-        for name in MODEL_NAMES
-    }
+    xo_scores = {name: -xo_deferred[name].execute() for name in MODEL_NAMES}
     for name in MODEL_NAMES:
         mae = xo_scores[name]
         print(f"  xorq   {name:15s}: MAE={mae.mean():.4f} (+/-{mae.std():.4f})")
@@ -263,7 +269,9 @@ def main():
     print("Assertions passed.")
 
     # Build plots
-    sk_fig = _plot_cv_results(sk_results, "sklearn - Cyclical Feature Engineering (MAE)")
+    sk_fig = _plot_cv_results(
+        sk_results, "sklearn - Cyclical Feature Engineering (MAE)"
+    )
     xo_fig = _plot_cv_results(xo_scores, "xorq - Cyclical Feature Engineering (MAE)")
 
     fig, axes = plt.subplots(1, 2, figsize=(16, 5))
@@ -274,7 +282,12 @@ def main():
     axes[1].set_title("xorq", fontsize=14, fontweight="bold")
     axes[1].axis("off")
 
-    fig.suptitle("Cyclical Feature Engineering: sklearn vs xorq", fontsize=16, fontweight="bold", y=0.98)
+    fig.suptitle(
+        "Cyclical Feature Engineering: sklearn vs xorq",
+        fontsize=16,
+        fontweight="bold",
+        y=0.98,
+    )
     fig.tight_layout()
     out = "imgs/cyclical_feature_engineering.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")

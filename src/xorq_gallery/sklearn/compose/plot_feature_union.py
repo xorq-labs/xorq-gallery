@@ -84,8 +84,12 @@ def _load_data():
 
 def _build_pipeline():
     """Build FeatureUnion pipeline: PCA + SelectKBest + linear SVM."""
-    combined_features = FeatureUnion([("pca", PCA(n_components=2)), ("univ_select", SelectKBest(k=1))])
-    return SklearnPipeline([("features", combined_features), ("svm", SVC(kernel="linear"))])
+    combined_features = FeatureUnion(
+        [("pca", PCA(n_components=2)), ("univ_select", SelectKBest(k=1))]
+    )
+    return SklearnPipeline(
+        [("features", combined_features), ("svm", SVC(kernel="linear"))]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -166,8 +170,12 @@ def xorq_way(data):
         sk_pipe.set_params(**params)
         xorq_pipe = Pipeline.from_instance(sk_pipe)
         cv_result = deferred_cross_val_score(
-            xorq_pipe, data, FEATURE_COLS, Y_COL,
-            cv=CV_SPLITTER, random_seed=RANDOM_STATE,
+            xorq_pipe,
+            data,
+            FEATURE_COLS,
+            Y_COL,
+            cv=CV_SPLITTER,
+            random_seed=RANDOM_STATE,
         )
         results.append((params, cv_result))
 
@@ -233,8 +241,11 @@ def main():
     sk_ax.set_ylabel("Cross-Validation Score")
     sk_ax.set_ylim(0, 1.0)
     sk_ax.text(
-        0, sk_results["best_score"] + 0.02,
-        f"{sk_results['best_score']:.4f}", ha="center", fontsize=12,
+        0,
+        sk_results["best_score"] + 0.02,
+        f"{sk_results['best_score']:.4f}",
+        ha="center",
+        fontsize=12,
     )
     sk_fig.tight_layout()
 
@@ -248,7 +259,12 @@ def main():
     axes[1].set_title("xorq", fontsize=14, fontweight="bold")
     axes[1].axis("off")
 
-    fig.suptitle("FeatureUnion with GridSearchCV: sklearn vs xorq", fontsize=16, fontweight="bold", y=0.98)
+    fig.suptitle(
+        "FeatureUnion with GridSearchCV: sklearn vs xorq",
+        fontsize=16,
+        fontweight="bold",
+        y=0.98,
+    )
     fig.tight_layout()
     out = "imgs/feature_union.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")

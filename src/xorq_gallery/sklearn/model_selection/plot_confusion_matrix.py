@@ -62,10 +62,12 @@ def _load_data():
 
 def _build_pipeline():
     """Return sklearn Pipeline with StandardScaler and SVC."""
-    return SklearnPipeline([
-        ("scaler", StandardScaler()),
-        ("clf", SVC(kernel="linear", C=1.0, random_state=RANDOM_STATE)),
-    ])
+    return SklearnPipeline(
+        [
+            ("scaler", StandardScaler()),
+            ("clf", SVC(kernel="linear", C=1.0, random_state=RANDOM_STATE)),
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -77,13 +79,15 @@ def _plot_confusion_matrices(cm_raw, cm_norm, display_labels, title_prefix=""):
     """Plot both raw and normalized confusion matrices side by side."""
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    disp_raw = ConfusionMatrixDisplay(confusion_matrix=cm_raw,
-                                       display_labels=display_labels)
+    disp_raw = ConfusionMatrixDisplay(
+        confusion_matrix=cm_raw, display_labels=display_labels
+    )
     disp_raw.plot(ax=axes[0], cmap="Blues", colorbar=True)
     axes[0].set_title(f"{title_prefix}Confusion Matrix (counts)")
 
-    disp_norm = ConfusionMatrixDisplay(confusion_matrix=cm_norm,
-                                        display_labels=display_labels)
+    disp_norm = ConfusionMatrixDisplay(
+        confusion_matrix=cm_norm, display_labels=display_labels
+    )
     disp_norm.plot(ax=axes[1], cmap="Blues", colorbar=True, values_format=".2f")
     axes[1].set_title(f"{title_prefix}Confusion Matrix (normalized)")
 
@@ -155,7 +159,10 @@ def main():
     con = xo.connect()
     table = con.register(df, "iris_data")
     train_data, test_data = xo.train_test_splits(
-        table, test_sizes=TEST_SIZE, unique_key=ROW_IDX, random_seed=RANDOM_STATE,
+        table,
+        test_sizes=TEST_SIZE,
+        unique_key=ROW_IDX,
+        random_seed=RANDOM_STATE,
     )
     train_data = train_data.order_by(ROW_IDX)
     test_data = test_data.order_by(ROW_IDX)
@@ -192,9 +199,7 @@ def main():
     sk_fig = _plot_confusion_matrices(
         sk_results["cm_raw"], sk_results["cm_norm"], target_names, "sklearn: "
     )
-    xo_fig = _plot_confusion_matrices(
-        cm_raw_xo, cm_norm_xo, target_names, "xorq: "
-    )
+    xo_fig = _plot_confusion_matrices(cm_raw_xo, cm_norm_xo, target_names, "xorq: ")
 
     fig, axes = plt.subplots(1, 2, figsize=(20, 6))
     axes[0].imshow(fig_to_image(sk_fig))

@@ -39,7 +39,7 @@ from sklearn.preprocessing import (
 )
 from xorq.expr.ml.pipeline_lib import Pipeline
 
-from xorq_gallery.utils import fig_to_image, load_plot_bytes
+from xorq_gallery.utils import fig_to_image
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +118,7 @@ def _create_axes(figsize=(16, 6)):
         (ax_scatter_zoom, ax_histy_zoom, ax_histx_zoom) : zoomed-in view
         ax_colorbar : colorbar axis
     """
-    fig = plt.figure(figsize=figsize)
+    plt.figure(figsize=figsize)
 
     # Main plot axes
     left, width = 0.1, 0.22
@@ -158,9 +158,7 @@ def _create_axes(figsize=(16, 6)):
     )
 
 
-def _plot_distribution(
-    axes, X, y, hist_nbins=50, title="", x0_label="", x1_label=""
-):
+def _plot_distribution(axes, X, y, hist_nbins=50, title="", x0_label="", x1_label=""):
     """Plot scatter with marginal histograms for a 2D distribution.
 
     Parameters
@@ -407,7 +405,7 @@ def main():
     os.makedirs("imgs", exist_ok=True)
 
     data_dict = _load_data()
-    X_orig = data_dict["X"]
+    # X_orig = data_dict["X"]  # Not used, data_dict passed directly to sklearn_way
     y = data_dict["y"]
     feature_labels = data_dict["feature_labels"]
 
@@ -441,24 +439,30 @@ def main():
             # Extract from transformed column structure
             xo_X = np.array([list(row.values()) for row in xo_df["transformed"]])
         else:
-            raise ValueError(f"Unexpected column structure in transformed data: {xo_df.columns}")
+            raise ValueError(
+                f"Unexpected column structure in transformed data: {xo_df.columns}"
+            )
 
         # Build row for each scaler with summary statistics
-        sklearn_stats.append({
-            "scaler": name,
-            "mean_feature0": sk_X[:, 0].mean(),
-            "std_feature0": sk_X[:, 0].std(),
-            "mean_feature1": sk_X[:, 1].mean(),
-            "std_feature1": sk_X[:, 1].std(),
-        })
+        sklearn_stats.append(
+            {
+                "scaler": name,
+                "mean_feature0": sk_X[:, 0].mean(),
+                "std_feature0": sk_X[:, 0].std(),
+                "mean_feature1": sk_X[:, 1].mean(),
+                "std_feature1": sk_X[:, 1].std(),
+            }
+        )
 
-        xorq_stats.append({
-            "scaler": name,
-            "mean_feature0": xo_X[:, 0].mean(),
-            "std_feature0": xo_X[:, 0].std(),
-            "mean_feature1": xo_X[:, 1].mean(),
-            "std_feature1": xo_X[:, 1].std(),
-        })
+        xorq_stats.append(
+            {
+                "scaler": name,
+                "mean_feature0": xo_X[:, 0].mean(),
+                "std_feature0": xo_X[:, 0].std(),
+                "mean_feature1": xo_X[:, 1].mean(),
+                "std_feature1": xo_X[:, 1].std(),
+            }
+        )
 
     sklearn_df = pd.DataFrame(sklearn_stats).set_index("scaler")
     xorq_df = pd.DataFrame(xorq_stats).set_index("scaler")

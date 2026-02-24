@@ -79,15 +79,19 @@ def _load_data():
 def _build_pipelines():
     """Build sklearn pipeline instances for KNN and NCA+KNN."""
     pipelines = {
-        "KNN": SklearnPipeline([
-            ("scaler", StandardScaler()),
-            ("knn", KNeighborsClassifier(n_neighbors=N_NEIGHBORS)),
-        ]),
-        "NCA+KNN": SklearnPipeline([
-            ("scaler", StandardScaler()),
-            ("nca", NeighborhoodComponentsAnalysis(random_state=RANDOM_STATE)),
-            ("knn", KNeighborsClassifier(n_neighbors=N_NEIGHBORS)),
-        ]),
+        "KNN": SklearnPipeline(
+            [
+                ("scaler", StandardScaler()),
+                ("knn", KNeighborsClassifier(n_neighbors=N_NEIGHBORS)),
+            ]
+        ),
+        "NCA+KNN": SklearnPipeline(
+            [
+                ("scaler", StandardScaler()),
+                ("nca", NeighborhoodComponentsAnalysis(random_state=RANDOM_STATE)),
+                ("knn", KNeighborsClassifier(n_neighbors=N_NEIGHBORS)),
+            ]
+        ),
     }
     return pipelines
 
@@ -111,10 +115,7 @@ def _plot_decision_boundary(ax, X, y, clf, title, score):
     x_min, x_max = X[:, 0].min() - 0.5, X[:, 0].max() + 0.5
     y_min, y_max = X[:, 1].min() - 0.5, X[:, 1].max() + 0.5
 
-    xx, yy = np.meshgrid(
-        np.arange(x_min, x_max, H),
-        np.arange(y_min, y_max, H)
-    )
+    xx, yy = np.meshgrid(np.arange(x_min, x_max, H), np.arange(y_min, y_max, H))
 
     Z = clf.predict(np.c_[xx.ravel(), yy.ravel()])
     Z = Z.reshape(xx.shape)
@@ -125,9 +126,13 @@ def _plot_decision_boundary(ax, X, y, clf, title, score):
     ax.set_ylim(yy.min(), yy.max())
     ax.set_title(title)
     ax.text(
-        0.9, 0.1, f"{score:.2f}",
-        size=15, ha="center", va="center",
-        transform=ax.transAxes
+        0.9,
+        0.1,
+        f"{score:.2f}",
+        size=15,
+        ha="center",
+        va="center",
+        transform=ax.transAxes,
     )
 
 
@@ -135,14 +140,19 @@ def _plot_decision_boundary(ax, X, y, clf, title, score):
 def _build_knn_plot(df, xo_results):
     """Build decision boundary plot for KNN."""
     split_data = xo_results["KNN"]["split_data"]
-    fitted_clf = split_data["sklearn_clf"].fit(split_data["X_train"], split_data["y_train"])
+    fitted_clf = split_data["sklearn_clf"].fit(
+        split_data["X_train"], split_data["y_train"]
+    )
     score = fitted_clf.score(split_data["X_test"], split_data["y_test"])
 
     fig, ax = plt.subplots(figsize=(6, 5))
     _plot_decision_boundary(
-        ax, split_data["X_full"], split_data["y_full"], fitted_clf,
+        ax,
+        split_data["X_full"],
+        split_data["y_full"],
+        fitted_clf,
         f"KNN (k = {N_NEIGHBORS})",
-        score
+        score,
     )
     fig.tight_layout()
     return fig
@@ -152,14 +162,19 @@ def _build_knn_plot(df, xo_results):
 def _build_nca_knn_plot(df, xo_results):
     """Build decision boundary plot for NCA+KNN."""
     split_data = xo_results["NCA+KNN"]["split_data"]
-    fitted_clf = split_data["sklearn_clf"].fit(split_data["X_train"], split_data["y_train"])
+    fitted_clf = split_data["sklearn_clf"].fit(
+        split_data["X_train"], split_data["y_train"]
+    )
     score = fitted_clf.score(split_data["X_test"], split_data["y_test"])
 
     fig, ax = plt.subplots(figsize=(6, 5))
     _plot_decision_boundary(
-        ax, split_data["X_full"], split_data["y_full"], fitted_clf,
+        ax,
+        split_data["X_full"],
+        split_data["y_full"],
+        fitted_clf,
         f"NCA+KNN (k = {N_NEIGHBORS})",
-        score
+        score,
     )
     fig.tight_layout()
     return fig
@@ -336,29 +351,41 @@ def main():
     nca_knn_xo_metrics_df = xo_results["NCA+KNN"]["metrics"].execute()
     nca_knn_xo_score = nca_knn_xo_metrics_df["acc"].iloc[0]
     print(f"  xorq:   NCA+KNN         | acc = {nca_knn_xo_score:.4f}")
-    np.testing.assert_allclose(sk_results["NCA+KNN"]["score"], nca_knn_xo_score, rtol=1e-2)
+    np.testing.assert_allclose(
+        sk_results["NCA+KNN"]["score"], nca_knn_xo_score, rtol=1e-2
+    )
 
     print("Assertions passed: sklearn and xorq metrics match.")
 
     # Execute deferred plots
-    knn_png = deferred_matplotlib_plot(xo_results["KNN"]["preds"], _build_knn_plot(xo_results=xo_results)).execute()
-    nca_knn_png = deferred_matplotlib_plot(xo_results["NCA+KNN"]["preds"], _build_nca_knn_plot(xo_results=xo_results)).execute()
+    knn_png = deferred_matplotlib_plot(
+        xo_results["KNN"]["preds"], _build_knn_plot(xo_results=xo_results)
+    ).execute()
+    nca_knn_png = deferred_matplotlib_plot(
+        xo_results["NCA+KNN"]["preds"], _build_nca_knn_plot(xo_results=xo_results)
+    ).execute()
 
     # Build sklearn plots
     fig_sk, axes_sk = plt.subplots(1, 2, figsize=(12, 5))
 
     knn_result = sk_results["KNN"]
     _plot_decision_boundary(
-        axes_sk[0], knn_result["X_full"], knn_result["y_full"], knn_result["clf"],
+        axes_sk[0],
+        knn_result["X_full"],
+        knn_result["y_full"],
+        knn_result["clf"],
         f"KNN (k = {N_NEIGHBORS})",
-        knn_result["score"]
+        knn_result["score"],
     )
 
     nca_knn_result = sk_results["NCA+KNN"]
     _plot_decision_boundary(
-        axes_sk[1], nca_knn_result["X_full"], nca_knn_result["y_full"], nca_knn_result["clf"],
+        axes_sk[1],
+        nca_knn_result["X_full"],
+        nca_knn_result["y_full"],
+        nca_knn_result["clf"],
         f"NCA+KNN (k = {N_NEIGHBORS})",
-        nca_knn_result["score"]
+        nca_knn_result["score"],
     )
 
     fig_sk.suptitle("sklearn: KNN vs NCA+KNN", fontsize=14)
@@ -390,8 +417,7 @@ def main():
     axes[1].axis("off")
 
     fig.suptitle(
-        "Comparing Nearest Neighbors with/without NCA: sklearn vs xorq",
-        fontsize=16
+        "Comparing Nearest Neighbors with/without NCA: sklearn vs xorq", fontsize=16
     )
     fig.tight_layout()
     out = "imgs/plot_nca_classification.png"

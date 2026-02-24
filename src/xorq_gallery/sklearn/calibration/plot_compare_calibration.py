@@ -331,7 +331,10 @@ def main():
     table = con.register(df, "calibration_compare_data")
     test_size = (N_SAMPLES - TRAIN_SAMPLES) / N_SAMPLES
     train_data, test_data = xo.train_test_splits(
-        table, test_sizes=test_size, unique_key=ROW_IDX, random_seed=RANDOM_STATE,
+        table,
+        test_sizes=test_size,
+        unique_key=ROW_IDX,
+        random_seed=RANDOM_STATE,
     )
 
     # Sort by ROW_IDX for deterministic ordering in both paths
@@ -354,21 +357,22 @@ def main():
 
     print("\n=== ASSERTIONS ===")
     xo_metrics_executed = {
-        name: metrics_expr.execute()
-        for name, (_, metrics_expr) in xo_results.items()
+        name: metrics_expr.execute() for name, (_, metrics_expr) in xo_results.items()
     }
 
     for name in classifier_names:
         xo_brier = xo_metrics_executed[name]["brier"].iloc[0]
         print(f"  xorq:    {name:25s} | Brier = {xo_brier:.4f}")
 
-    sk_brier_df = pd.DataFrame({
-        name: [brier] for name, brier in sk_results["brier_scores"].items()
-    })
-    xo_brier_df = pd.DataFrame({
-        name: [xo_metrics_executed[name]["brier"].iloc[0]]
-        for name in classifier_names
-    })
+    sk_brier_df = pd.DataFrame(
+        {name: [brier] for name, brier in sk_results["brier_scores"].items()}
+    )
+    xo_brier_df = pd.DataFrame(
+        {
+            name: [xo_metrics_executed[name]["brier"].iloc[0]]
+            for name in classifier_names
+        }
+    )
     pd.testing.assert_frame_equal(sk_brier_df, xo_brier_df, rtol=1e-1)
     print("Assertions passed: sklearn and xorq Brier scores match.")
 
@@ -381,11 +385,15 @@ def main():
     xo_plot_dfs = []
     for name in classifier_names:
         pred_df = xo_predictions_executed[name]
-        xo_plot_dfs.append(pd.DataFrame({
-            Y_TRUE_COL: pred_df[TARGET_COL].values,
-            Y_PROB_COL: np.vstack(pred_df["predict_proba"].values)[:, 1],
-            CLF_NAME_COL: name,
-        }))
+        xo_plot_dfs.append(
+            pd.DataFrame(
+                {
+                    Y_TRUE_COL: pred_df[TARGET_COL].values,
+                    Y_PROB_COL: np.vstack(pred_df["predict_proba"].values)[:, 1],
+                    CLF_NAME_COL: name,
+                }
+            )
+        )
     xo_combined_df = pd.concat(xo_plot_dfs, ignore_index=True)
 
     xo_plot_table = con.register(xo_combined_df, "calibration_plot_data")

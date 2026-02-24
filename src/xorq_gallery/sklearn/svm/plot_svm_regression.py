@@ -29,7 +29,6 @@ from xorq.ibis_yaml.utils import freeze
 
 from xorq_gallery.utils import (
     deferred_matplotlib_plot,
-    fig_to_image,
     load_plot_bytes,
 )
 
@@ -86,19 +85,31 @@ def _plot_svr_result(ax, X, y, svr, kernel, color):
 
     support_indices = svr.support_
     ax.scatter(
-        X[support_indices], y[support_indices],
-        facecolor="none", edgecolor=color, s=50,
+        X[support_indices],
+        y[support_indices],
+        facecolor="none",
+        edgecolor=color,
+        s=50,
         label=f"{KERNEL_LABELS[kernel]} support vectors",
     )
 
     other_indices = np.setdiff1d(np.arange(len(X)), support_indices)
     ax.scatter(
-        X[other_indices], y[other_indices],
-        facecolor="none", edgecolor="k", s=50,
+        X[other_indices],
+        y[other_indices],
+        facecolor="none",
+        edgecolor="k",
+        s=50,
         label="other training data",
     )
 
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.15), ncol=1, fancybox=True, shadow=True)
+    ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.15),
+        ncol=1,
+        fancybox=True,
+        shadow=True,
+    )
     ax.set_xlabel("data")
     ax.set_ylabel("target")
     ax.set_title(f"{KERNEL_LABELS[kernel]} kernel")
@@ -138,7 +149,11 @@ def sklearn_way(df):
         svr.fit(X, y)
         y_pred = svr.predict(X)
         print(f"  sklearn: kernel={kernel:8s} | n_support={len(svr.support_):2d}")
-        results[kernel] = {"svr": svr, "predictions": y_pred, "n_support": len(svr.support_)}
+        results[kernel] = {
+            "svr": svr,
+            "predictions": y_pred,
+            "n_support": len(svr.support_),
+        }
 
     return results
 
@@ -218,8 +233,14 @@ def main():
         _plot_svr_result(axes[0, idx], X, y, svr, kernel, MODEL_COLORS[kernel])
         if idx == 0:
             axes[0, idx].text(
-                -0.3, 0.5, "sklearn", transform=axes[0, idx].transAxes,
-                fontsize=12, fontweight="bold", va="center", rotation=90,
+                -0.3,
+                0.5,
+                "sklearn",
+                transform=axes[0, idx].transAxes,
+                fontsize=12,
+                fontweight="bold",
+                va="center",
+                rotation=90,
             )
 
         # Bottom row: xorq
@@ -228,8 +249,14 @@ def main():
         axes[1, idx].axis("off")
         if idx == 0:
             axes[1, idx].text(
-                -0.3, 0.5, "xorq", transform=axes[1, idx].transAxes,
-                fontsize=12, fontweight="bold", va="center", rotation=90,
+                -0.3,
+                0.5,
+                "xorq",
+                transform=axes[1, idx].transAxes,
+                fontsize=12,
+                fontweight="bold",
+                va="center",
+                rotation=90,
             )
 
     fig.suptitle("Support Vector Regression: sklearn vs xorq", fontsize=16, y=0.995)

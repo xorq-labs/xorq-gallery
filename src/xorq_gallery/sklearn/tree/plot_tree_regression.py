@@ -29,7 +29,6 @@ from xorq.expr.ml.pipeline_lib import Pipeline
 
 from xorq_gallery.utils import (
     deferred_matplotlib_plot,
-    fig_to_image,
     load_plot_bytes,
 )
 
@@ -175,17 +174,17 @@ def xorq_way(df, df_test):
     table_test = con.register(df_test, "tree_test_data")
 
     # max_depth=2
-    sklearn_pipe_2 = SklearnPipeline([
-        ("tree", DecisionTreeRegressor(max_depth=2, random_state=RANDOM_SEED))
-    ])
+    sklearn_pipe_2 = SklearnPipeline(
+        [("tree", DecisionTreeRegressor(max_depth=2, random_state=RANDOM_SEED))]
+    )
     xorq_pipe_2 = Pipeline.from_instance(sklearn_pipe_2)
     fitted_2 = xorq_pipe_2.fit(table, features=("x",), target="y")
     preds_2 = fitted_2.predict(table_test, name="pred")
 
     # max_depth=5
-    sklearn_pipe_5 = SklearnPipeline([
-        ("tree", DecisionTreeRegressor(max_depth=5, random_state=RANDOM_SEED))
-    ])
+    sklearn_pipe_5 = SklearnPipeline(
+        [("tree", DecisionTreeRegressor(max_depth=5, random_state=RANDOM_SEED))]
+    )
     xorq_pipe_5 = Pipeline.from_instance(sklearn_pipe_5)
     fitted_5 = xorq_pipe_5.fit(table, features=("x",), target="y")
     preds_5 = fitted_5.predict(table_test, name="pred")
@@ -215,13 +214,13 @@ def main():
     sk_preds_2 = sk_results[2]["predictions"]
     xo_preds_2 = xo_preds_df_2["pred"].values
     np.testing.assert_allclose(sk_preds_2, xo_preds_2, rtol=1e-10)
-    print(f"  xorq:   max_depth=2 | predictions match sklearn")
+    print("  xorq:   max_depth=2 | predictions match sklearn")
 
     xo_preds_df_5 = xo_results[5].execute()
     sk_preds_5 = sk_results[5]["predictions"]
     xo_preds_5 = xo_preds_df_5["pred"].values
     np.testing.assert_allclose(sk_preds_5, xo_preds_5, rtol=1e-10)
-    print(f"  xorq:   max_depth=5 | predictions match sklearn")
+    print("  xorq:   max_depth=5 | predictions match sklearn")
 
     print("Assertions passed: sklearn and xorq predictions match.")
 
@@ -237,8 +236,14 @@ def main():
     y_pred_sk_2 = sk_results[2]["predictions"]
     _plot_tree_result(ax_sk_2, X, y, X_test, y_pred_sk_2, 2, MODEL_COLORS[2])
     ax_sk_2.text(
-        -0.3, 0.5, "sklearn", transform=ax_sk_2.transAxes,
-        fontsize=12, fontweight="bold", va="center", rotation=90,
+        -0.3,
+        0.5,
+        "sklearn",
+        transform=ax_sk_2.transAxes,
+        fontsize=12,
+        fontweight="bold",
+        va="center",
+        rotation=90,
     )
 
     ax_sk_5 = axes[0, 1]
@@ -254,8 +259,14 @@ def main():
     ax_xo_2.imshow(img_2)
     ax_xo_2.axis("off")
     ax_xo_2.text(
-        -0.3, 0.5, "xorq", transform=ax_xo_2.transAxes,
-        fontsize=12, fontweight="bold", va="center", rotation=90,
+        -0.3,
+        0.5,
+        "xorq",
+        transform=ax_xo_2.transAxes,
+        fontsize=12,
+        fontweight="bold",
+        va="center",
+        rotation=90,
     )
 
     png_bytes_5 = deferred_matplotlib_plot(
@@ -266,9 +277,7 @@ def main():
     ax_xo_5.imshow(img_5)
     ax_xo_5.axis("off")
 
-    fig.suptitle(
-        "Decision Tree Regression: sklearn vs xorq", fontsize=16, y=0.995
-    )
+    fig.suptitle("Decision Tree Regression: sklearn vs xorq", fontsize=16, y=0.995)
     fig.tight_layout()
     out = "imgs/tree_regression.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")

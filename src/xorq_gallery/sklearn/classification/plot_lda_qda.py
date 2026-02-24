@@ -34,7 +34,6 @@ from xorq.expr.ml.pipeline_lib import Pipeline
 
 from xorq_gallery.utils import (
     deferred_matplotlib_plot,
-    fig_to_image,
     load_plot_bytes,
 )
 
@@ -257,8 +256,12 @@ def sklearn_way(datasets):
         "qda_means": qda_isotropic.means_.copy(),
         "qda_cov": [c.copy() for c in qda_isotropic.covariance_],
     }
-    print(f"sklearn: isotropic      | LDA fitted | means shape: {lda_isotropic.means_.shape}")
-    print(f"sklearn: isotropic      | QDA fitted | means shape: {qda_isotropic.means_.shape}")
+    print(
+        f"sklearn: isotropic      | LDA fitted | means shape: {lda_isotropic.means_.shape}"
+    )
+    print(
+        f"sklearn: isotropic      | QDA fitted | means shape: {qda_isotropic.means_.shape}"
+    )
 
     # Dataset 1: shared
     X_shared, y_shared = datasets["shared"]
@@ -276,8 +279,12 @@ def sklearn_way(datasets):
         "qda_means": qda_shared.means_.copy(),
         "qda_cov": [c.copy() for c in qda_shared.covariance_],
     }
-    print(f"sklearn: shared         | LDA fitted | means shape: {lda_shared.means_.shape}")
-    print(f"sklearn: shared         | QDA fitted | means shape: {qda_shared.means_.shape}")
+    print(
+        f"sklearn: shared         | LDA fitted | means shape: {lda_shared.means_.shape}"
+    )
+    print(
+        f"sklearn: shared         | QDA fitted | means shape: {qda_shared.means_.shape}"
+    )
 
     # Dataset 2: different
     X_different, y_different = datasets["different"]
@@ -295,8 +302,12 @@ def sklearn_way(datasets):
         "qda_means": qda_different.means_.copy(),
         "qda_cov": [c.copy() for c in qda_different.covariance_],
     }
-    print(f"sklearn: different      | LDA fitted | means shape: {lda_different.means_.shape}")
-    print(f"sklearn: different      | QDA fitted | means shape: {qda_different.means_.shape}")
+    print(
+        f"sklearn: different      | LDA fitted | means shape: {lda_different.means_.shape}"
+    )
+    print(
+        f"sklearn: different      | QDA fitted | means shape: {qda_different.means_.shape}"
+    )
 
     return {
         "isotropic": result_isotropic,
@@ -325,9 +336,9 @@ def xorq_way(datasets):
     table_isotropic = con.register(df_isotropic, "data_isotropic")
 
     # LDA for dataset 0
-    lda_sklearn_isotropic = SklearnPipeline([
-        ("lda", LinearDiscriminantAnalysis(solver="svd", store_covariance=True))
-    ])
+    lda_sklearn_isotropic = SklearnPipeline(
+        [("lda", LinearDiscriminantAnalysis(solver="svd", store_covariance=True))]
+    )
     lda_pipe_isotropic = Pipeline.from_instance(lda_sklearn_isotropic)
     lda_fitted_isotropic = lda_pipe_isotropic.fit(
         table_isotropic,
@@ -337,9 +348,9 @@ def xorq_way(datasets):
     lda_preds_isotropic = lda_fitted_isotropic.predict(table_isotropic, name=pred_col)
 
     # QDA for dataset 0
-    qda_sklearn_isotropic = SklearnPipeline([
-        ("qda", QuadraticDiscriminantAnalysis(store_covariance=True))
-    ])
+    qda_sklearn_isotropic = SklearnPipeline(
+        [("qda", QuadraticDiscriminantAnalysis(store_covariance=True))]
+    )
     qda_pipe_isotropic = Pipeline.from_instance(qda_sklearn_isotropic)
     qda_fitted_isotropic = qda_pipe_isotropic.fit(
         table_isotropic,
@@ -361,9 +372,9 @@ def xorq_way(datasets):
     table_shared = con.register(df_shared, "data_shared")
 
     # LDA for dataset 1
-    lda_sklearn_shared = SklearnPipeline([
-        ("lda", LinearDiscriminantAnalysis(solver="svd", store_covariance=True))
-    ])
+    lda_sklearn_shared = SklearnPipeline(
+        [("lda", LinearDiscriminantAnalysis(solver="svd", store_covariance=True))]
+    )
     lda_pipe_shared = Pipeline.from_instance(lda_sklearn_shared)
     lda_fitted_shared = lda_pipe_shared.fit(
         table_shared,
@@ -373,9 +384,9 @@ def xorq_way(datasets):
     lda_preds_shared = lda_fitted_shared.predict(table_shared, name=pred_col)
 
     # QDA for dataset 1
-    qda_sklearn_shared = SklearnPipeline([
-        ("qda", QuadraticDiscriminantAnalysis(store_covariance=True))
-    ])
+    qda_sklearn_shared = SklearnPipeline(
+        [("qda", QuadraticDiscriminantAnalysis(store_covariance=True))]
+    )
     qda_pipe_shared = Pipeline.from_instance(qda_sklearn_shared)
     qda_fitted_shared = qda_pipe_shared.fit(
         table_shared,
@@ -397,9 +408,9 @@ def xorq_way(datasets):
     table_different = con.register(df_different, "data_different")
 
     # LDA for dataset 2
-    lda_sklearn_different = SklearnPipeline([
-        ("lda", LinearDiscriminantAnalysis(solver="svd", store_covariance=True))
-    ])
+    lda_sklearn_different = SklearnPipeline(
+        [("lda", LinearDiscriminantAnalysis(solver="svd", store_covariance=True))]
+    )
     lda_pipe_different = Pipeline.from_instance(lda_sklearn_different)
     lda_fitted_different = lda_pipe_different.fit(
         table_different,
@@ -409,9 +420,9 @@ def xorq_way(datasets):
     lda_preds_different = lda_fitted_different.predict(table_different, name=pred_col)
 
     # QDA for dataset 2
-    qda_sklearn_different = SklearnPipeline([
-        ("qda", QuadraticDiscriminantAnalysis(store_covariance=True))
-    ])
+    qda_sklearn_different = SklearnPipeline(
+        [("qda", QuadraticDiscriminantAnalysis(store_covariance=True))]
+    )
     qda_pipe_different = Pipeline.from_instance(qda_sklearn_different)
     qda_fitted_different = qda_pipe_different.fit(
         table_different,
@@ -461,22 +472,26 @@ def main():
         lda_check.fit(X, y)
         qda_check.fit(X, y)
 
-        sklearn_means_data.append({
-            "dataset": ds_name,
-            "classifier": "LDA",
-            "mean_0_0": lda_check.means_[0, 0],
-            "mean_0_1": lda_check.means_[0, 1],
-            "mean_1_0": lda_check.means_[1, 0],
-            "mean_1_1": lda_check.means_[1, 1],
-        })
-        sklearn_means_data.append({
-            "dataset": ds_name,
-            "classifier": "QDA",
-            "mean_0_0": qda_check.means_[0, 0],
-            "mean_0_1": qda_check.means_[0, 1],
-            "mean_1_0": qda_check.means_[1, 0],
-            "mean_1_1": qda_check.means_[1, 1],
-        })
+        sklearn_means_data.append(
+            {
+                "dataset": ds_name,
+                "classifier": "LDA",
+                "mean_0_0": lda_check.means_[0, 0],
+                "mean_0_1": lda_check.means_[0, 1],
+                "mean_1_0": lda_check.means_[1, 0],
+                "mean_1_1": lda_check.means_[1, 1],
+            }
+        )
+        sklearn_means_data.append(
+            {
+                "dataset": ds_name,
+                "classifier": "QDA",
+                "mean_0_0": qda_check.means_[0, 0],
+                "mean_0_1": qda_check.means_[0, 1],
+                "mean_1_0": qda_check.means_[1, 0],
+                "mean_1_1": qda_check.means_[1, 1],
+            }
+        )
 
         # Individual assertions for verification
         sk_lda_means = sk_results[ds_name]["lda_means"]
@@ -484,8 +499,6 @@ def main():
         np.testing.assert_allclose(sk_lda_means, lda_check.means_, rtol=1e-5)
         np.testing.assert_allclose(sk_qda_means, qda_check.means_, rtol=1e-5)
         print(f"  {ds_name:15s} | LDA/QDA means match")
-
-    sklearn_means_df = pd.DataFrame(sklearn_means_data)
 
     print("Assertions passed: sklearn and xorq produce identical results.")
 

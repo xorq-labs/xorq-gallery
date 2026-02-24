@@ -198,7 +198,9 @@ def sklearn_way(X_list, pipelines):
                 "vertical": grid_encoded[:, 1].reshape(xx.shape),
             }
 
-        figures[f"dataset_{ds_idx}"] = _build_dataset_figure(X, transformed_grids, "sklearn")
+        figures[f"dataset_{ds_idx}"] = _build_dataset_figure(
+            X, transformed_grids, "sklearn"
+        )
 
     return figures
 
@@ -243,7 +245,11 @@ def xorq_way(X_list, pipelines):
             xorq_pipe = Pipeline.from_instance(pipelines[strategy])
             fitted = xorq_pipe.fit(data, features=FEATURE_COLS, target=None)
             grid_encoded = fitted.transform(grid_data)
-            transformed_grids[strategy] = {"xx": xx, "yy": yy, "grid_encoded": grid_encoded}
+            transformed_grids[strategy] = {
+                "xx": xx,
+                "yy": yy,
+                "grid_encoded": grid_encoded,
+            }
 
         results[f"dataset_{ds_idx}"] = {"X": X, "transformed_grids": transformed_grids}
 
@@ -285,18 +291,23 @@ def main():
             # The transformed output is a list of {'key': 'x0', 'value': v} dicts
             # Extract the values for x0 and x1
             if "transformed" in grid_encoded.columns:
+
                 def extract_value(row, key_name):
                     for item in row:
                         if item["key"] == key_name:
                             return item["value"]
                     return None
 
-                horizontal = grid_encoded["transformed"].apply(
-                    lambda x: extract_value(x, FEATURE_COLS[0])
-                ).values.reshape(xx.shape)
-                vertical = grid_encoded["transformed"].apply(
-                    lambda x: extract_value(x, FEATURE_COLS[1])
-                ).values.reshape(xx.shape)
+                horizontal = (
+                    grid_encoded["transformed"]
+                    .apply(lambda x: extract_value(x, FEATURE_COLS[0]))
+                    .values.reshape(xx.shape)
+                )
+                vertical = (
+                    grid_encoded["transformed"]
+                    .apply(lambda x: extract_value(x, FEATURE_COLS[1]))
+                    .values.reshape(xx.shape)
+                )
             else:
                 # Fallback: direct column access
                 horizontal = grid_encoded[FEATURE_COLS[0]].values.reshape(xx.shape)

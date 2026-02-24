@@ -24,7 +24,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xorq.api as xo
-import xorq.expr.datatypes as dt
 from matplotlib.colors import SymLogNorm
 from sklearn.linear_model import ARDRegression, ElasticNet, Lasso
 from sklearn.metrics import r2_score
@@ -34,10 +33,8 @@ from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
 
 from xorq_gallery.utils import (
-    deferred_matplotlib_plot,
     deferred_sequential_split,
     fig_to_image,
-    load_plot_bytes,
 )
 
 
@@ -253,7 +250,11 @@ def xorq_way(df):
 
     # Sequential split (first ~67% train, last ~33% test)
     train_data, test_data = deferred_sequential_split(
-        data, features=FEATURE_COLS, target=TARGET_COL, order_by=ROW_IDX, test_size=0.3333
+        data,
+        features=FEATURE_COLS,
+        target=TARGET_COL,
+        order_by=ROW_IDX,
+        test_size=0.3333,
     )
 
     make_metric = deferred_sklearn_metric(target=TARGET_COL, pred=PRED_COL)
@@ -287,9 +288,14 @@ def xorq_way(df):
     }
 
     # ElasticNet
-    enet_sklearn_pipe = SklearnPipeline([
-        ("elasticnet", ElasticNet(alpha=ELASTICNET_ALPHA, l1_ratio=ELASTICNET_L1_RATIO))
-    ])
+    enet_sklearn_pipe = SklearnPipeline(
+        [
+            (
+                "elasticnet",
+                ElasticNet(alpha=ELASTICNET_ALPHA, l1_ratio=ELASTICNET_L1_RATIO),
+            )
+        ]
+    )
     enet_pipe = Pipeline.from_instance(enet_sklearn_pipe)
     enet_fitted = enet_pipe.fit(train_data, features=FEATURE_COLS, target=TARGET_COL)
     enet_preds = enet_fitted.predict(test_data, name=PRED_COL)
@@ -349,32 +355,42 @@ def main():
         sk_r2 = sk_results[name]["r2"]
         xo_r2 = xo_r2_scores[name]
         r2_diff = abs(sk_r2 - xo_r2)
-        print(f"{name} R^2 - sklearn: {sk_r2:.3f}, xorq: {xo_r2:.3f}, diff: {r2_diff:.4f}")
+        print(
+            f"{name} R^2 - sklearn: {sk_r2:.3f}, xorq: {xo_r2:.3f}, diff: {r2_diff:.4f}"
+        )
 
         sk_coef = sk_results[name]["coef"]
         xo_coef = xo_coefs[name]
         coef_diff = np.max(np.abs(sk_coef - xo_coef))
         print(f"{name} max coef difference: {coef_diff:.6f}")
 
-    print("\nBoth approaches produce L1-regularized sparse models with similar sparsity patterns.")
+    print(
+        "\nBoth approaches produce L1-regularized sparse models with similar sparsity patterns."
+    )
 
     # Build coefficient matrices
     row_labels = ["True coefficients", "Lasso", "ARDRegression", "ElasticNet"]
-    sk_coef_matrix = np.vstack([
-        true_coef,
-        sk_results["Lasso"]["coef"],
-        sk_results["ARD"]["coef"],
-        sk_results["ElasticNet"]["coef"],
-    ])
+    sk_coef_matrix = np.vstack(
+        [
+            true_coef,
+            sk_results["Lasso"]["coef"],
+            sk_results["ARD"]["coef"],
+            sk_results["ElasticNet"]["coef"],
+        ]
+    )
 
-    xo_coef_matrix = np.vstack([
-        true_coef,
-        xo_coefs["Lasso"],
-        xo_coefs["ARD"],
-        xo_coefs["ElasticNet"],
-    ])
+    xo_coef_matrix = np.vstack(
+        [
+            true_coef,
+            xo_coefs["Lasso"],
+            xo_coefs["ARD"],
+            xo_coefs["ElasticNet"],
+        ]
+    )
 
-    sk_r2_dict = {name: sk_results[name]["r2"] for name in ["Lasso", "ARD", "ElasticNet"]}
+    sk_r2_dict = {
+        name: sk_results[name]["r2"] for name in ["Lasso", "ARD", "ElasticNet"]
+    }
 
     # Build sklearn heatmap
     sk_fig = _build_coefficient_heatmap(
@@ -395,9 +411,7 @@ def main():
     axes[1].imshow(fig_to_image(xo_fig))
     axes[1].axis("off")
 
-    fig.suptitle(
-        "L1-based models for Sparse Signals: sklearn vs xorq", fontsize=16
-    )
+    fig.suptitle("L1-based models for Sparse Signals: sklearn vs xorq", fontsize=16)
     fig.tight_layout()
     out = "imgs/lasso_and_elasticnet.png"
     fig.savefig(out, dpi=150)

@@ -68,7 +68,10 @@ def _build_pipeline():
     return SklearnPipeline(
         [
             ("scaler", MinMaxScaler()),
-            ("rfe", RFE(estimator=LogisticRegression(), n_features_to_select=1, step=1)),
+            (
+                "rfe",
+                RFE(estimator=LogisticRegression(), n_features_to_select=1, step=1),
+            ),
         ]
     )
 
@@ -78,7 +81,9 @@ def _build_pipeline():
 # ---------------------------------------------------------------------------
 
 
-def _plot_ranking(ranking, image_shape, title="Ranking of pixels with RFE\n(Logistic Regression)"):
+def _plot_ranking(
+    ranking, image_shape, title="Ranking of pixels with RFE\n(Logistic Regression)"
+):
     """Build ranking heatmap visualization.
 
     Parameters
@@ -100,7 +105,15 @@ def _plot_ranking(ranking, image_shape, title="Ranking of pixels with RFE\n(Logi
     # Add annotations for pixel numbers
     for i in range(ranking.shape[0]):
         for j in range(ranking.shape[1]):
-            ax.text(j, i, str(int(ranking[i, j])), ha="center", va="center", color="black", fontsize=8)
+            ax.text(
+                j,
+                i,
+                str(int(ranking[i, j])),
+                ha="center",
+                va="center",
+                color="black",
+                fontsize=8,
+            )
 
     fig.colorbar(im, ax=ax)
     ax.set_title(title)
@@ -206,17 +219,18 @@ def main():
     print("Comparing RFE rankings (sklearn vs xorq):")
     print(f"  sklearn ranking shape: {sk_results['ranking'].shape}")
     print(f"  xorq ranking shape: {xo_ranking.shape}")
-    print(f"  sklearn ranking min/max: {sk_results['ranking'].min()}/{sk_results['ranking'].max()}")
+    print(
+        f"  sklearn ranking min/max: {sk_results['ranking'].min()}/{sk_results['ranking'].max()}"
+    )
     print(f"  xorq ranking min/max: {xo_ranking.min()}/{xo_ranking.max()}")
 
-    np.testing.assert_array_equal(sk_results['ranking'], xo_ranking)
+    np.testing.assert_array_equal(sk_results["ranking"], xo_ranking)
     print("Assertions passed: sklearn and xorq rankings match exactly.")
 
     # Execute deferred plot
     print("\n=== PLOTTING ===")
     xo_png = deferred_matplotlib_plot(
-        xo_deferred["table"],
-        _build_ranking_plot(xo_ranking, data["image_shape"])
+        xo_deferred["table"], _build_ranking_plot(xo_ranking, data["image_shape"])
     ).execute()
 
     # Build sklearn plot

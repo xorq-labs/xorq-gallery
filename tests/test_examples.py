@@ -2,21 +2,16 @@ import os
 import pathlib
 import runpy
 
+# Set non-interactive matplotlib backend before any imports
+import matplotlib as mpl
 import pytest
 from pytest import param
 
 
-# Set non-interactive matplotlib backend before any imports
-import matplotlib
-matplotlib.use("Agg")
+mpl.use("Agg")
 
 
-sklearn_dir = (
-    pathlib.Path(__file__).parents[1]
-    / "src"
-    / "xorq_gallery"
-    / "sklearn"
-)
+sklearn_dir = pathlib.Path(__file__).parents[1] / "src" / "xorq_gallery" / "sklearn"
 
 repo_root = pathlib.Path(__file__).parents[1]
 imgs_dir = repo_root / "imgs"

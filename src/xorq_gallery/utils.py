@@ -42,6 +42,7 @@ def deferred_sequential_split(expr, *, features, target, order_by):
         _fold_pairs_from_fold_expr,
         _make_folds_from_sklearn,
     )
+
     cv = TimeSeriesSplit(n_splits=2)
     fold_expr = _make_folds_from_sklearn(
         expr=expr,
@@ -95,6 +96,7 @@ def deferred_matplotlib_plot(expr, fn, name="plot"):
 
     import xorq.expr.datatypes as dt
     from xorq.expr.udf import agg
+
     plot_udaf = agg.pandas_df(
         fn=compose(_fig_to_png_bytes, fn),
         schema=expr.schema(),

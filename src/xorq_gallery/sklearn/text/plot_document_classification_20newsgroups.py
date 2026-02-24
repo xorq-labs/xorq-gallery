@@ -107,9 +107,16 @@ def _build_pipeline():
     1. The sklearn example vectorizes separately
     2. For xorq, we need dense features as input (vectorization happens before)
     """
-    return SklearnPipeline([
-        ("clf", RidgeClassifier(tol=1e-2, solver="sparse_cg", random_state=RANDOM_STATE))
-    ])
+    return SklearnPipeline(
+        [
+            (
+                "clf",
+                RidgeClassifier(
+                    tol=1e-2, solver="sparse_cg", random_state=RANDOM_STATE
+                ),
+            )
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +270,10 @@ def main():
     print("\n=== GENERATING PLOTS ===")
     target_names = data["target_names"]
 
-    xo_png = deferred_matplotlib_plot(xo_results["preds"], _build_confusion_matrix_plot_deferred(target_names=target_names)).execute()
+    xo_png = deferred_matplotlib_plot(
+        xo_results["preds"],
+        _build_confusion_matrix_plot_deferred(target_names=target_names),
+    ).execute()
 
     # Build sklearn confusion matrix
     sk_fig = _plot_confusion_matrix(
