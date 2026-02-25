@@ -11,7 +11,11 @@ dependencies = [
     "numpy",
     "pooch",
     "toolz>=1.1.0",
+    "click",
 ]
+
+[project.scripts]
+xorq-gallery = "xorq_gallery.cli:cli"
 
 [build-system]
 requires = ["uv_build>=0.9.0,<0.10.0"]

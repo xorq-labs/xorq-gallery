@@ -1582,7 +1582,7 @@ wheels = [
 [[package]]
 name = "xorq"
 version = "0.3.10"
-source = { git = "https://github.com/xorq-labs/xorq.git?branch=main#65c5bf2dd7c4d55bd2afba040c2d2500cc89e327" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "atpublic" },
     { name = "attrs" },
@@ -1614,6 +1614,10 @@ dependencies = [
     { name = "uv" },
     { name = "xorq-datafusion" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/ac/d5/0236eb72f9a0994a3b1eff65232d9040804137755dc6010337ff59ebd8ba/xorq-0.3.10.tar.gz", hash = "sha256:e770bbd294ef02a09d637a628d9232f0803c469ffb570c72a133cd9b113f8543", size = 1491161, upload-time = "2026-02-18T04:09:24.302Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/93/10/591dc6247eabb46b2b989025ab6ef3f42b1112c51fe306440f06c0121743/xorq-0.3.10-py3-none-any.whl", hash = "sha256:b54bc225d4fc1564169c340bd6890fd22eb744bb4ed411d58ad83cad326c9732", size = 1715578, upload-time = "2026-02-18T04:09:22.518Z" },
+]
 
 [[package]]
 name = "xorq-datafusion"
@@ -1638,6 +1642,7 @@ name = "xorq-gallery"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "click" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pandas" },
@@ -1662,13 +1667,14 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "click" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "pooch" },
     { name = "scikit-learn" },
     { name = "toolz", specifier = ">=1.1.0" },
-    { name = "xorq", git = "https://github.com/xorq-labs/xorq.git?branch=main" },
+    { name = "xorq" },
 ]
 
 [package.metadata.requires-dev]

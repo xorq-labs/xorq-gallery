@@ -7,7 +7,7 @@ import click
 
 scripts = tuple(
     p
-    for p in sorted(pathlib.Path(__file__).parent.glob("sklearn/applications/*.py"))
+    for p in sorted(pathlib.Path(__file__).parent.glob("sklearn/*/plot_*.py"))
     if p.name != "__init__.py"
 )
 
@@ -58,7 +58,9 @@ def run_all_scripts():
 
 
 _COMPLETION_INSTALL_PATHS = {
-    "bash": pathlib.Path("~/.local/share/bash-completion/completions/xorq-gallery").expanduser(),
+    "bash": pathlib.Path(
+        "~/.local/share/bash-completion/completions/xorq-gallery"
+    ).expanduser(),
     "zsh": pathlib.Path("~/.zfunc/_xorq-gallery").expanduser(),
     "fish": pathlib.Path("~/.config/fish/completions/xorq-gallery.fish").expanduser(),
 }
