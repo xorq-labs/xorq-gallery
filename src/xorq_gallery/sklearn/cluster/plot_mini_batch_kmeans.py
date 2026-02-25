@@ -129,8 +129,7 @@ def _load_data():
 # ---------------------------------------------------------------------------
 
 
-def _plot_results(X, km_labels, km_centers, mbk_labels, mbk_centers,
-                  title_prefix=""):
+def _plot_results(X, km_labels, km_centers, mbk_labels, mbk_centers, title_prefix=""):
     """Build the 3-panel comparison figure.
 
     Panel 1: KMeans clustering with cluster centres
@@ -160,8 +159,14 @@ def _plot_results(X, km_labels, km_centers, mbk_labels, mbk_centers,
         mask = km_labels == k
         ax.scatter(X[mask, 0], X[mask, 1], c=col, marker=".", s=6, alpha=0.6)
     ax.scatter(
-        km_centers[:, 0], km_centers[:, 1],
-        marker="o", c="w", edgecolor="k", s=100, linewidths=2, zorder=10,
+        km_centers[:, 0],
+        km_centers[:, 1],
+        marker="o",
+        c="w",
+        edgecolor="k",
+        s=100,
+        linewidths=2,
+        zorder=10,
     )
     ax.set_title("KMeans")
     ax.set_xticks(())
@@ -173,8 +178,14 @@ def _plot_results(X, km_labels, km_centers, mbk_labels, mbk_centers,
         mask = mbk_labels == k
         ax.scatter(X[mask, 0], X[mask, 1], c=col, marker=".", s=6, alpha=0.6)
     ax.scatter(
-        mbk_centers[:, 0], mbk_centers[:, 1],
-        marker="o", c="w", edgecolor="k", s=100, linewidths=2, zorder=10,
+        mbk_centers[:, 0],
+        mbk_centers[:, 1],
+        marker="o",
+        c="w",
+        edgecolor="k",
+        s=100,
+        linewidths=2,
+        zorder=10,
     )
     ax.set_title("MiniBatchKMeans")
     ax.set_xticks(())
@@ -190,12 +201,22 @@ def _plot_results(X, km_labels, km_centers, mbk_labels, mbk_centers,
 
     different = km_labels != mbk_labels_reordered
     ax.scatter(
-        X[~different, 0], X[~different, 1],
-        c="#bbbbbb", marker=".", s=6, alpha=0.3, label="Same label",
+        X[~different, 0],
+        X[~different, 1],
+        c="#bbbbbb",
+        marker=".",
+        s=6,
+        alpha=0.3,
+        label="Same label",
     )
     ax.scatter(
-        X[different, 0], X[different, 1],
-        c="m", marker=".", s=6, alpha=0.8, label="Different label",
+        X[different, 0],
+        X[different, 1],
+        c="m",
+        marker=".",
+        s=6,
+        alpha=0.8,
+        label="Different label",
     )
     n_diff = different.sum()
     ax.set_title(f"Difference: {n_diff} ({100 * n_diff / len(X):.1f}%)")
@@ -241,9 +262,7 @@ def _remap_labels(reference, labels):
 
 def _centroids_from_labels(X, labels, n_clusters):
     """Compute cluster centroids from data and label assignments."""
-    return np.array(
-        [X[labels == k].mean(axis=0) for k in range(n_clusters)]
-    )
+    return np.array([X[labels == k].mean(axis=0) for k in range(n_clusters)])
 
 
 # =========================================================================
@@ -276,9 +295,7 @@ def sklearn_way(df):
             "centers": estimator.cluster_centers_,
             "inertia": estimator.inertia_,
         }
-        print(
-            f"  {algo_name:20s}  inertia={estimator.inertia_:.1f}"
-        )
+        print(f"  {algo_name:20s}  inertia={estimator.inertia_:.1f}")
 
     return results
 
@@ -337,8 +354,7 @@ def main():
         sk_n = len(np.unique(sk_labels))
         xo_n = len(np.unique(xo_labels))
         assert sk_n == xo_n, (
-            f"{algo_name}: cluster count mismatch "
-            f"(sklearn={sk_n}, xorq={xo_n})"
+            f"{algo_name}: cluster count mismatch (sklearn={sk_n}, xorq={xo_n})"
         )
 
         # Remap xorq labels to match sklearn colours for plotting

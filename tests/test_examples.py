@@ -7,7 +7,6 @@ import matplotlib as mpl
 import pytest
 from pytest import param
 
-
 from xorq_gallery.sklearn import (
     get_scripts_for_group,
     groups,

@@ -74,9 +74,7 @@ def _load_data():
     """
     data, labels = load_digits(return_X_y=True)
     n_features = data.shape[1]
-    df = pd.DataFrame(
-        data, columns=[f"{FEATURE_PREFIX}{i}" for i in range(n_features)]
-    )
+    df = pd.DataFrame(data, columns=[f"{FEATURE_PREFIX}{i}" for i in range(n_features)])
     df[LABEL_COL] = labels
     return df
 
@@ -401,11 +399,7 @@ def main():
     n_digits = df[LABEL_COL].nunique()
     pca_init = _pca_init_components(df, n_digits)
 
-    print(
-        f"# digits: {n_digits}; "
-        f"# samples: {len(df)}; "
-        f"# features {len(features)}"
-    )
+    print(f"# digits: {n_digits}; # samples: {len(df)}; # features {len(features)}")
     print()
 
     print("=== SKLEARN WAY ===")
