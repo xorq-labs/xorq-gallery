@@ -41,7 +41,6 @@ from xorq_gallery.utils import (
 RANDOM_STATE = 42
 N_SAMPLES = 100
 FEATURE_COLS = ("feature_0",)
-ROW_IDX = "row_idx"
 
 METRICS_NAMES_FUNCS = (
     ("mae", mean_absolute_error),
@@ -93,7 +92,6 @@ def _load_data():
         "y_pareto": datasets["pareto"]["y"],
         "x": datasets["normal"]["x"],
         "y_true_mean": datasets["normal"]["y_true_mean"],
-        ROW_IDX: range(len(datasets["normal"]["X"])),
     })
 
     return df
