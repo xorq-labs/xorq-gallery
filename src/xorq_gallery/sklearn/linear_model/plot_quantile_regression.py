@@ -88,12 +88,13 @@ def _load_data():
     datasets = _generate_datasets()
 
     # Build DataFrame with both targets
-    df = pd.DataFrame(datasets["normal"]["X"], columns=[FEATURE_COLS[0]])
-    df["y_normal"] = datasets["normal"]["y"]
-    df["y_pareto"] = datasets["pareto"]["y"]
-    df["x"] = datasets["normal"]["x"]
-    df["y_true_mean"] = datasets["normal"]["y_true_mean"]
-    df[ROW_IDX] = range(len(df))
+    df = pd.DataFrame(datasets["normal"]["X"], columns=[FEATURE_COLS[0]]).assign(**{
+        "y_normal": datasets["normal"]["y"],
+        "y_pareto": datasets["pareto"]["y"],
+        "x": datasets["normal"]["x"],
+        "y_true_mean": datasets["normal"]["y_true_mean"],
+        ROW_IDX: range(len(datasets["normal"]["X"])),
+    })
 
     return df
 
@@ -320,31 +321,28 @@ def main():
         print("Assertions passed: sklearn and xorq metrics match.")
 
         # Execute deferred predictions and build combined dataframe for plotting
-        xo_predictions = {}
-        for quantile, pred_expr in deferred["predictions"].items():
-            pred_df = pred_expr.execute()
-            pred_name = f"pred_q{int(quantile * 100):02d}"
-            xo_predictions[quantile] = pred_df[pred_name].values
+        xo_predictions = {
+            quantile: pred_expr.execute()[f"pred_q{int(quantile * 100):02d}"].values
+            for quantile, pred_expr in deferred["predictions"].items()
+        }
 
         # Build xorq plot dataframe
         target_col = f"y_{dataset_type}"
-        xo_plot_df = _DF.copy()
-        xo_plot_df["pred_q05"] = xo_predictions[0.05]
-        xo_plot_df["pred_q50"] = xo_predictions[0.5]
-        xo_plot_df["pred_q95"] = xo_predictions[0.95]
-
-        # Compute out_bounds flag for xorq predictions
-        xo_out_bounds = (xo_predictions[0.05] >= xo_plot_df[target_col].values) | (
-            xo_predictions[0.95] <= xo_plot_df[target_col].values
-        )
-        xo_plot_df["out_bounds"] = xo_out_bounds.astype(int)
+        xo_plot_df = _DF.assign(**{
+            "pred_q05": xo_predictions[0.05],
+            "pred_q50": xo_predictions[0.5],
+            "pred_q95": xo_predictions[0.95],
+            # Compute out_bounds flag for xorq predictions
+            "out_bounds": (~_DF[target_col].between(xo_predictions[0.05], xo_predictions[0.95], inclusive="neither")).astype(int),
+        })
 
         # Build sklearn plot
-        sk_plot_df = _DF.copy()
-        sk_plot_df["pred_q05"] = sk_results["predictions"][0.05]
-        sk_plot_df["pred_q50"] = sk_results["predictions"][0.5]
-        sk_plot_df["pred_q95"] = sk_results["predictions"][0.95]
-        sk_plot_df["out_bounds"] = sk_results["out_bounds"].astype(int)
+        sk_plot_df = _DF.assign(**{
+            "pred_q05": sk_results["predictions"][0.05],
+            "pred_q50": sk_results["predictions"][0.5],
+            "pred_q95": sk_results["predictions"][0.95],
+            "out_bounds": sk_results["out_bounds"].astype(int),
+        })
 
         sk_fig = _build_quantile_plot(sk_plot_df, dataset_type, target_col)
         xo_fig = _build_quantile_plot(xo_plot_df, dataset_type, target_col)
