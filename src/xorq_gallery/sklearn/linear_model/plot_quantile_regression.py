@@ -27,9 +27,8 @@ from sklearn.linear_model import LinearRegression, QuantileRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from toolz import curry
-from xorq.expr.ml.metrics import deferred_sklearn_metric
-from xorq.expr.ml.pipeline_lib import Pipeline
 
+from xorq_gallery.sklearn.sklearn_lib import SklearnXorqComparator
 from xorq_gallery.utils import (
     fig_to_image,
 )
@@ -43,6 +42,11 @@ RANDOM_STATE = 42
 N_SAMPLES = 100
 FEATURE_COLS = ("feature_0",)
 ROW_IDX = "row_idx"
+
+METRICS_NAMES_FUNCS = (
+    ("mae", mean_absolute_error),
+    ("mse", mean_squared_error),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -157,18 +161,72 @@ def _build_quantile_plot(df, dataset_type, y_col):
     return fig
 
 
+# ---------------------------------------------------------------------------
+# Comparator factory
+# ---------------------------------------------------------------------------
+
+
+def _make_comparator(sklearn_pipeline, input_expr, dataset_type, pred):
+    return SklearnXorqComparator(
+        sklearn_pipeline=sklearn_pipeline,
+        input_expr=input_expr,
+        kwargs_tuple=(
+            ("features", FEATURE_COLS),
+            ("target", f"y_{dataset_type}"),
+            ("pred", pred),
+        ),
+        metrics_names_funcs=METRICS_NAMES_FUNCS,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Module-level data and comparator instances
+# ---------------------------------------------------------------------------
+
+_DF = _load_data()
+_CON = xo.connect()
+INPUT_EXPR = _CON.register(_DF, "quantile_data")
+
+COMPARATOR_Q05_NORMAL = _make_comparator(SklearnPipeline([("qr", QuantileRegressor(quantile=0.05, alpha=0))]), INPUT_EXPR, "normal", "pred_q05")
+COMPARATOR_Q50_NORMAL = _make_comparator(SklearnPipeline([("qr", QuantileRegressor(quantile=0.50, alpha=0))]), INPUT_EXPR, "normal", "pred_q50")
+COMPARATOR_Q95_NORMAL = _make_comparator(SklearnPipeline([("qr", QuantileRegressor(quantile=0.95, alpha=0))]), INPUT_EXPR, "normal", "pred_q95")
+COMPARATOR_LR_NORMAL  = _make_comparator(SklearnPipeline([("lr", LinearRegression())]),                        INPUT_EXPR, "normal", "pred_lr")
+COMPARATOR_QR_NORMAL  = _make_comparator(SklearnPipeline([("qr", QuantileRegressor(quantile=0.50, alpha=0))]), INPUT_EXPR, "normal", "pred_qr")
+
+COMPARATOR_Q05_PARETO = _make_comparator(SklearnPipeline([("qr", QuantileRegressor(quantile=0.05, alpha=0))]), INPUT_EXPR, "pareto", "pred_q05")
+COMPARATOR_Q50_PARETO = _make_comparator(SklearnPipeline([("qr", QuantileRegressor(quantile=0.50, alpha=0))]), INPUT_EXPR, "pareto", "pred_q50")
+COMPARATOR_Q95_PARETO = _make_comparator(SklearnPipeline([("qr", QuantileRegressor(quantile=0.95, alpha=0))]), INPUT_EXPR, "pareto", "pred_q95")
+COMPARATOR_LR_PARETO  = _make_comparator(SklearnPipeline([("lr", LinearRegression())]),                        INPUT_EXPR, "pareto", "pred_lr")
+COMPARATOR_QR_PARETO  = _make_comparator(SklearnPipeline([("qr", QuantileRegressor(quantile=0.50, alpha=0))]), INPUT_EXPR, "pareto", "pred_qr")
+
+_COMPARATORS = {
+    "normal": (
+        COMPARATOR_Q05_NORMAL,
+        COMPARATOR_Q50_NORMAL,
+        COMPARATOR_Q95_NORMAL,
+        COMPARATOR_LR_NORMAL,
+        COMPARATOR_QR_NORMAL,
+    ),
+    "pareto": (
+        COMPARATOR_Q05_PARETO,
+        COMPARATOR_Q50_PARETO,
+        COMPARATOR_Q95_PARETO,
+        COMPARATOR_LR_PARETO,
+        COMPARATOR_QR_PARETO,
+    ),
+}
+
+
 # =========================================================================
 # SKLEARN WAY -- eager execution
 # =========================================================================
 
 
-def sklearn_way(df, dataset_type="normal"):
+def sklearn_way(dataset_type="normal"):
     """Eager sklearn: fit quantile regressors at 0.05, 0.5, 0.95.
 
     Parameters
     ----------
-    df : pd.DataFrame
-        Full dataset
     dataset_type : str
         Either "normal" or "pareto"
 
@@ -178,46 +236,21 @@ def sklearn_way(df, dataset_type="normal"):
         Keys: "predictions" (dict of quantile -> array), "out_bounds" (bool array),
               "lr_metrics" (dict with mae, mse)
     """
-    target_col = f"y_{dataset_type}"
-    X = df[list(FEATURE_COLS)].values
-    y = df[target_col].values
+    q05, q50, q95, lr, qr = _COMPARATORS[dataset_type]
 
-    # Fit quantile regressors - flat, no loops
-    qr_05 = QuantileRegressor(quantile=0.05, alpha=0)
-    y_pred_05 = qr_05.fit(X, y).predict(X)
+    y_pred_05 = q05.sklearn_prediction
+    y_pred_50 = q50.sklearn_prediction
+    y_pred_95 = q95.sklearn_prediction
+    out_bounds = (y_pred_05 >= q05.y) | (y_pred_95 <= q05.y)
 
-    qr_50 = QuantileRegressor(quantile=0.5, alpha=0)
-    y_pred_50 = qr_50.fit(X, y).predict(X)
-
-    qr_95 = QuantileRegressor(quantile=0.95, alpha=0)
-    y_pred_95 = qr_95.fit(X, y).predict(X)
-
-    predictions = {0.05: y_pred_05, 0.5: y_pred_50, 0.95: y_pred_95}
-
-    # Compute out_bounds flag
-    out_bounds_predictions = (y_pred_05 >= y) | (y_pred_95 <= y)
-
-    # LinearRegression for comparison
-    lr = LinearRegression().fit(X, y)
-    y_pred_lr = lr.predict(X)
-
-    # QuantileRegressor at median for comparison
-    qr_median = QuantileRegressor(quantile=0.5, alpha=0).fit(X, y)
-    y_pred_qr = qr_median.predict(X)
-
-    mae_lr = mean_absolute_error(y, y_pred_lr)
-    mse_lr = mean_squared_error(y, y_pred_lr)
-    mae_qr = mean_absolute_error(y, y_pred_qr)
-    mse_qr = mean_squared_error(y, y_pred_qr)
-
-    print(f"  sklearn LinearRegression:    MAE={mae_lr:.3f}, MSE={mse_lr:.3f}")
-    print(f"  sklearn QuantileRegressor:   MAE={mae_qr:.3f}, MSE={mse_qr:.3f}")
+    print(f"  sklearn LinearRegression:    MAE={lr.sklearn_metrics['mae']:.3f}, MSE={lr.sklearn_metrics['mse']:.3f}")
+    print(f"  sklearn QuantileRegressor:   MAE={qr.sklearn_metrics['mae']:.3f}, MSE={qr.sklearn_metrics['mse']:.3f}")
 
     return {
-        "predictions": predictions,
-        "out_bounds": out_bounds_predictions,
-        "lr_metrics": {"mae": mae_lr, "mse": mse_lr},
-        "qr_metrics": {"mae": mae_qr, "mse": mse_qr},
+        "predictions": {0.05: y_pred_05, 0.5: y_pred_50, 0.95: y_pred_95},
+        "out_bounds": out_bounds,
+        "lr_metrics": lr.sklearn_metrics,
+        "qr_metrics": qr.sklearn_metrics,
     }
 
 
@@ -226,13 +259,11 @@ def sklearn_way(df, dataset_type="normal"):
 # =========================================================================
 
 
-def xorq_way(df, dataset_type="normal"):
+def xorq_way(dataset_type="normal"):
     """Deferred xorq: fit quantile regressors at 0.05, 0.5, 0.95.
 
     Parameters
     ----------
-    df : pd.DataFrame
-        Full dataset
     dataset_type : str
         Either "normal" or "pareto"
 
@@ -244,63 +275,16 @@ def xorq_way(df, dataset_type="normal"):
     dict
         Keys: "predictions", "lr_metrics", "qr_metrics"
     """
-    con = xo.connect()
-    data = con.register(df, "quantile_data")
-
-    target_col = f"y_{dataset_type}"
-
-    # Fit quantile regressors - flat, no loops
-    qr_05_sklearn = SklearnPipeline([("qr", QuantileRegressor(quantile=0.05, alpha=0))])
-    qr_05_pipe = Pipeline.from_instance(qr_05_sklearn)
-    qr_05_fitted = qr_05_pipe.fit(data, features=FEATURE_COLS, target=target_col)
-    preds_05 = qr_05_fitted.predict(data, name="pred_q05")
-
-    qr_50_sklearn = SklearnPipeline([("qr", QuantileRegressor(quantile=0.5, alpha=0))])
-    qr_50_pipe = Pipeline.from_instance(qr_50_sklearn)
-    qr_50_fitted = qr_50_pipe.fit(data, features=FEATURE_COLS, target=target_col)
-    preds_50 = qr_50_fitted.predict(data, name="pred_q50")
-
-    qr_95_sklearn = SklearnPipeline([("qr", QuantileRegressor(quantile=0.95, alpha=0))])
-    qr_95_pipe = Pipeline.from_instance(qr_95_sklearn)
-    qr_95_fitted = qr_95_pipe.fit(data, features=FEATURE_COLS, target=target_col)
-    preds_95 = qr_95_fitted.predict(data, name="pred_q95")
-
-    predictions_exprs = {0.05: preds_05, 0.5: preds_50, 0.95: preds_95}
-
-    # LinearRegression for comparison
-    lr_sklearn = SklearnPipeline([("lr", LinearRegression())])
-    lr_pipe = Pipeline.from_instance(lr_sklearn)
-    lr_fitted = lr_pipe.fit(data, features=FEATURE_COLS, target=target_col)
-    lr_preds = lr_fitted.predict(data, name="pred_lr")
-
-    # QuantileRegressor at median for comparison
-    qr_median_sklearn = SklearnPipeline(
-        [("qr", QuantileRegressor(quantile=0.5, alpha=0))]
-    )
-    qr_median_pipe = Pipeline.from_instance(qr_median_sklearn)
-    qr_median_fitted = qr_median_pipe.fit(
-        data, features=FEATURE_COLS, target=target_col
-    )
-    qr_median_preds = qr_median_fitted.predict(data, name="pred_qr")
-
-    # Metrics
-    make_metric_lr = deferred_sklearn_metric(target=target_col, pred="pred_lr")
-    make_metric_qr = deferred_sklearn_metric(target=target_col, pred="pred_qr")
-
-    lr_metrics = lr_preds.agg(
-        mae=make_metric_lr(metric=mean_absolute_error),
-        mse=make_metric_lr(metric=mean_squared_error),
-    )
-
-    qr_metrics = qr_median_preds.agg(
-        mae=make_metric_qr(metric=mean_absolute_error),
-        mse=make_metric_qr(metric=mean_squared_error),
-    )
+    q05, q50, q95, lr, qr = _COMPARATORS[dataset_type]
 
     return {
-        "predictions": predictions_exprs,
-        "lr_metrics": lr_metrics,
-        "qr_metrics": qr_metrics,
+        "predictions": {
+            0.05: q05.xorq_prediction,
+            0.5: q50.xorq_prediction,
+            0.95: q95.xorq_prediction,
+        },
+        "lr_metrics": lr.xorq_metrics,
+        "qr_metrics": qr.xorq_metrics,
     }
 
 
@@ -312,17 +296,15 @@ def xorq_way(df, dataset_type="normal"):
 def main():
     os.makedirs("imgs", exist_ok=True)
 
-    df = _load_data()
-
     # We'll run both normal and pareto, but for brevity, focus on normal in main output
     for dataset_type in ["normal", "pareto"]:
         print(f"\n=== DATASET: {dataset_type.upper()} ===")
 
         print("=== SKLEARN WAY ===")
-        sk_results = sklearn_way(df, dataset_type)
+        sk_results = sklearn_way(dataset_type)
 
         print("\n=== XORQ WAY ===")
-        deferred = xorq_way(df, dataset_type)
+        deferred = xorq_way(dataset_type)
 
         # Execute deferred metrics
         lr_metrics_df = deferred["lr_metrics"].execute()
@@ -360,7 +342,7 @@ def main():
 
         # Build xorq plot dataframe
         target_col = f"y_{dataset_type}"
-        xo_plot_df = df.copy()
+        xo_plot_df = _DF.copy()
         xo_plot_df["pred_q05"] = xo_predictions[0.05]
         xo_plot_df["pred_q50"] = xo_predictions[0.5]
         xo_plot_df["pred_q95"] = xo_predictions[0.95]
@@ -372,7 +354,7 @@ def main():
         xo_plot_df["out_bounds"] = xo_out_bounds.astype(int)
 
         # Build sklearn plot
-        sk_plot_df = df.copy()
+        sk_plot_df = _DF.copy()
         sk_plot_df["pred_q05"] = sk_results["predictions"][0.05]
         sk_plot_df["pred_q50"] = sk_results["predictions"][0.5]
         sk_plot_df["pred_q95"] = sk_results["predictions"][0.95]
