@@ -8,10 +8,10 @@ visualize PCA-reduced clusters.
 
 xorq: Same KMeans pipelines wrapped in Pipeline.from_instance, deferred
 fit/predict, deferred metrics evaluation, deferred PCA reduction and plotting.
-PCA-based initialization is skipped because KMeans(init=pca.components_) passes
-a numpy array, which is unhashable for xorq's frozen parameter storage.
+PCA-based initialization passes pca.components_ as a tuple-of-tuples so that
+xorq's frozen parameter storage can hash it (numpy arrays are not hashable).
 
-Both produce identical clustering metrics (for k-means++ and random init).
+Both produce identical clustering metrics for all three initialization methods.
 
 Dataset: load_digits (sklearn handwritten digits 0-9)
 """
@@ -68,16 +68,17 @@ METRIC_NAMES = ("homogeneity", "completeness", "v_measure", "ari", "ami")
 
 
 def _load_data():
-    """Load the digits dataset and return data, labels, metadata."""
+    """Load the digits dataset and return a pandas DataFrame.
+
+    Feature columns are named f0..f63, plus a label column.
+    """
     data, labels = load_digits(return_X_y=True)
-    (n_samples, n_features), n_digits = data.shape, np.unique(labels).size
-    return {
-        "data": data,
-        "labels": labels,
-        "n_samples": n_samples,
-        "n_features": n_features,
-        "n_digits": n_digits,
-    }
+    n_features = data.shape[1]
+    df = pd.DataFrame(
+        data, columns=[f"{FEATURE_PREFIX}{i}" for i in range(n_features)]
+    )
+    df[LABEL_COL] = labels
+    return df
 
 
 # ---------------------------------------------------------------------------
@@ -239,17 +240,29 @@ def _bench_k_means(kmeans, name, data, labels):
     }
 
 
+def _pca_init_components(df, n_components):
+    """Fit PCA on features and return components as a tuple-of-tuples.
+
+    The tuple form is hashable (required by xorq's frozen parameter storage)
+    and sklearn coerces it back to ndarray internally.
+    """
+    features = [c for c in df.columns if c.startswith(FEATURE_PREFIX)]
+    pca = PCA(n_components=n_components).fit(df[features].values)
+    return tuple(tuple(row) for row in pca.components_)
+
+
 # =========================================================================
 # SKLEARN WAY -- eager fit/predict, benchmarking
 # =========================================================================
 
 
-def sklearn_way(dataset):
+def sklearn_way(df, pca_init):
     """Eager sklearn: benchmark three KMeans initialization strategies,
     compute clustering metrics, create PCA visualization."""
-    data = dataset["data"]
-    labels = dataset["labels"]
-    n_digits = dataset["n_digits"]
+    features = [c for c in df.columns if c.startswith(FEATURE_PREFIX)]
+    data = df[features].values
+    labels = df[LABEL_COL].values
+    n_digits = len(np.unique(labels))
 
     print(82 * "_")
     print("init\t\ttime\tinertia\thomo\tcompl\tv-meas\tARI\tAMI\tsilhouette")
@@ -267,8 +280,7 @@ def sklearn_way(dataset):
     )
 
     # PCA-based initialization
-    pca = PCA(n_components=n_digits).fit(data)
-    kmeans_pca = KMeans(init=pca.components_, n_clusters=n_digits, n_init=1)
+    kmeans_pca = KMeans(init=pca_init, n_clusters=n_digits, n_init=1)
     res_pca = _bench_k_means(
         kmeans=kmeans_pca, name="PCA-based", data=data, labels=labels
     )
@@ -294,28 +306,17 @@ def sklearn_way(dataset):
 # =========================================================================
 
 
-def xorq_way(dataset):
+def xorq_way(df, pca_init):
     """Deferred xorq: wrap KMeans pipelines in Pipeline.from_instance,
     fit/predict deferred, compute deferred clustering metrics.
 
     Returns dict with deferred metric expressions and table for plotting.
     """
-    data = dataset["data"]
-    labels = dataset["labels"]
-    n_digits = dataset["n_digits"]
-
     con = xo.connect()
-
-    # Register full dataset with labels
-    # Use 'f' prefix for feature columns to avoid numeric-only names
-    df = pd.DataFrame(
-        data, columns=[f"{FEATURE_PREFIX}{i}" for i in range(data.shape[1])]
-    )
-    df[LABEL_COL] = labels
     table = con.register(df, "digits")
 
-    # Feature columns (all except label)
-    features = tuple(f"{FEATURE_PREFIX}{i}" for i in range(data.shape[1]))
+    features = tuple(c for c in table.columns if c.startswith(FEATURE_PREFIX))
+    n_digits = len(pca_init)  # n_components == n_digits
 
     make_metric = deferred_sklearn_metric(target=LABEL_COL, pred=PRED_COL)
 
@@ -359,22 +360,30 @@ def xorq_way(dataset):
         }
     )
 
-    # Note: PCA-based init passes pca.components_ (a numpy ndarray) as the
-    # `init` parameter to KMeans.  xorq's Pipeline stores model parameters in
-    # attrs-based frozen classes that require all values to be hashable.
-    # numpy arrays are not hashable, so Pipeline.from_instance raises a
-    # TypeError when it tries to freeze the KMeans params.  Until xorq adds
-    # automatic array-to-tuple coercion for init parameters, PCA-based init
-    # must be handled outside the deferred pipeline.
-    print(
-        "Note: PCA-based initialization skipped for xorq -- "
-        "KMeans(init=pca.components_) passes a numpy array, which is "
-        "unhashable for xorq's frozen parameter storage."
+    # PCA-based initialization: pca_init is a tuple-of-tuples (hashable).
+    sklearn_pipe_pca = SklearnPipeline(
+        [
+            ("standardscaler", StandardScaler()),
+            (
+                "kmeans",
+                KMeans(init=pca_init, n_clusters=n_digits, n_init=1),
+            ),
+        ]
+    )
+    xorq_pipe_pca = Pipeline.from_instance(sklearn_pipe_pca)
+    fitted_pca = xorq_pipe_pca.fit(table, features=features, target=LABEL_COL)
+    preds_pca = fitted_pca.predict(table, name=PRED_COL)
+    metrics_pca = preds_pca.agg(
+        **{
+            metric_name: make_metric(metric=metric_fn)
+            for metric_name, metric_fn in zip(METRIC_NAMES, CLUSTERING_METRICS)
+        }
     )
 
     return {
         "k-means++": metrics_kpp,
         "random": metrics_rand,
+        "PCA-based": metrics_pca,
         "table": table,
     }
 
@@ -387,34 +396,33 @@ def xorq_way(dataset):
 def main():
     os.makedirs("imgs", exist_ok=True)
 
-    dataset = _load_data()
+    df = _load_data()
+    features = [c for c in df.columns if c.startswith(FEATURE_PREFIX)]
+    n_digits = df[LABEL_COL].nunique()
+    pca_init = _pca_init_components(df, n_digits)
 
     print(
-        f"# digits: {dataset['n_digits']}; "
-        f"# samples: {dataset['n_samples']}; "
-        f"# features {dataset['n_features']}"
+        f"# digits: {n_digits}; "
+        f"# samples: {len(df)}; "
+        f"# features {len(features)}"
     )
     print()
 
     print("=== SKLEARN WAY ===")
-    sk_results = sklearn_way(dataset)
+    sk_results = sklearn_way(df, pca_init)
 
     print("\n=== XORQ WAY ===")
-    xo_results = xorq_way(dataset)
+    xo_results = xorq_way(df, pca_init)
 
     # Execute deferred metrics and build comparison dataframe
     print("\n=== ASSERTIONS ===")
     print("Comparing clustering metrics (sklearn vs xorq):")
-    print(
-        "(Note: PCA-based initialization only tested with sklearn "
-        "due to unhashable parameter constraint)"
-    )
 
     # Build metrics comparison DataFrame
     sklearn_metrics_data = []
     xorq_metrics_data = []
 
-    init_methods = ("k-means++", "random")
+    init_methods = ("k-means++", "random", "PCA-based")
 
     for init_method in init_methods:
         sk_res = sk_results[init_method]
@@ -448,15 +456,9 @@ def main():
         sklearn_metrics_df, xorq_metrics_df, rtol=1e-2, check_dtype=False
     )
 
-    # Also print PCA-based sklearn results for reference
-    sk_res_pca = sk_results["PCA-based"]
-    print("\nPCA-based (sklearn only):")
-    for metric_name in METRIC_NAMES:
-        print(f"  {metric_name:12s} - sklearn: {sk_res_pca[metric_name]:.3f}")
-
     print(
         "\nAssertions passed: sklearn and xorq clustering metrics match "
-        "for k-means++ and random initialization."
+        "for all three initialization methods."
     )
 
     print("\n=== PLOTTING ===")
@@ -464,7 +466,7 @@ def main():
 
     # Build sklearn plot
     sk_fig = _plot_pca_clusters(
-        sk_results["reduced_data"], sk_results["kmeans_viz"], dataset["n_digits"]
+        sk_results["reduced_data"], sk_results["kmeans_viz"], n_digits
     )
 
     # Composite: sklearn (left) | xorq (right)
