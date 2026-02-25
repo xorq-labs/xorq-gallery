@@ -184,36 +184,22 @@ def _make_comparator(sklearn_pipeline, input_expr, dataset_type, pred):
 # ---------------------------------------------------------------------------
 
 _DF = _load_data()
-_CON = xo.connect()
-INPUT_EXPR = _CON.register(_DF, "quantile_data")
+INPUT_EXPR = xo.connect().register(_DF, "quantile_data")
 
-COMPARATOR_Q05_NORMAL = _make_comparator(SklearnPipeline([("qr", QuantileRegressor(quantile=0.05, alpha=0))]), INPUT_EXPR, "normal", "pred_q05")
-COMPARATOR_Q50_NORMAL = _make_comparator(SklearnPipeline([("qr", QuantileRegressor(quantile=0.50, alpha=0))]), INPUT_EXPR, "normal", "pred_q50")
-COMPARATOR_Q95_NORMAL = _make_comparator(SklearnPipeline([("qr", QuantileRegressor(quantile=0.95, alpha=0))]), INPUT_EXPR, "normal", "pred_q95")
-COMPARATOR_LR_NORMAL  = _make_comparator(SklearnPipeline([("lr", LinearRegression())]),                        INPUT_EXPR, "normal", "pred_lr")
-COMPARATOR_QR_NORMAL  = _make_comparator(SklearnPipeline([("qr", QuantileRegressor(quantile=0.50, alpha=0))]), INPUT_EXPR, "normal", "pred_qr")
-
-COMPARATOR_Q05_PARETO = _make_comparator(SklearnPipeline([("qr", QuantileRegressor(quantile=0.05, alpha=0))]), INPUT_EXPR, "pareto", "pred_q05")
-COMPARATOR_Q50_PARETO = _make_comparator(SklearnPipeline([("qr", QuantileRegressor(quantile=0.50, alpha=0))]), INPUT_EXPR, "pareto", "pred_q50")
-COMPARATOR_Q95_PARETO = _make_comparator(SklearnPipeline([("qr", QuantileRegressor(quantile=0.95, alpha=0))]), INPUT_EXPR, "pareto", "pred_q95")
-COMPARATOR_LR_PARETO  = _make_comparator(SklearnPipeline([("lr", LinearRegression())]),                        INPUT_EXPR, "pareto", "pred_lr")
-COMPARATOR_QR_PARETO  = _make_comparator(SklearnPipeline([("qr", QuantileRegressor(quantile=0.50, alpha=0))]), INPUT_EXPR, "pareto", "pred_qr")
+PIPELINES = {
+    "pred_q05": SklearnPipeline([("qr", QuantileRegressor(quantile=0.05, alpha=0))]),
+    "pred_q50": SklearnPipeline([("qr", QuantileRegressor(quantile=0.50, alpha=0))]),
+    "pred_q95": SklearnPipeline([("qr", QuantileRegressor(quantile=0.95, alpha=0))]),
+    "pred_lr":  SklearnPipeline([("lr", LinearRegression())]),
+    "pred_qr":  SklearnPipeline([("qr", QuantileRegressor(quantile=0.50, alpha=0))]),
+}
 
 _COMPARATORS = {
-    "normal": (
-        COMPARATOR_Q05_NORMAL,
-        COMPARATOR_Q50_NORMAL,
-        COMPARATOR_Q95_NORMAL,
-        COMPARATOR_LR_NORMAL,
-        COMPARATOR_QR_NORMAL,
-    ),
-    "pareto": (
-        COMPARATOR_Q05_PARETO,
-        COMPARATOR_Q50_PARETO,
-        COMPARATOR_Q95_PARETO,
-        COMPARATOR_LR_PARETO,
-        COMPARATOR_QR_PARETO,
-    ),
+    dataset_type: {
+        pred: _make_comparator(pipeline, INPUT_EXPR, dataset_type, pred)
+        for pred, pipeline in PIPELINES.items()
+    }
+    for dataset_type in ("normal", "pareto")
 }
 
 
@@ -236,21 +222,21 @@ def sklearn_way(dataset_type="normal"):
         Keys: "predictions" (dict of quantile -> array), "out_bounds" (bool array),
               "lr_metrics" (dict with mae, mse)
     """
-    q05, q50, q95, lr, qr = _COMPARATORS[dataset_type]
+    comparators = _COMPARATORS[dataset_type]
 
-    y_pred_05 = q05.sklearn_prediction
-    y_pred_50 = q50.sklearn_prediction
-    y_pred_95 = q95.sklearn_prediction
-    out_bounds = (y_pred_05 >= q05.y) | (y_pred_95 <= q05.y)
+    y_pred_05 = comparators["pred_q05"].sklearn_prediction
+    y_pred_50 = comparators["pred_q50"].sklearn_prediction
+    y_pred_95 = comparators["pred_q95"].sklearn_prediction
+    out_bounds = (y_pred_05 >= comparators["pred_q05"].y) | (y_pred_95 <= comparators["pred_q05"].y)
 
-    print(f"  sklearn LinearRegression:    MAE={lr.sklearn_metrics['mae']:.3f}, MSE={lr.sklearn_metrics['mse']:.3f}")
-    print(f"  sklearn QuantileRegressor:   MAE={qr.sklearn_metrics['mae']:.3f}, MSE={qr.sklearn_metrics['mse']:.3f}")
+    print(f"  sklearn LinearRegression:    MAE={comparators['pred_lr'].sklearn_metrics['mae']:.3f}, MSE={comparators['pred_lr'].sklearn_metrics['mse']:.3f}")
+    print(f"  sklearn QuantileRegressor:   MAE={comparators['pred_qr'].sklearn_metrics['mae']:.3f}, MSE={comparators['pred_qr'].sklearn_metrics['mse']:.3f}")
 
     return {
         "predictions": {0.05: y_pred_05, 0.5: y_pred_50, 0.95: y_pred_95},
         "out_bounds": out_bounds,
-        "lr_metrics": lr.sklearn_metrics,
-        "qr_metrics": qr.sklearn_metrics,
+        "lr_metrics": comparators["pred_lr"].sklearn_metrics,
+        "qr_metrics": comparators["pred_qr"].sklearn_metrics,
     }
 
 
@@ -275,16 +261,16 @@ def xorq_way(dataset_type="normal"):
     dict
         Keys: "predictions", "lr_metrics", "qr_metrics"
     """
-    q05, q50, q95, lr, qr = _COMPARATORS[dataset_type]
+    comparators = _COMPARATORS[dataset_type]
 
     return {
         "predictions": {
-            0.05: q05.xorq_prediction,
-            0.5: q50.xorq_prediction,
-            0.95: q95.xorq_prediction,
+            0.05: comparators["pred_q05"].xorq_prediction,
+            0.5:  comparators["pred_q50"].xorq_prediction,
+            0.95: comparators["pred_q95"].xorq_prediction,
         },
-        "lr_metrics": lr.xorq_metrics,
-        "qr_metrics": qr.xorq_metrics,
+        "lr_metrics": comparators["pred_lr"].xorq_metrics,
+        "qr_metrics": comparators["pred_qr"].xorq_metrics,
     }
 
 
