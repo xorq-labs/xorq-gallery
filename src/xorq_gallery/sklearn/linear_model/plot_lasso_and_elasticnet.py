@@ -19,12 +19,14 @@ from __future__ import annotations
 
 import os
 from time import time
+from functools import cache
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xorq.api as xo
 from matplotlib.colors import SymLogNorm
+from sklearn.base import clone
 from sklearn.linear_model import ARDRegression, ElasticNet, Lasso
 from sklearn.metrics import r2_score
 from sklearn.model_selection import train_test_split
@@ -97,17 +99,16 @@ def _generate_sparse_signal():
     return true_coef, X, y, time_step
 
 
+@cache
 def _load_data():
     """Load data as pandas DataFrame with row_idx for temporal ordering."""
     true_coef, X, y, time_step = _generate_sparse_signal()
 
-    # Build DataFrame
-    df = pd.DataFrame(X, columns=FEATURE_COLS)
-    df[TARGET_COL] = y
-    df["time_step"] = time_step
-    df[ROW_IDX] = range(len(df))
-
-    # Store true_coef separately for comparison
+    df = pd.DataFrame(X, columns=FEATURE_COLS).assign(**{
+        TARGET_COL: y,
+        "time_step": time_step,
+        ROW_IDX: range(len(X)),
+    })
     df.attrs["true_coef"] = true_coef
 
     return df
@@ -166,9 +167,89 @@ def _build_coefficient_heatmap(coef_matrix, row_labels, r2_scores, title_prefix)
     return fig
 
 
+PIPELINES = {
+    "Lasso": SklearnPipeline([("lasso", Lasso(alpha=LASSO_ALPHA))]),
+    "ARD": SklearnPipeline([("ard", ARDRegression())]),
+    "ElasticNet": SklearnPipeline([("elasticnet", ElasticNet(alpha=ELASTICNET_ALPHA, l1_ratio=ELASTICNET_L1_RATIO))]),
+}
+
+
+def _fit_xorq_pipeline(sklearn_pipeline, train_data, test_data):
+    fitted = Pipeline.from_instance(sklearn_pipeline).fit(train_data, features=FEATURE_COLS, target=TARGET_COL)
+    preds = fitted.predict(test_data, name=PRED_COL)
+    return {
+        "preds": preds,
+        "metrics": preds.agg(r2=deferred_sklearn_metric(target=TARGET_COL, pred=PRED_COL, metric=r2_score)),
+        "fitted_pipe": fitted,
+    }
+
+# =========================================================================
+# XORQ WAY -- deferred, deferred_sequential_split
+# =========================================================================
+
+con = xo.connect()
+data = con.register(_load_data(), "sparse_signal")
+
+
+# Sequential split (first ~67% train, last ~33% test)
+train_data, test_data = deferred_sequential_split(
+    data,
+    features=FEATURE_COLS,
+    target=TARGET_COL,
+    order_by=ROW_IDX,
+)
+name_to_xorq_exprs = {
+    name: _fit_xorq_pipeline(sklearn_pipeline, train_data, test_data)
+    for name, sklearn_pipeline in PIPELINES.items()
+}
+# expose the exprs in the script to invoke `xorq build plot_lasso_and_elasticnet.py --expr $expr_name`
+(xorq_lasso_preds, xorq_ard_preds, xorq_elastic_net_preds) = (
+    name_to_xorq_exprs[name]["preds"]
+    for name in ("Lasso", "ARD", "ElasticNet")
+)
+
+
+def xorq_way(name_to_xorq_exprs):
+    """Deferred xorq: sequential split, fit three L1-based models deferred.
+
+    Executes deferred expressions for predictions and metrics, plus fitted pipelines
+    for coefficient extraction after execution.
+    Nothing is executed until ``.execute()``.
+
+    Returns
+    -------
+    dict
+        Keys: "Lasso", "ARD", "ElasticNet"
+        Values: dict with "preds", "metrics", "fitted_pipe"
+    """
+    xo_r2_scores = {
+        name: exprs["metrics"].execute()["r2"].iloc[0]
+        for name, exprs in name_to_xorq_exprs.items()
+    }
+    xo_coefs = {
+        # FittedStep.model executes
+        name: exprs["fitted_pipe"].fitted_steps[-1].model.coef_
+        for name, exprs in name_to_xorq_exprs.items()
+    }
+
+    for name, r2 in xo_r2_scores.items():
+        print(f"  xorq   {name}: R^2 = {r2:.3f}")
+
+    return xo_r2_scores, xo_coefs
+
+
 # =========================================================================
 # SKLEARN WAY -- eager, train_test_split(shuffle=False)
 # =========================================================================
+
+
+def _fit_sklearn_pipeline(name, pipeline, X_train, X_test, y_train, y_test):
+    t0 = time()
+    fitted = clone(pipeline).fit(X_train, y_train)
+    fit_time = time() - t0
+    r2 = r2_score(y_test, fitted.predict(X_test))
+    print(f"  sklearn {name}: R^2 = {r2:.3f}, fit time = {fit_time:.3f}s")
+    return {"r2": r2, "coef": fitted[-1].coef_, "fit_time": fit_time}
 
 
 def sklearn_way(df):
@@ -189,125 +270,11 @@ def sklearn_way(df):
         X, y, test_size=0.3333, shuffle=False
     )
 
-    results = {}
-
-    # Lasso
-    t0 = time()
-    lasso = Lasso(alpha=LASSO_ALPHA).fit(X_train, y_train)
-    lasso_time = time() - t0
-    y_pred_lasso = lasso.predict(X_test)
-    r2_lasso = r2_score(y_test, y_pred_lasso)
-    print(f"  sklearn Lasso: R^2 = {r2_lasso:.3f}, fit time = {lasso_time:.3f}s")
-    results["Lasso"] = {"r2": r2_lasso, "coef": lasso.coef_, "fit_time": lasso_time}
-
-    # ARDRegression
-    t0 = time()
-    ard = ARDRegression().fit(X_train, y_train)
-    ard_time = time() - t0
-    y_pred_ard = ard.predict(X_test)
-    r2_ard = r2_score(y_test, y_pred_ard)
-    print(f"  sklearn ARD: R^2 = {r2_ard:.3f}, fit time = {ard_time:.3f}s")
-    results["ARD"] = {"r2": r2_ard, "coef": ard.coef_, "fit_time": ard_time}
-
-    # ElasticNet
-    t0 = time()
-    enet = ElasticNet(alpha=ELASTICNET_ALPHA, l1_ratio=ELASTICNET_L1_RATIO).fit(
-        X_train, y_train
-    )
-    enet_time = time() - t0
-    y_pred_enet = enet.predict(X_test)
-    r2_enet = r2_score(y_test, y_pred_enet)
-    print(f"  sklearn ElasticNet: R^2 = {r2_enet:.3f}, fit time = {enet_time:.3f}s")
-    results["ElasticNet"] = {
-        "r2": r2_enet,
-        "coef": enet.coef_,
-        "fit_time": enet_time,
+    return {
+        name: _fit_sklearn_pipeline(name, pipeline, X_train, X_test, y_train, y_test)
+        for name, pipeline in PIPELINES.items()
     }
 
-    return results
-
-
-# =========================================================================
-# XORQ WAY -- deferred, deferred_sequential_split
-# =========================================================================
-
-
-def xorq_way(df):
-    """Deferred xorq: sequential split, fit three L1-based models deferred.
-
-    Returns deferred expressions for predictions and metrics, plus fitted pipelines
-    for coefficient extraction after execution.
-    Nothing is executed until ``.execute()``.
-
-    Returns
-    -------
-    dict
-        Keys: "Lasso", "ARD", "ElasticNet"
-        Values: dict with "preds", "metrics", "fitted_pipe"
-    """
-    con = xo.connect()
-    data = con.register(df, "sparse_signal")
-
-    # Sequential split (first ~67% train, last ~33% test)
-    train_data, test_data = deferred_sequential_split(
-        data,
-        features=FEATURE_COLS,
-        target=TARGET_COL,
-        order_by=ROW_IDX,
-        test_size=0.3333,
-    )
-
-    make_metric = deferred_sklearn_metric(target=TARGET_COL, pred=PRED_COL)
-
-    results = {}
-
-    # Lasso - wrap in sklearn Pipeline first
-    lasso_sklearn_pipe = SklearnPipeline([("lasso", Lasso(alpha=LASSO_ALPHA))])
-    lasso_pipe = Pipeline.from_instance(lasso_sklearn_pipe)
-    lasso_fitted = lasso_pipe.fit(train_data, features=FEATURE_COLS, target=TARGET_COL)
-    lasso_preds = lasso_fitted.predict(test_data, name=PRED_COL)
-    lasso_metrics = lasso_preds.agg(r2=make_metric(metric=r2_score))
-
-    results["Lasso"] = {
-        "preds": lasso_preds,
-        "metrics": lasso_metrics,
-        "fitted_pipe": lasso_fitted,
-    }
-
-    # ARDRegression
-    ard_sklearn_pipe = SklearnPipeline([("ard", ARDRegression())])
-    ard_pipe = Pipeline.from_instance(ard_sklearn_pipe)
-    ard_fitted = ard_pipe.fit(train_data, features=FEATURE_COLS, target=TARGET_COL)
-    ard_preds = ard_fitted.predict(test_data, name=PRED_COL)
-    ard_metrics = ard_preds.agg(r2=make_metric(metric=r2_score))
-
-    results["ARD"] = {
-        "preds": ard_preds,
-        "metrics": ard_metrics,
-        "fitted_pipe": ard_fitted,
-    }
-
-    # ElasticNet
-    enet_sklearn_pipe = SklearnPipeline(
-        [
-            (
-                "elasticnet",
-                ElasticNet(alpha=ELASTICNET_ALPHA, l1_ratio=ELASTICNET_L1_RATIO),
-            )
-        ]
-    )
-    enet_pipe = Pipeline.from_instance(enet_sklearn_pipe)
-    enet_fitted = enet_pipe.fit(train_data, features=FEATURE_COLS, target=TARGET_COL)
-    enet_preds = enet_fitted.predict(test_data, name=PRED_COL)
-    enet_metrics = enet_preds.agg(r2=make_metric(metric=r2_score))
-
-    results["ElasticNet"] = {
-        "preds": enet_preds,
-        "metrics": enet_metrics,
-        "fitted_pipe": enet_fitted,
-    }
-
-    return results
 
 
 # =========================================================================
@@ -325,24 +292,9 @@ def main():
     sk_results = sklearn_way(df)
 
     print("\n=== XORQ WAY ===")
-    deferred = xorq_way(df)
+    xo_r2_scores, xo_coefs = xorq_way(name_to_xorq_exprs)
 
     # Execute deferred expressions
-    xo_r2_scores = {}
-    xo_coefs = {}
-
-    for name, exprs in deferred.items():
-        metrics_df = exprs["metrics"].execute()
-        r2 = metrics_df["r2"].iloc[0]
-        xo_r2_scores[name] = r2
-        print(f"  xorq   {name}: R^2 = {r2:.3f}")
-
-        # Extract coefficients from fitted pipeline
-        fitted_pipe = exprs["fitted_pipe"]
-        # Access the fitted sklearn model from the last fitted step
-        last_step = fitted_pipe.fitted_steps[-1]
-        sklearn_model = last_step.model
-        xo_coefs[name] = sklearn_model.coef_
 
     # ---- Compare results ----
     # Note: Results may differ slightly due to subtle differences in how
