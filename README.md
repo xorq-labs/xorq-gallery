@@ -7,13 +7,19 @@ Side-by-side examples comparing **sklearn** (eager) and **xorq** (deferred) appr
 Run any example directly with `uv`:
 
 ```bash
-uv tool run --isolated --python 3.12 --with git+ssh://git@github.com/xorq-labs/xorq-gallery xorq-gallery run plot_cyclical_feature_engineering
+uv tool run --isolated --python 3.12 --with git+ssh://git@github.com/xorq-labs/xorq-gallery xorq-gallery run plot_topics_extraction_with_nmf_lda
 ```
 
 Or run locally:
 
 ```bash
-python -m xorq_gallery.sklearn.applications.plot_cyclical_feature_engineering
+xorq-gallery run plot_cyclical_feature_engineering
+```
+
+Run all examples in a group
+
+```bash
+xorq-gallery run-all --group svm
 ```
 
 ## Development
@@ -22,16 +28,16 @@ python -m xorq_gallery.sklearn.applications.plot_cyclical_feature_engineering
 nix develop
 ```
 
-Run all examples via pytest (CI):
+Run all examples:
 
 ```bash
-python -m pytest -s
+xorq-gallery run-all
 ```
 
 Run a single example:
 
 ```bash
-python -m xorq_gallery.sklearn.applications.plot_cyclical_feature_engineering
+xorq-gallery run plot_cyclical_feature_engineering
 ```
 
 ## Examples

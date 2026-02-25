@@ -7,21 +7,24 @@ import matplotlib as mpl
 import pytest
 from pytest import param
 
+from xorq_gallery.sklearn import (
+    get_scripts_for_group,
+    groups,
+)
+
 
 mpl.use("Agg")
 
-
-sklearn_dir = pathlib.Path(__file__).parents[1] / "src" / "xorq_gallery" / "sklearn"
 
 repo_root = pathlib.Path(__file__).parents[1]
 imgs_dir = repo_root / "imgs"
 
 # Collect all example scripts from all categories (applications, calibration, etc.)
-scripts = []
-for category_dir in sorted(sklearn_dir.iterdir()):
-    if category_dir.is_dir() and not category_dir.name.startswith("_"):
-        for script in sorted(category_dir.glob("plot_*.py")):
-            scripts.append((category_dir.name, script))
+scripts = tuple(
+    (group_name, script)
+    for group_name in (group.name for group in groups)
+    for script in get_scripts_for_group(group_name)
+)
 
 
 @pytest.mark.parametrize(

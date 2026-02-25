@@ -214,7 +214,12 @@ def sklearn_way(datasets):
         X = df[list(FEATURES)].values
 
         pipeline = SklearnPipeline(
-            [("kmeans", KMeans(n_clusters=n_clusters, random_state=RANDOM_STATE, n_init=10))]
+            [
+                (
+                    "kmeans",
+                    KMeans(n_clusters=n_clusters, random_state=RANDOM_STATE, n_init=10),
+                )
+            ]
         )
         pipeline.fit(X)
         estimator = pipeline.named_steps["kmeans"]
@@ -225,7 +230,9 @@ def sklearn_way(datasets):
                 "centers": estimator.cluster_centers_,
             }
         )
-        print(f"  {title:40s} n_clusters={n_clusters}  inertia={estimator.inertia_:.1f}")
+        print(
+            f"  {title:40s} n_clusters={n_clusters}  inertia={estimator.inertia_:.1f}"
+        )
 
     return results
 
@@ -248,7 +255,12 @@ def xorq_way(datasets):
         table = con.register(df, f"scenario_{idx}")
 
         sklearn_pipe = SklearnPipeline(
-            [("kmeans", KMeans(n_clusters=n_clusters, random_state=RANDOM_STATE, n_init=10))]
+            [
+                (
+                    "kmeans",
+                    KMeans(n_clusters=n_clusters, random_state=RANDOM_STATE, n_init=10),
+                )
+            ]
         )
         xorq_pipe = Pipeline.from_instance(sklearn_pipe)
         fitted = xorq_pipe.fit(table, features=FEATURES, target=TARGET_COL)
