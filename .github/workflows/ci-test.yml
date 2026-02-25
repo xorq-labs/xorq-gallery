@@ -47,7 +47,7 @@ jobs:
         working-directory: ${{ github.workspace }}
 
       - name: pytest
-        run: nix develop -c uv run --no-sync pytest --verbose --import-mode=importlib --cov --cov-report=xml -k plot_tomography_l1_reconstruction .
+        run: uv run --no-sync pytest --verbose --import-mode=importlib --cov --cov-report=xml -k plot_tomography_l1_reconstruction .
         working-directory: ${{ github.workspace }}
 
       - name: Upload coverage reports to Codecov
