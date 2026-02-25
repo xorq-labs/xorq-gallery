@@ -21,7 +21,9 @@ def _scripts_for_group(group_name):
 
 def run_script(script, run_name="__main__"):
     print(f"Running {script.name}")
-    return runpy.run_path(str(script), run_name=run_name)
+    dct = runpy.run_path(str(script), run_name=run_name)
+    dct["main"]()
+    return dct
 
 
 def _complete_group(ctx, param, incomplete):
