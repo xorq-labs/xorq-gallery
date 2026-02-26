@@ -16,12 +16,14 @@ Dataset: Synthetic 3-class overlapping blobs with linear transformation
 
 from __future__ import annotations
 
-import os
+from functools import cache
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import toolz
 import xorq.api as xo
+from sklearn.base import clone
 from sklearn.datasets import make_blobs
 from sklearn.inspection import DecisionBoundaryDisplay
 from sklearn.linear_model import LogisticRegression
@@ -31,7 +33,7 @@ from sklearn.pipeline import Pipeline as SklearnPipeline
 from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
 
-from xorq_gallery.utils import fig_to_image
+from xorq_gallery.utils import fig_to_image, save_fig
 
 
 # ---------------------------------------------------------------------------
@@ -48,12 +50,23 @@ TARGET_COL = "target"
 ROW_IDX = "row_idx"
 PRED_COL = "pred"
 
+methods = (MULTINOMIAL, OVR) = ("multinomial", "ovr")
+name_to_pipeline = {
+    MULTINOMIAL: SklearnPipeline(
+        [("multinomial", LogisticRegression(random_state=RANDOM_STATE))]
+    ),
+    OVR: SklearnPipeline(
+        [("ovr", OneVsRestClassifier(LogisticRegression(random_state=RANDOM_STATE)))]
+    ),
+}
+
 
 # ---------------------------------------------------------------------------
 # Data generation (shared)
 # ---------------------------------------------------------------------------
 
 
+@cache
 def _load_data():
     """Generate synthetic 3-class dataset following sklearn example exactly.
 
@@ -62,9 +75,9 @@ def _load_data():
     X, y = make_blobs(n_samples=N_SAMPLES, centers=CENTERS, random_state=RANDOM_STATE)
     X = np.dot(X, TRANSFORMATION)
 
-    df = pd.DataFrame(X, columns=list(FEATURE_COLS))
-    df[TARGET_COL] = y
-    df[ROW_IDX] = range(len(df))
+    df = pd.DataFrame(X, columns=list(FEATURE_COLS)).assign(
+        **{TARGET_COL: y, ROW_IDX: range(len(X))}
+    )
 
     return df
 
@@ -206,105 +219,96 @@ def _build_hyperplane_plot(X, y, model_multi, model_ovr):
     return fig
 
 
-# =========================================================================
-# SKLEARN WAY -- eager, train_test_split(shuffle=False)
-# =========================================================================
+def _deferred_fit_xorq_pipeline(sklearn_pipeline, data):
+    fitted = Pipeline.from_instance(sklearn_pipeline).fit(
+        data, features=FEATURE_COLS, target=TARGET_COL
+    )
+    preds = fitted.predict(data, name=PRED_COL)
+    return {
+        "preds": preds,
+        "metrics": preds.agg(
+            acc=deferred_sklearn_metric(
+                target=TARGET_COL, pred=PRED_COL, metric=accuracy_score
+            )
+        ),
+        "fitted_pipe": fitted,
+    }
 
 
-def sklearn_way(df):
-    """Eager sklearn: fit multinomial and OvR classifiers, evaluate, plot.
+def compute_with_xorq(name_to_xorq_exprs):
+    """Execute deferred xorq expressions for multinomial and OvR classifiers.
 
     Returns
     -------
-    dict
-        Keys: "multinomial", "ovr"
-        Values: dict with "model", "accuracy"
+    tuple
+        (xo_accuracies, xo_models) dicts keyed by method name
+    """
+    xo_accuracies = {
+        name: exprs["metrics"].execute()["acc"].iloc[0]
+        for name, exprs in name_to_xorq_exprs.items()
+    }
+    xo_models = {
+        name: exprs["fitted_pipe"].fitted_steps[-1].model
+        for name, exprs in name_to_xorq_exprs.items()
+    }
+
+    for name, acc in xo_accuracies.items():
+        print(f"  xorq   {name}: Accuracy = {acc:.3f}")
+
+    return xo_accuracies, xo_models
+
+
+# =========================================================================
+# SKLEARN WAY -- eager
+# =========================================================================
+
+
+def _fit_sklearn_pipeline(name, pipeline, X, y):
+    fitted = clone(pipeline).fit(X, y)
+    acc = accuracy_score(y, fitted.predict(X))
+    print(f"  sklearn {name}: Accuracy = {acc:.3f}")
+    return {"accuracy": acc, "model": fitted[-1]}
+
+
+def compute_with_sklearn(name_to_pipeline, df):
+    """Eager sklearn: fit multinomial and OvR classifiers on full dataset.
+
+    Returns
+    -------
+    tuple
+        (sk_accuracies, sk_models) dicts keyed by method name
     """
     X = df[list(FEATURE_COLS)].values
     y = df[TARGET_COL].values
 
-    # Fit both models on the full dataset (matching sklearn example)
-    model_multi = LogisticRegression(random_state=RANDOM_STATE).fit(X, y)
-    model_ovr = OneVsRestClassifier(LogisticRegression(random_state=RANDOM_STATE)).fit(
-        X, y
-    )
-
-    # Evaluate on full dataset (matching sklearn example)
-    acc_multi = model_multi.score(X, y)
-    acc_ovr = model_ovr.score(X, y)
-
-    print(f"  sklearn Multinomial: Accuracy = {acc_multi:.3f}")
-    print(f"  sklearn One-vs-Rest: Accuracy = {acc_ovr:.3f}")
-
-    return {
-        "multinomial": {"model": model_multi, "accuracy": acc_multi},
-        "ovr": {"model": model_ovr, "accuracy": acc_ovr},
-        "X": X,
-        "y": y,
+    results = {
+        name: _fit_sklearn_pipeline(name, pipeline, X, y)
+        for name, pipeline in name_to_pipeline.items()
     }
+    sk_accuracies, sk_models = (
+        toolz.valmap(toolz.curried.get(key), results) for key in ("accuracy", "model")
+    )
+    return sk_accuracies, sk_models
 
 
 # =========================================================================
-# XORQ WAY -- deferred, deferred_sequential_split
+# XORQ WAY -- deferred
 # =========================================================================
 
+con = xo.connect()
+data = con.register(_load_data(), "blobs")
 
-def xorq_way(df):
-    """Deferred xorq: fit multinomial and OvR classifiers deferred.
+# One-vs-Rest requires a separate connection to avoid backend conflicts
+con_ovr = xo.connect()
+data_ovr = con_ovr.register(_load_data(), "blobs_ovr")
 
-    Returns deferred expressions for predictions and metrics.
-    Nothing is executed until ``.execute()``.
-
-    Returns
-    -------
-    dict
-        Keys: "multinomial", "ovr"
-        Values: dict with "metrics" and fitted pipeline for coefficient access
-    """
-    con = xo.connect()
-    data = con.register(df, "blobs")
-
-    results = {}
-
-    # Multinomial logistic regression
-    multi_sklearn_pipe = SklearnPipeline(
-        [("multinomial", LogisticRegression(random_state=RANDOM_STATE))]
-    )
-    multi_pipe = Pipeline.from_instance(multi_sklearn_pipe)
-    multi_fitted = multi_pipe.fit(data, features=FEATURE_COLS, target=TARGET_COL)
-    multi_preds = multi_fitted.predict(data, name=PRED_COL)
-
-    make_metric_multi = deferred_sklearn_metric(target=TARGET_COL, pred=PRED_COL)
-    multi_metrics = multi_preds.agg(acc=make_metric_multi(metric=accuracy_score))
-
-    results["multinomial"] = {
-        "metrics": multi_metrics,
-        "fitted": multi_fitted,
-    }
-
-    # One-vs-Rest logistic regression (separate connection to avoid backend conflicts)
-    con_ovr = xo.connect()
-    data_ovr = con_ovr.register(df, "blobs_ovr")
-
-    ovr_sklearn_pipe = SklearnPipeline(
-        [("ovr", OneVsRestClassifier(LogisticRegression(random_state=RANDOM_STATE)))]
-    )
-    ovr_pipe = Pipeline.from_instance(ovr_sklearn_pipe)
-    ovr_fitted = ovr_pipe.fit(data_ovr, features=FEATURE_COLS, target=TARGET_COL)
-    ovr_preds = ovr_fitted.predict(data_ovr, name=PRED_COL)
-
-    make_metric_ovr = deferred_sklearn_metric(target=TARGET_COL, pred=PRED_COL)
-    ovr_metrics = ovr_preds.agg(acc=make_metric_ovr(metric=accuracy_score))
-
-    results["ovr"] = {
-        "metrics": ovr_metrics,
-        "fitted": ovr_fitted,
-    }
-
-    # Store data for plotting (we'll refit for visualization as in classifier_comparison)
-    results["data"] = df
-
-    return results
+name_to_xorq_exprs = {
+    MULTINOMIAL: _deferred_fit_xorq_pipeline(name_to_pipeline[MULTINOMIAL], data),
+    OVR: _deferred_fit_xorq_pipeline(name_to_pipeline[OVR], data_ovr),
+}
+(xorq_multinomial_preds, xorq_ovr_preds) = (
+    name_to_xorq_exprs[name]["preds"] for name in methods
+)
 
 
 # =========================================================================
@@ -312,99 +316,77 @@ def xorq_way(df):
 # =========================================================================
 
 
-def main():
-    os.makedirs("imgs", exist_ok=True)
-
-    df = _load_data()
-
-    print("=== SKLEARN WAY ===")
-    sk_results = sklearn_way(df)
-
-    print("\n=== XORQ WAY ===")
-    xo_results = xorq_way(df)
-
-    # Execute deferred metrics
-    multi_metrics_df = xo_results["multinomial"]["metrics"].execute()
-    xo_acc_multi = multi_metrics_df["acc"].iloc[0]
-
-    ovr_metrics_df = xo_results["ovr"]["metrics"].execute()
-    xo_acc_ovr = ovr_metrics_df["acc"].iloc[0]
-
-    print(f"  xorq   Multinomial: Accuracy = {xo_acc_multi:.3f}")
-    print(f"  xorq   One-vs-Rest: Accuracy = {xo_acc_ovr:.3f}")
-
-    # ---- Assert numerical equivalence BEFORE plotting ----
+def compare_results(sk_accuracies, xo_accuracies):
     print("\n=== Comparing Results ===")
-    sk_acc_multi = sk_results["multinomial"]["accuracy"]
-    sk_acc_ovr = sk_results["ovr"]["accuracy"]
-
-    np.testing.assert_allclose(sk_acc_multi, xo_acc_multi, rtol=1e-2)
-    np.testing.assert_allclose(sk_acc_ovr, xo_acc_ovr, rtol=1e-2)
+    for name in methods:
+        sk_acc, xo_acc = (dct[name] for dct in (sk_accuracies, xo_accuracies))
+        print(
+            f"{name} Accuracy - sklearn: {sk_acc:.3f}, xorq: {xo_acc:.3f}, diff: {abs(sk_acc - xo_acc):.4f}"
+        )
+        np.testing.assert_allclose(sk_acc, xo_acc, rtol=1e-2)
     print("Assertions passed: sklearn and xorq accuracies match.")
 
-    # Extract fitted models from xorq pipelines for plotting
-    # Note: For visualization we refit on the data (similar to classifier_comparison)
-    X = df[list(FEATURE_COLS)].values
-    y = df[TARGET_COL].values
 
-    xo_model_multi = LogisticRegression(random_state=RANDOM_STATE).fit(X, y)
-    xo_model_ovr = OneVsRestClassifier(
-        LogisticRegression(random_state=RANDOM_STATE)
-    ).fit(X, y)
-
-    # Build sklearn plots
-    sk_decision_fig = _build_decision_boundary_plot(
-        sk_results["X"],
-        sk_results["y"],
-        sk_results["multinomial"]["model"],
-        sk_results["ovr"]["model"],
-        sk_acc_multi,
-        sk_acc_ovr,
+def save_decision_plot(X, y, sk_models, sk_accuracies, xo_models, xo_accuracies):
+    sk_fig = _build_decision_boundary_plot(
+        X,
+        y,
+        sk_models[MULTINOMIAL],
+        sk_models[OVR],
+        sk_accuracies[MULTINOMIAL],
+        sk_accuracies[OVR],
+    )
+    xo_fig = _build_decision_boundary_plot(
+        X,
+        y,
+        xo_models[MULTINOMIAL],
+        xo_models[OVR],
+        xo_accuracies[MULTINOMIAL],
+        xo_accuracies[OVR],
     )
 
-    sk_hyperplane_fig = _build_hyperplane_plot(
-        sk_results["X"],
-        sk_results["y"],
-        sk_results["multinomial"]["model"],
-        sk_results["ovr"]["model"],
-    )
-
-    # Build xorq plots (using refitted models for visualization)
-    xo_decision_fig = _build_decision_boundary_plot(
-        X, y, xo_model_multi, xo_model_ovr, xo_acc_multi, xo_acc_ovr
-    )
-
-    xo_hyperplane_fig = _build_hyperplane_plot(X, y, xo_model_multi, xo_model_ovr)
-
-    # Composite: decision boundaries sklearn (left) | xorq (right)
     fig, axes = plt.subplots(1, 2, figsize=(24, 5))
-    axes[0].imshow(fig_to_image(sk_decision_fig))
+    axes[0].imshow(fig_to_image(sk_fig))
     axes[0].axis("off")
-    axes[1].imshow(fig_to_image(xo_decision_fig))
+    axes[1].imshow(fig_to_image(xo_fig))
     axes[1].axis("off")
 
     fig.suptitle("Decision Boundaries: sklearn vs xorq", fontsize=16)
     fig.tight_layout()
-    out_decision = "imgs/logistic_multinomial_decision.png"
-    fig.savefig(out_decision, dpi=150)
-    plt.close(fig)
-    print(f"\nDecision boundary plot saved to {out_decision}")
+    save_fig("imgs/logistic_multinomial_decision.png", fig)
 
-    # Composite: hyperplanes sklearn (left) | xorq (right)
+
+def save_hyperplane_plot(X, y, sk_models, xo_models):
+    sk_fig = _build_hyperplane_plot(X, y, sk_models[MULTINOMIAL], sk_models[OVR])
+    xo_fig = _build_hyperplane_plot(X, y, xo_models[MULTINOMIAL], xo_models[OVR])
+
     fig, axes = plt.subplots(1, 2, figsize=(24, 5))
-    axes[0].imshow(fig_to_image(sk_hyperplane_fig))
+    axes[0].imshow(fig_to_image(sk_fig))
     axes[0].axis("off")
-    axes[1].imshow(fig_to_image(xo_hyperplane_fig))
+    axes[1].imshow(fig_to_image(xo_fig))
     axes[1].axis("off")
 
     fig.suptitle("Hyperplanes: sklearn vs xorq", fontsize=16)
     fig.tight_layout()
-    out_hyperplane = "imgs/logistic_multinomial_hyperplane.png"
-    fig.savefig(out_hyperplane, dpi=150)
-    plt.close(fig)
-    print(f"Hyperplane plot saved to {out_hyperplane}")
+    save_fig("imgs/logistic_multinomial_hyperplane.png", fig)
 
 
-if __name__ in ("__main__", "__pytest_main__"):
+def main():
+    df = _load_data()
+    X = df[list(FEATURE_COLS)].values
+    y = df[TARGET_COL].values
+
+    print("=== SKLEARN WAY ===")
+    sk_accuracies, sk_models = compute_with_sklearn(name_to_pipeline, df)
+
+    print("\n=== XORQ WAY ===")
+    xo_accuracies, xo_models = compute_with_xorq(name_to_xorq_exprs)
+
+    compare_results(sk_accuracies, xo_accuracies)
+    save_decision_plot(X, y, sk_models, sk_accuracies, xo_models, xo_accuracies)
+    save_hyperplane_plot(X, y, sk_models, xo_models)
+
+
+if __name__ in ("__pytest_main__",):
     main()
     pytest_examples_passed = True
