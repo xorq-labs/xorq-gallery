@@ -24,6 +24,7 @@ from functools import cache
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import toolz
 import xorq.api as xo
 from matplotlib.colors import SymLogNorm
 from sklearn.base import clone
@@ -167,10 +168,11 @@ def _build_coefficient_heatmap(coef_matrix, row_labels, r2_scores, title_prefix)
     return fig
 
 
+methods = (LASSO, ARD, ELASTICNET) = ("Lasso", "ARD", "ElasticNet")
 PIPELINES = {
-    "Lasso": SklearnPipeline([("lasso", Lasso(alpha=LASSO_ALPHA))]),
-    "ARD": SklearnPipeline([("ard", ARDRegression())]),
-    "ElasticNet": SklearnPipeline([("elasticnet", ElasticNet(alpha=ELASTICNET_ALPHA, l1_ratio=ELASTICNET_L1_RATIO))]),
+    LASSO: SklearnPipeline([("lasso", Lasso(alpha=LASSO_ALPHA))]),
+    ARD: SklearnPipeline([("ard", ARDRegression())]),
+    ELASTICNET: SklearnPipeline([("elasticnet", ElasticNet(alpha=ELASTICNET_ALPHA, l1_ratio=ELASTICNET_L1_RATIO))]),
 }
 
 
@@ -183,33 +185,8 @@ def _fit_xorq_pipeline(sklearn_pipeline, train_data, test_data):
         "fitted_pipe": fitted,
     }
 
-# =========================================================================
-# XORQ WAY -- deferred, deferred_sequential_split
-# =========================================================================
 
-con = xo.connect()
-data = con.register(_load_data(), "sparse_signal")
-
-
-# Sequential split (first ~67% train, last ~33% test)
-train_data, test_data = deferred_sequential_split(
-    data,
-    features=FEATURE_COLS,
-    target=TARGET_COL,
-    order_by=ROW_IDX,
-)
-name_to_xorq_exprs = {
-    name: _fit_xorq_pipeline(sklearn_pipeline, train_data, test_data)
-    for name, sklearn_pipeline in PIPELINES.items()
-}
-# expose the exprs in the script to invoke `xorq build plot_lasso_and_elasticnet.py --expr $expr_name`
-(xorq_lasso_preds, xorq_ard_preds, xorq_elastic_net_preds) = (
-    name_to_xorq_exprs[name]["preds"]
-    for name in ("Lasso", "ARD", "ElasticNet")
-)
-
-
-def xorq_way(name_to_xorq_exprs):
+def compute_with_xorq(name_to_xorq_exprs):
     """Deferred xorq: sequential split, fit three L1-based models deferred.
 
     Executes deferred expressions for predictions and metrics, plus fitted pipelines
@@ -252,7 +229,7 @@ def _fit_sklearn_pipeline(name, pipeline, X_train, X_test, y_train, y_test):
     return {"r2": r2, "coef": fitted[-1].coef_, "fit_time": fit_time}
 
 
-def sklearn_way(df):
+def compute_with_sklearn(df):
     """Eager sklearn: time-ordered split, fit three L1-based models, score.
 
     Returns
@@ -270,10 +247,41 @@ def sklearn_way(df):
         X, y, test_size=0.3333, shuffle=False
     )
 
-    return {
+    results = {
         name: _fit_sklearn_pipeline(name, pipeline, X_train, X_test, y_train, y_test)
         for name, pipeline in PIPELINES.items()
     }
+    sk_r2_scores, sk_coefs, sk_fit_times = (
+        toolz.valmap(toolz.curried.get(key), results)
+        for key in ("r2", "coef", "fit_time")
+    )
+    return sk_r2_scores, sk_coefs, sk_fit_times
+
+
+# =========================================================================
+# XORQ WAY -- deferred, deferred_sequential_split
+# =========================================================================
+
+con = xo.connect()
+data = con.register(_load_data(), "sparse_signal")
+
+
+# Sequential split (first ~67% train, last ~33% test)
+train_data, test_data = deferred_sequential_split(
+    data,
+    features=FEATURE_COLS,
+    target=TARGET_COL,
+    order_by=ROW_IDX,
+)
+name_to_xorq_exprs = {
+    name: _fit_xorq_pipeline(sklearn_pipeline, train_data, test_data)
+    for name, sklearn_pipeline in PIPELINES.items()
+}
+# expose the exprs in the script to invoke `xorq build plot_lasso_and_elasticnet.py --expr $expr_name`
+(xorq_lasso_preds, xorq_ard_preds, xorq_elastic_net_preds) = (
+    name_to_xorq_exprs[name]["preds"]
+    for name in methods
+)
 
 
 
@@ -289,10 +297,10 @@ def main():
     true_coef = df.attrs["true_coef"]
 
     print("=== SKLEARN WAY ===")
-    sk_results = sklearn_way(df)
+    sk_r2_scores, sk_coefs, sk_fit_times = compute_with_sklearn(df)
 
     print("\n=== XORQ WAY ===")
-    xo_r2_scores, xo_coefs = xorq_way(name_to_xorq_exprs)
+    xo_r2_scores, xo_coefs = compute_with_xorq(name_to_xorq_exprs)
 
     # Execute deferred expressions
 
@@ -303,16 +311,14 @@ def main():
     # but TimeSeriesSplit uses fold-based splitting while train_test_split
     # uses a simple cutoff.
     print("\n=== Comparing Results ===")
-    for name in ["Lasso", "ARD", "ElasticNet"]:
-        sk_r2 = sk_results[name]["r2"]
-        xo_r2 = xo_r2_scores[name]
+    for name in methods:
+        sk_r2, xo_r2 = (dct[name] for dct in (sk_r2_scores, xo_r2_scores))
         r2_diff = abs(sk_r2 - xo_r2)
         print(
             f"{name} R^2 - sklearn: {sk_r2:.3f}, xorq: {xo_r2:.3f}, diff: {r2_diff:.4f}"
         )
 
-        sk_coef = sk_results[name]["coef"]
-        xo_coef = xo_coefs[name]
+        sk_coef, xo_coef = (dct[name] for dct in (sk_coefs, xo_coefs))
         coef_diff = np.max(np.abs(sk_coef - xo_coef))
         print(f"{name} max coef difference: {coef_diff:.6f}")
 
@@ -321,32 +327,22 @@ def main():
     )
 
     # Build coefficient matrices
-    row_labels = ["True coefficients", "Lasso", "ARDRegression", "ElasticNet"]
-    sk_coef_matrix = np.vstack(
-        [
-            true_coef,
-            sk_results["Lasso"]["coef"],
-            sk_results["ARD"]["coef"],
-            sk_results["ElasticNet"]["coef"],
-        ]
+    row_labels = ["True coefficients", *methods]
+    sk_coef_matrix, xo_coef_matrix = (
+        np.vstack(
+            [
+                true_coef,
+                *(
+                    coefs[method] for method in methods
+                ),
+            ]
+        )
+        for coefs in (sk_coefs, xo_coefs)
     )
-
-    xo_coef_matrix = np.vstack(
-        [
-            true_coef,
-            xo_coefs["Lasso"],
-            xo_coefs["ARD"],
-            xo_coefs["ElasticNet"],
-        ]
-    )
-
-    sk_r2_dict = {
-        name: sk_results[name]["r2"] for name in ["Lasso", "ARD", "ElasticNet"]
-    }
 
     # Build sklearn heatmap
     sk_fig = _build_coefficient_heatmap(
-        sk_coef_matrix, row_labels, sk_r2_dict, "sklearn"
+        sk_coef_matrix, row_labels, sk_r2_scores, "sklearn"
     )
 
     # Build xorq heatmap
