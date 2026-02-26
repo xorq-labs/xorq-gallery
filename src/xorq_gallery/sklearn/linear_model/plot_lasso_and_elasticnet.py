@@ -17,9 +17,8 @@ Dataset: Synthetic sparse sinusoidal signals with Gaussian noise
 
 from __future__ import annotations
 
-import os
-from time import time
 from functools import cache
+from time import time
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -106,11 +105,13 @@ def _load_data():
     """Load data as pandas DataFrame with row_idx for temporal ordering."""
     true_coef, X, y, time_step = _generate_sparse_signal()
 
-    df = pd.DataFrame(X, columns=FEATURE_COLS).assign(**{
-        TARGET_COL: y,
-        "time_step": time_step,
-        ROW_IDX: range(len(X)),
-    })
+    df = pd.DataFrame(X, columns=FEATURE_COLS).assign(
+        **{
+            TARGET_COL: y,
+            "time_step": time_step,
+            ROW_IDX: range(len(X)),
+        }
+    )
     df.attrs["true_coef"] = true_coef
 
     return df
@@ -170,11 +171,17 @@ def _build_coefficient_heatmap(coef_matrix, row_labels, r2_scores, title_prefix)
 
 
 def _deferred_fit_xorq_pipeline(sklearn_pipeline, train_data, test_data):
-    fitted = Pipeline.from_instance(sklearn_pipeline).fit(train_data, features=FEATURE_COLS, target=TARGET_COL)
+    fitted = Pipeline.from_instance(sklearn_pipeline).fit(
+        train_data, features=FEATURE_COLS, target=TARGET_COL
+    )
     preds = fitted.predict(test_data, name=PRED_COL)
     return {
         "preds": preds,
-        "metrics": preds.agg(r2=deferred_sklearn_metric(target=TARGET_COL, pred=PRED_COL, metric=r2_score)),
+        "metrics": preds.agg(
+            r2=deferred_sklearn_metric(
+                target=TARGET_COL, pred=PRED_COL, metric=r2_score
+            )
+        ),
         "fitted_pipe": fitted,
     }
 
@@ -255,7 +262,14 @@ methods = (LASSO, ARD, ELASTICNET) = ("Lasso", "ARD", "ElasticNet")
 name_to_pipeline = {
     LASSO: SklearnPipeline([("lasso", Lasso(alpha=LASSO_ALPHA))]),
     ARD: SklearnPipeline([("ard", ARDRegression())]),
-    ELASTICNET: SklearnPipeline([("elasticnet", ElasticNet(alpha=ELASTICNET_ALPHA, l1_ratio=ELASTICNET_L1_RATIO))]),
+    ELASTICNET: SklearnPipeline(
+        [
+            (
+                "elasticnet",
+                ElasticNet(alpha=ELASTICNET_ALPHA, l1_ratio=ELASTICNET_L1_RATIO),
+            )
+        ]
+    ),
 }
 
 
@@ -279,8 +293,7 @@ name_to_xorq_exprs = {
 }
 # expose the exprs in the script to invoke `xorq build plot_lasso_and_elasticnet.py --expr $expr_name`
 (xorq_lasso_preds, xorq_ard_preds, xorq_elastic_net_preds) = (
-    name_to_xorq_exprs[name]["preds"]
-    for name in methods
+    name_to_xorq_exprs[name]["preds"] for name in methods
 )
 
 
@@ -316,9 +329,7 @@ def save_comparison_plot(true_coef, sk_coefs, sk_r2_scores, xo_coefs, xo_r2_scor
         np.vstack(
             [
                 true_coef,
-                *(
-                    coefs[method] for method in methods
-                ),
+                *(coefs[method] for method in methods),
             ]
         )
         for coefs in (sk_coefs, xo_coefs)

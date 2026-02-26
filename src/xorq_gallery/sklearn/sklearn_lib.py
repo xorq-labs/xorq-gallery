@@ -1,12 +1,12 @@
 from functools import cache
 
+from attr.validators import (
+    deep_iterable,
+    instance_of,
+)
 from attrs import (
     field,
     frozen,
-)
-from attr.validators import (
-    instance_of,
-    deep_iterable,
 )
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from xorq.api import Expr
@@ -18,8 +18,12 @@ from xorq.expr.ml.pipeline_lib import Pipeline
 class SklearnXorqComparator:
     sklearn_pipeline = field(validator=instance_of(SklearnPipeline))
     input_expr = field(validator=instance_of(Expr))
-    kwargs_tuple = field(validator=deep_iterable(instance_of(tuple), instance_of(tuple)))
-    metrics_names_funcs = field(validator=deep_iterable(instance_of(tuple), instance_of(tuple)), default=())
+    kwargs_tuple = field(
+        validator=deep_iterable(instance_of(tuple), instance_of(tuple))
+    )
+    metrics_names_funcs = field(
+        validator=deep_iterable(instance_of(tuple), instance_of(tuple)), default=()
+    )
 
     @property
     @cache
@@ -52,7 +56,9 @@ class SklearnXorqComparator:
 
     @property
     def xorq_prediction(self):
-        return self.fitted_xorq_pipeline.predict(self.input_expr, name=self.kwargs["pred"])
+        return self.fitted_xorq_pipeline.predict(
+            self.input_expr, name=self.kwargs["pred"]
+        )
 
     @property
     @cache
@@ -73,11 +79,13 @@ class SklearnXorqComparator:
 
     @property
     def xorq_metrics(self):
-        return self.xorq_prediction.agg(**{
-            name: deferred_sklearn_metric(
-                target=self.kwargs["target"],
-                pred=self.kwargs["pred"],
-                metric=metric,
-            )
-            for name, metric in self.metrics_names_funcs
-        })
+        return self.xorq_prediction.agg(
+            **{
+                name: deferred_sklearn_metric(
+                    target=self.kwargs["target"],
+                    pred=self.kwargs["pred"],
+                    metric=metric,
+                )
+                for name, metric in self.metrics_names_funcs
+            }
+        )
