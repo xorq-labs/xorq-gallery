@@ -56,6 +56,14 @@ lagged_features_ns = (
     ("lagged_count_7d", 24 * 7),
 )
 
+lagged_features = tuple(name for name, _ in lagged_features_ns)
+all_features = lagged_features + calendar_features + weather_features
+
+hgbr_pipeline = SklearnPipeline(
+    [("hgbr", HistGradientBoostingRegressor(**model_params))]
+)
+
+
 # ---------------------------------------------------------------------------
 # Data loading (shared)
 # ---------------------------------------------------------------------------
@@ -75,10 +83,31 @@ def _load_data():
 
 
 # ---------------------------------------------------------------------------
-# Plotting helpers (used by deferred_matplotlib_plot)
+# Plotting helpers
 # ---------------------------------------------------------------------------
 
 N_PLOT = 96
+
+
+def _build_sklearn_figure(sk):
+    """Plot sklearn predictions vs actuals for the last N_PLOT hours."""
+    fig, ax = plt.subplots(figsize=(8, 5))
+    hours = range(N_PLOT)
+    ax.plot(hours, sk["y_test"][-N_PLOT:], color="black", linewidth=1.2, label="actual")
+    ax.plot(
+        hours,
+        sk["y_pred"][-N_PLOT:],
+        color="tab:blue",
+        linewidth=1,
+        linestyle="--",
+        label=f"predicted (MAE={sk['mae']:.2f})",
+    )
+    ax.set_title("sklearn - HGBR with lagged features")
+    ax.set_xlabel("Hours")
+    ax.set_ylabel("Bike count")
+    ax.legend(fontsize=9)
+    fig.tight_layout()
+    return fig
 
 
 def _build_xorq_figure(df):
@@ -111,9 +140,8 @@ def _build_xorq_figure(df):
 # =========================================================================
 
 
-def sklearn_way(df):
+def compute_with_sklearn(df):
     """Eager sklearn: pandas shift for lags, shuffle=False split."""
-    # Engineer lagged features with pandas
     ldf = (
         df[list(("count", ROW_IDX) + calendar_features + weather_features)]
         .assign(
@@ -125,13 +153,13 @@ def sklearn_way(df):
         .dropna()
     )
 
-    lagged_cols = [c for c in ldf.columns if c.startswith("lagged_")]
-    feature_cols = lagged_cols + list(calendar_features + weather_features)
+    feature_cols = [c for c in ldf.columns if c.startswith("lagged_")] + list(
+        calendar_features + weather_features
+    )
 
     X = ldf[feature_cols]
     y = ldf[target]
 
-    # shuffle=False preserves temporal order
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.3333, shuffle=False
     )
@@ -148,48 +176,53 @@ def sklearn_way(df):
 
 
 # =========================================================================
-# XORQ WAY -- lagged features via ibis, deferred TimeSeriesSplit
+# XORQ WAY -- lagged features via ibis, deferred split
 # =========================================================================
 
 
-def xorq_way(df):
-    """Deferred xorq: ibis .lag(), TimeSeriesSplit fold, Pipeline.from_instance.
+def compute_with_xorq(xorq_metrics, xorq_plot):
+    """Execute deferred xorq metrics and plot expressions.
 
-    Returns deferred expressions for the plot (PNG bytes via UDAF) and
-    metrics.  Nothing is executed until the caller calls ``.execute()``.
+    Returns
+    -------
+    tuple
+        (xo_mae, xo_rmse, xo_png)
     """
-    con = xo.connect()
-    data = con.register(df, "bike_sharing")
+    metrics_df = xorq_metrics.execute()
+    xo_mae = metrics_df["mae"].iloc[0]
+    xo_rmse = np.sqrt(metrics_df["mse"].iloc[0])
+    print(f"  xorq:   MAE = {xo_mae:.2f}, RMSE = {xo_rmse:.2f}")
+    xo_png = xorq_plot.execute()
+    return xo_mae, xo_rmse, xo_png
 
-    # Lagged features via ibis window functions
-    lagged_features = list(lagged_feature for lagged_feature, _ in lagged_features_ns)
-    data_with_lags = data.mutate(
-        **{
-            lagged_feature: data[target].lag(n).over(order_by=ROW_IDX)
-            for (lagged_feature, n) in lagged_features_ns
-        }
-    ).drop_null(subset=lagged_features)
 
-    all_features = tuple(lagged_features) + calendar_features + weather_features
+con = xo.connect()
+data = con.register(_load_data(), "bike_sharing")
 
-    train_data, test_data = deferred_sequential_split(
-        data_with_lags, features=tuple(all_features), target=target, order_by=ROW_IDX
-    )
+data_with_lags = data.mutate(
+    **{
+        lagged_feature: data[target].lag(n).over(order_by=ROW_IDX)
+        for (lagged_feature, n) in lagged_features_ns
+    }
+).drop_null(subset=lagged_features)
 
-    sk_pipe = SklearnPipeline([("hgbr", HistGradientBoostingRegressor(**model_params))])
-    xorq_pipe = Pipeline.from_instance(sk_pipe)
-    fitted = xorq_pipe.fit(train_data, features=tuple(all_features), target=target)
-    preds = fitted.predict(test_data, name=pred_col)
+train_data, test_data = deferred_sequential_split(
+    data_with_lags, features=all_features, target=target, order_by=ROW_IDX
+)
 
-    make_metric = deferred_sklearn_metric(target=target, pred=pred_col)
-    metrics = preds.agg(
-        mae=make_metric(metric=mean_absolute_error),
-        mse=make_metric(metric=mean_squared_error),
-    )
-
-    plot_expr = deferred_matplotlib_plot(preds, _build_xorq_figure)
-
-    return plot_expr, metrics
+fitted = Pipeline.from_instance(hgbr_pipeline).fit(
+    train_data, features=all_features, target=target
+)
+xorq_preds = fitted.predict(test_data, name=pred_col)
+xorq_metrics = xorq_preds.agg(
+    mae=deferred_sklearn_metric(
+        target=target, pred=pred_col, metric=mean_absolute_error
+    ),
+    mse=deferred_sklearn_metric(
+        target=target, pred=pred_col, metric=mean_squared_error
+    ),
+)
+xorq_plot = deferred_matplotlib_plot(xorq_preds, _build_xorq_figure)
 
 
 # =========================================================================
@@ -197,52 +230,14 @@ def xorq_way(df):
 # =========================================================================
 
 
-def main():
-    df = _load_data()
-
-    print("=== SKLEARN WAY ===")
-    sk = sklearn_way(df)
-
-    print("\n=== XORQ WAY ===")
-    plot_expr, metrics = xorq_way(df)
-
-    # Execute deferred expressions
-    metrics_df = metrics.execute()
-    xo_mae = metrics_df["mae"].iloc[0]
-    xo_rmse = np.sqrt(metrics_df["mse"].iloc[0])
-    print(f"  xorq:   MAE = {xo_mae:.2f}, RMSE = {xo_rmse:.2f}")
-
-    xo_png = plot_expr.execute()
-
-    # Build sklearn subplot natively
-    sk_fig, sk_ax = plt.subplots(figsize=(8, 5))
-    hours = range(N_PLOT)
-    sk_ax.plot(
-        hours, sk["y_test"][-N_PLOT:], color="black", linewidth=1.2, label="actual"
-    )
-    sk_ax.plot(
-        hours,
-        sk["y_pred"][-N_PLOT:],
-        color="tab:blue",
-        linewidth=1,
-        linestyle="--",
-        label=f"predicted (MAE={sk['mae']:.2f})",
-    )
-    sk_ax.set_title("sklearn - HGBR with lagged features")
-    sk_ax.set_xlabel("Hours")
-    sk_ax.set_ylabel("Bike count")
-    sk_ax.legend(fontsize=9)
-    sk_fig.tight_layout()
-
-    # Composite: sklearn (left) | xorq deferred plot (right)
+def save_comparison_plot(sk, xo_png):
+    sk_fig = _build_sklearn_figure(sk)
     xo_img = load_plot_bytes(xo_png)
 
     fig, axes = plt.subplots(1, 2, figsize=(16, 5))
-
     axes[0].imshow(fig_to_image(sk_fig))
     axes[0].set_title("sklearn")
     axes[0].axis("off")
-
     axes[1].imshow(xo_img)
     axes[1].set_title("xorq")
     axes[1].axis("off")
@@ -250,6 +245,18 @@ def main():
     fig.suptitle("Lagged Features Forecasting: sklearn vs xorq (last 96h)", fontsize=14)
     fig.tight_layout()
     save_fig("imgs/time_series_lagged_features.png", fig)
+
+
+def main():
+    df = _load_data()
+
+    print("=== SKLEARN WAY ===")
+    sk = compute_with_sklearn(df)
+
+    print("\n=== XORQ WAY ===")
+    xo_mae, xo_rmse, xo_png = compute_with_xorq(xorq_metrics, xorq_plot)
+
+    save_comparison_plot(sk, xo_png)
 
 
 if __name__ in ("__pytest_main__",):
