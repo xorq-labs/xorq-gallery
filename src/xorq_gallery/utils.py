@@ -12,12 +12,15 @@ from pathlib import Path
 from toolz import compose
 
 
-def deferred_sequential_split(expr, *, features, target, order_by):
+def deferred_sequential_split(expr, *, features, target, order_by, n_splits=2):
     """Split an ibis expression into (train, test) preserving row order.
 
-    Uses TimeSeriesSplit(n_splits=2) under the hood so the last fold gives
-    roughly the first 2/3 for training and the last 1/3 for testing -- the
-    deferred equivalent of ``train_test_split(shuffle=False, test_size=0.3333)``.
+    Uses ``TimeSeriesSplit(n_splits=n_splits)`` under the hood.  The last fold
+    gives the largest training set; ``test_size ≈ 1 / (n_splits + 1)``.
+
+    Common combinations:
+        n_splits=2  →  test ≈ 1/3  (matches test_size=0.3333)
+        n_splits=3  →  test ≈ 1/4  (matches test_size=0.25)
 
     Parameters
     ----------
@@ -29,9 +32,8 @@ def deferred_sequential_split(expr, *, features, target, order_by):
         Target column name.
     order_by : str
         Column that defines the temporal / sequential order.
-    test_size : float, optional
-        Ignored for now (always 1/3). Kept for forward-compatibility with a
-        future ``train_test_splits(shuffle=False)`` implementation.
+    n_splits : int, optional
+        Number of splits for TimeSeriesSplit (default 2).
 
     Returns
     -------
@@ -43,7 +45,7 @@ def deferred_sequential_split(expr, *, features, target, order_by):
         _make_folds_from_sklearn,
     )
 
-    cv = TimeSeriesSplit(n_splits=2)
+    cv = TimeSeriesSplit(n_splits=n_splits)
     fold_expr = _make_folds_from_sklearn(
         expr=expr,
         cv=cv,
@@ -52,7 +54,7 @@ def deferred_sequential_split(expr, *, features, target, order_by):
         order_by=order_by,
     )
     # last fold = largest train set
-    (*_, fold_pair) = _fold_pairs_from_fold_expr(fold_expr, n_splits=2)
+    (*_, fold_pair) = _fold_pairs_from_fold_expr(fold_expr, n_splits=n_splits)
     return fold_pair
 
 

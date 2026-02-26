@@ -22,7 +22,6 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import xorq.api as xo
 from sklearn.linear_model import LinearRegression, QuantileRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.pipeline import Pipeline as SklearnPipeline
@@ -30,6 +29,7 @@ from toolz import curry
 from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
 
+from xorq_gallery.sklearn.sklearn_lib import SklearnXorqComparator
 from xorq_gallery.utils import (
     fig_to_image,
 )
@@ -43,10 +43,11 @@ RANDOM_STATE = 42
 N_SAMPLES = 100
 FEATURE_COLS = ("feature_0",)
 ROW_IDX = "row_idx"
+PRED_COL = "pred"
 
 
 # ---------------------------------------------------------------------------
-# Data generation (shared)
+# Data generation
 # ---------------------------------------------------------------------------
 
 
@@ -80,10 +81,9 @@ def _generate_datasets():
 
 
 def _load_data():
-    """Load data as pandas DataFrame with row_idx for temporal ordering."""
+    """Load data as pandas DataFrame with both target columns."""
     datasets = _generate_datasets()
 
-    # Build DataFrame with both targets
     df = pd.DataFrame(datasets["normal"]["X"], columns=[FEATURE_COLS[0]])
     df["y_normal"] = datasets["normal"]["y"]
     df["y_pareto"] = datasets["pareto"]["y"]
@@ -95,7 +95,7 @@ def _load_data():
 
 
 # ---------------------------------------------------------------------------
-# Plotting helpers for deferred_matplotlib_plot
+# Plot helper
 # ---------------------------------------------------------------------------
 
 
@@ -157,245 +157,290 @@ def _build_quantile_plot(df, dataset_type, y_col):
     return fig
 
 
-# =========================================================================
-# SKLEARN WAY -- eager execution
-# =========================================================================
+# ---------------------------------------------------------------------------
+# Expr builder: defined here — reader sees what gets built
+# ---------------------------------------------------------------------------
 
 
-def sklearn_way(df, dataset_type="normal"):
-    """Eager sklearn: fit quantile regressors at 0.05, 0.5, 0.95.
+def build_exprs_with_metrics(target_col):
+    """Return a build_exprs_fn that does fit + predict + mae/mse metrics."""
 
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Full dataset
-    dataset_type : str
-        Either "normal" or "pareto"
+    def _build(sklearn_pipeline, train_expr, test_expr, features, target, pred_name):
+        pipeline = Pipeline.from_instance(sklearn_pipeline)
+        fitted = pipeline.fit(train_expr, features=features, target=target)
+        preds = fitted.predict(test_expr, name=pred_name)
+        make_metric = deferred_sklearn_metric(target=target_col, pred=pred_name)
+        return {
+            "fitted_pipeline": fitted,
+            "preds": preds,
+            "metrics": preds.agg(
+                mae=make_metric(metric=mean_absolute_error),
+                mse=make_metric(metric=mean_squared_error),
+            ),
+        }
 
-    Returns
-    -------
-    dict
-        Keys: "predictions" (dict of quantile -> array), "out_bounds" (bool array),
-              "lr_metrics" (dict with mae, mse)
-    """
-    target_col = f"y_{dataset_type}"
-    X = df[list(FEATURE_COLS)].values
-    y = df[target_col].values
+    return _build
 
-    # Fit quantile regressors - flat, no loops
-    qr_05 = QuantileRegressor(quantile=0.05, alpha=0)
-    y_pred_05 = qr_05.fit(X, y).predict(X)
 
-    qr_50 = QuantileRegressor(quantile=0.5, alpha=0)
-    y_pred_50 = qr_50.fit(X, y).predict(X)
+# ---------------------------------------------------------------------------
+# Compute: defined here — reader sees every sklearn and xorq call
+# ---------------------------------------------------------------------------
 
-    qr_95 = QuantileRegressor(quantile=0.95, alpha=0)
-    y_pred_95 = qr_95.fit(X, y).predict(X)
 
-    predictions = {0.05: y_pred_05, 0.5: y_pred_50, 0.95: y_pred_95}
+def compute_sklearn(comparator):
+    """Eager sklearn: fit quantile + linear regressors, compute metrics."""
+    X = comparator.X
+    y = comparator.y
 
-    # Compute out_bounds flag
-    out_bounds_predictions = (y_pred_05 >= y) | (y_pred_95 <= y)
+    results = {}
+    for name in comparator.names:
+        pipe = comparator.sklearn_pipeline(name)
+        fitted = pipe.fit(X, y)
+        preds = fitted.predict(X)
+        results[name] = {"predictions": preds}
 
-    # LinearRegression for comparison
-    lr = LinearRegression().fit(X, y)
-    y_pred_lr = lr.predict(X)
+    # Compute out_bounds flag from quantile predictions
+    out_bounds = (results["QR_05"]["predictions"] >= y) | (
+        results["QR_95"]["predictions"] <= y
+    )
+    results["out_bounds"] = out_bounds
 
-    # QuantileRegressor at median for comparison
-    qr_median = QuantileRegressor(quantile=0.5, alpha=0).fit(X, y)
-    y_pred_qr = qr_median.predict(X)
+    # Compute comparison metrics: LR vs QR_median
+    y_pred_lr = results["LR"]["predictions"]
+    y_pred_qr = results["QR_median"]["predictions"]
 
     mae_lr = mean_absolute_error(y, y_pred_lr)
     mse_lr = mean_squared_error(y, y_pred_lr)
     mae_qr = mean_absolute_error(y, y_pred_qr)
     mse_qr = mean_squared_error(y, y_pred_qr)
 
+    results["lr_metrics"] = {"mae": mae_lr, "mse": mse_lr}
+    results["qr_metrics"] = {"mae": mae_qr, "mse": mse_qr}
+
     print(f"  sklearn LinearRegression:    MAE={mae_lr:.3f}, MSE={mse_lr:.3f}")
     print(f"  sklearn QuantileRegressor:   MAE={mae_qr:.3f}, MSE={mse_qr:.3f}")
 
-    return {
-        "predictions": predictions,
-        "out_bounds": out_bounds_predictions,
-        "lr_metrics": {"mae": mae_lr, "mse": mse_lr},
-        "qr_metrics": {"mae": mae_qr, "mse": mse_qr},
-    }
+    return results
+
+
+def compute_xorq(comparator):
+    """Deferred xorq: execute deferred predictions and metrics."""
+    exprs = comparator.deferred_exprs
+    results = {}
+
+    for name in comparator.names:
+        e = exprs[name]
+        pred_df = e["preds"].execute()
+        pred_col = f"{comparator.pred_col}_{name}"
+        results[name] = {"predictions": pred_df[pred_col].values}
+
+    # Compute out_bounds flag from quantile predictions
+    y = comparator.y
+    out_bounds = (results["QR_05"]["predictions"] >= y) | (
+        results["QR_95"]["predictions"] <= y
+    )
+    results["out_bounds"] = out_bounds
+
+    # Execute deferred metrics for LR and QR_median
+    lr_metrics_df = exprs["LR"]["metrics"].execute()
+    qr_metrics_df = exprs["QR_median"]["metrics"].execute()
+
+    xo_mae_lr = lr_metrics_df["mae"].iloc[0]
+    xo_mse_lr = lr_metrics_df["mse"].iloc[0]
+    xo_mae_qr = qr_metrics_df["mae"].iloc[0]
+    xo_mse_qr = qr_metrics_df["mse"].iloc[0]
+
+    results["lr_metrics"] = {"mae": xo_mae_lr, "mse": xo_mse_lr}
+    results["qr_metrics"] = {"mae": xo_mae_qr, "mse": xo_mse_qr}
+
+    print(f"  xorq   LinearRegression:    MAE={xo_mae_lr:.3f}, MSE={xo_mse_lr:.3f}")
+    print(f"  xorq   QuantileRegressor:   MAE={xo_mae_qr:.3f}, MSE={xo_mse_qr:.3f}")
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Assertions: defined here — reader sees what gets compared
+# ---------------------------------------------------------------------------
+
+
+def build_assertions(sk, xo, comparator):
+    """Build assertion pairs for LR vs QR metrics."""
+    sk_metrics_df = pd.DataFrame(
+        {
+            "LR_mae": [sk["lr_metrics"]["mae"]],
+            "LR_mse": [sk["lr_metrics"]["mse"]],
+            "QR_mae": [sk["qr_metrics"]["mae"]],
+            "QR_mse": [sk["qr_metrics"]["mse"]],
+        }
+    )
+    xo_metrics_df = pd.DataFrame(
+        {
+            "LR_mae": [xo["lr_metrics"]["mae"]],
+            "LR_mse": [xo["lr_metrics"]["mse"]],
+            "QR_mae": [xo["qr_metrics"]["mae"]],
+            "QR_mse": [xo["qr_metrics"]["mse"]],
+        }
+    )
+    return [
+        ("LR vs QR metrics", sk_metrics_df, xo_metrics_df),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Plot: defined here — reader sees figure creation and compositing
+# ---------------------------------------------------------------------------
+
+
+def plot(sk, xo, comparator):
+    """Build quantile regression plots and composite figure."""
+    target_col = comparator.target
+    dataset_type = comparator.name.split("_")[-1]  # "normal" or "pareto"
+
+    # Build sklearn plot dataframe
+    sk_plot_df = comparator.df.copy()
+    sk_plot_df["pred_q05"] = sk["QR_05"]["predictions"]
+    sk_plot_df["pred_q50"] = sk["QR_50"]["predictions"]
+    sk_plot_df["pred_q95"] = sk["QR_95"]["predictions"]
+    sk_plot_df["out_bounds"] = sk["out_bounds"].astype(int)
+
+    # Build xorq plot dataframe
+    xo_plot_df = comparator.df.copy()
+    xo_plot_df["pred_q05"] = xo["QR_05"]["predictions"]
+    xo_plot_df["pred_q50"] = xo["QR_50"]["predictions"]
+    xo_plot_df["pred_q95"] = xo["QR_95"]["predictions"]
+    xo_plot_df["out_bounds"] = xo["out_bounds"].astype(int)
+
+    sk_fig = _build_quantile_plot(sk_plot_df, dataset_type, target_col)
+    xo_fig = _build_quantile_plot(xo_plot_df, dataset_type, target_col)
+
+    # Composite: sklearn (left) | xorq (right)
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+    axes[0].imshow(fig_to_image(sk_fig))
+    axes[0].axis("off")
+    axes[1].imshow(fig_to_image(xo_fig))
+    axes[1].axis("off")
+
+    fig.suptitle(
+        f"Quantile Regression ({dataset_type}): sklearn vs xorq",
+        fontsize=16,
+    )
+    fig.tight_layout()
+    os.makedirs("imgs", exist_ok=True)
+    out = f"imgs/quantile_regression_{dataset_type}.png"
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    print(f"Plot saved to {out}")
+
+
+# ---------------------------------------------------------------------------
+# Shared sklearn pipelines
+# ---------------------------------------------------------------------------
+
+SHARED_SKLEARN_PIPELINES = (
+    ("QR_05", SklearnPipeline([("qr", QuantileRegressor(quantile=0.05, alpha=0))])),
+    ("QR_50", SklearnPipeline([("qr", QuantileRegressor(quantile=0.5, alpha=0))])),
+    ("QR_95", SklearnPipeline([("qr", QuantileRegressor(quantile=0.95, alpha=0))])),
+    ("LR", SklearnPipeline([("lr", LinearRegression())])),
+    ("QR_median", SklearnPipeline([("qr", QuantileRegressor(quantile=0.5, alpha=0))])),
+)
+
+_df = _load_data()
+
+
+# ---------------------------------------------------------------------------
+# Comparators: one per dataset type
+# ---------------------------------------------------------------------------
+
+comparators = {
+    "normal": SklearnXorqComparator(
+        name="quantile_normal",
+        named_pipelines=SHARED_SKLEARN_PIPELINES,
+        df=_df,
+        features=FEATURE_COLS,
+        target="y_normal",
+        pred_col=PRED_COL,
+        metrics=(("mae", mean_absolute_error), ("mse", mean_squared_error)),
+        build_exprs_fn=build_exprs_with_metrics("y_normal"),
+        compute_sklearn_fn=compute_sklearn,
+        compute_xorq_fn=compute_xorq,
+        build_assertions_fn=build_assertions,
+        plot_fn=plot,
+    ),
+    "pareto": SklearnXorqComparator(
+        name="quantile_pareto",
+        named_pipelines=SHARED_SKLEARN_PIPELINES,
+        df=_df,
+        features=FEATURE_COLS,
+        target="y_pareto",
+        pred_col=PRED_COL,
+        metrics=(("mae", mean_absolute_error), ("mse", mean_squared_error)),
+        build_exprs_fn=build_exprs_with_metrics("y_pareto"),
+        compute_sklearn_fn=compute_sklearn,
+        compute_xorq_fn=compute_xorq,
+        build_assertions_fn=build_assertions,
+        plot_fn=plot,
+    ),
+}
+
+# ── Module-level exprs (for xorq build --expr) ────────────────
+xorq_normal_exprs = comparators["normal"].deferred_exprs
+xorq_pareto_exprs = comparators["pareto"].deferred_exprs
+
+xorq_normal_qr05_fitted_pipeline = xorq_normal_exprs["QR_05"]["fitted_pipeline"]
+xorq_normal_qr05_preds = xorq_normal_exprs["QR_05"]["preds"]
+xorq_normal_qr05_metrics = xorq_normal_exprs["QR_05"]["metrics"]
+xorq_normal_qr50_fitted_pipeline = xorq_normal_exprs["QR_50"]["fitted_pipeline"]
+xorq_normal_qr50_preds = xorq_normal_exprs["QR_50"]["preds"]
+xorq_normal_qr50_metrics = xorq_normal_exprs["QR_50"]["metrics"]
+xorq_normal_qr95_fitted_pipeline = xorq_normal_exprs["QR_95"]["fitted_pipeline"]
+xorq_normal_qr95_preds = xorq_normal_exprs["QR_95"]["preds"]
+xorq_normal_qr95_metrics = xorq_normal_exprs["QR_95"]["metrics"]
+xorq_normal_lr_fitted_pipeline = xorq_normal_exprs["LR"]["fitted_pipeline"]
+xorq_normal_lr_preds = xorq_normal_exprs["LR"]["preds"]
+xorq_normal_lr_metrics = xorq_normal_exprs["LR"]["metrics"]
+xorq_normal_qr_median_fitted_pipeline = xorq_normal_exprs["QR_median"][
+    "fitted_pipeline"
+]
+xorq_normal_qr_median_preds = xorq_normal_exprs["QR_median"]["preds"]
+xorq_normal_qr_median_metrics = xorq_normal_exprs["QR_median"]["metrics"]
+
+xorq_pareto_qr05_fitted_pipeline = xorq_pareto_exprs["QR_05"]["fitted_pipeline"]
+xorq_pareto_qr05_preds = xorq_pareto_exprs["QR_05"]["preds"]
+xorq_pareto_qr05_metrics = xorq_pareto_exprs["QR_05"]["metrics"]
+xorq_pareto_qr50_fitted_pipeline = xorq_pareto_exprs["QR_50"]["fitted_pipeline"]
+xorq_pareto_qr50_preds = xorq_pareto_exprs["QR_50"]["preds"]
+xorq_pareto_qr50_metrics = xorq_pareto_exprs["QR_50"]["metrics"]
+xorq_pareto_qr95_fitted_pipeline = xorq_pareto_exprs["QR_95"]["fitted_pipeline"]
+xorq_pareto_qr95_preds = xorq_pareto_exprs["QR_95"]["preds"]
+xorq_pareto_qr95_metrics = xorq_pareto_exprs["QR_95"]["metrics"]
+xorq_pareto_lr_fitted_pipeline = xorq_pareto_exprs["LR"]["fitted_pipeline"]
+xorq_pareto_lr_preds = xorq_pareto_exprs["LR"]["preds"]
+xorq_pareto_lr_metrics = xorq_pareto_exprs["LR"]["metrics"]
+xorq_pareto_qr_median_fitted_pipeline = xorq_pareto_exprs["QR_median"][
+    "fitted_pipeline"
+]
+xorq_pareto_qr_median_preds = xorq_pareto_exprs["QR_median"]["preds"]
+xorq_pareto_qr_median_metrics = xorq_pareto_exprs["QR_median"]["metrics"]
 
 
 # =========================================================================
-# XORQ WAY -- deferred execution
-# =========================================================================
-
-
-def xorq_way(df, dataset_type="normal"):
-    """Deferred xorq: fit quantile regressors at 0.05, 0.5, 0.95.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Full dataset
-    dataset_type : str
-        Either "normal" or "pareto"
-
-    Returns deferred expressions for predictions, metrics, and plot.
-    Nothing is executed until ``.execute()``.
-
-    Returns
-    -------
-    dict
-        Keys: "predictions", "lr_metrics", "qr_metrics"
-    """
-    con = xo.connect()
-    data = con.register(df, "quantile_data")
-
-    target_col = f"y_{dataset_type}"
-
-    # Fit quantile regressors - flat, no loops
-    qr_05_sklearn = SklearnPipeline([("qr", QuantileRegressor(quantile=0.05, alpha=0))])
-    qr_05_pipe = Pipeline.from_instance(qr_05_sklearn)
-    qr_05_fitted = qr_05_pipe.fit(data, features=FEATURE_COLS, target=target_col)
-    preds_05 = qr_05_fitted.predict(data, name="pred_q05")
-
-    qr_50_sklearn = SklearnPipeline([("qr", QuantileRegressor(quantile=0.5, alpha=0))])
-    qr_50_pipe = Pipeline.from_instance(qr_50_sklearn)
-    qr_50_fitted = qr_50_pipe.fit(data, features=FEATURE_COLS, target=target_col)
-    preds_50 = qr_50_fitted.predict(data, name="pred_q50")
-
-    qr_95_sklearn = SklearnPipeline([("qr", QuantileRegressor(quantile=0.95, alpha=0))])
-    qr_95_pipe = Pipeline.from_instance(qr_95_sklearn)
-    qr_95_fitted = qr_95_pipe.fit(data, features=FEATURE_COLS, target=target_col)
-    preds_95 = qr_95_fitted.predict(data, name="pred_q95")
-
-    predictions_exprs = {0.05: preds_05, 0.5: preds_50, 0.95: preds_95}
-
-    # LinearRegression for comparison
-    lr_sklearn = SklearnPipeline([("lr", LinearRegression())])
-    lr_pipe = Pipeline.from_instance(lr_sklearn)
-    lr_fitted = lr_pipe.fit(data, features=FEATURE_COLS, target=target_col)
-    lr_preds = lr_fitted.predict(data, name="pred_lr")
-
-    # QuantileRegressor at median for comparison
-    qr_median_sklearn = SklearnPipeline(
-        [("qr", QuantileRegressor(quantile=0.5, alpha=0))]
-    )
-    qr_median_pipe = Pipeline.from_instance(qr_median_sklearn)
-    qr_median_fitted = qr_median_pipe.fit(
-        data, features=FEATURE_COLS, target=target_col
-    )
-    qr_median_preds = qr_median_fitted.predict(data, name="pred_qr")
-
-    # Metrics
-    make_metric_lr = deferred_sklearn_metric(target=target_col, pred="pred_lr")
-    make_metric_qr = deferred_sklearn_metric(target=target_col, pred="pred_qr")
-
-    lr_metrics = lr_preds.agg(
-        mae=make_metric_lr(metric=mean_absolute_error),
-        mse=make_metric_lr(metric=mean_squared_error),
-    )
-
-    qr_metrics = qr_median_preds.agg(
-        mae=make_metric_qr(metric=mean_absolute_error),
-        mse=make_metric_qr(metric=mean_squared_error),
-    )
-
-    return {
-        "predictions": predictions_exprs,
-        "lr_metrics": lr_metrics,
-        "qr_metrics": qr_metrics,
-    }
-
-
-# =========================================================================
-# Run and plot side by side
+# Run
 # =========================================================================
 
 
 def main():
-    os.makedirs("imgs", exist_ok=True)
-
-    df = _load_data()
-
-    # We'll run both normal and pareto, but for brevity, focus on normal in main output
-    for dataset_type in ["normal", "pareto"]:
+    for dataset_type, comparator in comparators.items():
         print(f"\n=== DATASET: {dataset_type.upper()} ===")
 
         print("=== SKLEARN WAY ===")
-        sk_results = sklearn_way(df, dataset_type)
+        sk = comparator.compute_with_sklearn()
 
         print("\n=== XORQ WAY ===")
-        deferred = xorq_way(df, dataset_type)
+        xo = comparator.compute_with_xorq()
 
-        # Execute deferred metrics
-        lr_metrics_df = deferred["lr_metrics"].execute()
-        qr_metrics_df = deferred["qr_metrics"].execute()
-
-        xo_mae_lr = lr_metrics_df["mae"].iloc[0]
-        xo_mse_lr = lr_metrics_df["mse"].iloc[0]
-        xo_mae_qr = qr_metrics_df["mae"].iloc[0]
-        xo_mse_qr = qr_metrics_df["mse"].iloc[0]
-
-        print(f"  xorq   LinearRegression:    MAE={xo_mae_lr:.3f}, MSE={xo_mse_lr:.3f}")
-        print(f"  xorq   QuantileRegressor:   MAE={xo_mae_qr:.3f}, MSE={xo_mse_qr:.3f}")
-
-        # ---- Assert numerical equivalence BEFORE plotting ----
-        np.testing.assert_allclose(
-            sk_results["lr_metrics"]["mae"], xo_mae_lr, rtol=1e-2
-        )
-        np.testing.assert_allclose(
-            sk_results["lr_metrics"]["mse"], xo_mse_lr, rtol=1e-2
-        )
-        np.testing.assert_allclose(
-            sk_results["qr_metrics"]["mae"], xo_mae_qr, rtol=1e-2
-        )
-        np.testing.assert_allclose(
-            sk_results["qr_metrics"]["mse"], xo_mse_qr, rtol=1e-2
-        )
-        print("Assertions passed: sklearn and xorq metrics match.")
-
-        # Execute deferred predictions and build combined dataframe for plotting
-        xo_predictions = {}
-        for quantile, pred_expr in deferred["predictions"].items():
-            pred_df = pred_expr.execute()
-            pred_name = f"pred_q{int(quantile * 100):02d}"
-            xo_predictions[quantile] = pred_df[pred_name].values
-
-        # Build xorq plot dataframe
-        target_col = f"y_{dataset_type}"
-        xo_plot_df = df.copy()
-        xo_plot_df["pred_q05"] = xo_predictions[0.05]
-        xo_plot_df["pred_q50"] = xo_predictions[0.5]
-        xo_plot_df["pred_q95"] = xo_predictions[0.95]
-
-        # Compute out_bounds flag for xorq predictions
-        xo_out_bounds = (xo_predictions[0.05] >= xo_plot_df[target_col].values) | (
-            xo_predictions[0.95] <= xo_plot_df[target_col].values
-        )
-        xo_plot_df["out_bounds"] = xo_out_bounds.astype(int)
-
-        # Build sklearn plot
-        sk_plot_df = df.copy()
-        sk_plot_df["pred_q05"] = sk_results["predictions"][0.05]
-        sk_plot_df["pred_q50"] = sk_results["predictions"][0.5]
-        sk_plot_df["pred_q95"] = sk_results["predictions"][0.95]
-        sk_plot_df["out_bounds"] = sk_results["out_bounds"].astype(int)
-
-        sk_fig = _build_quantile_plot(sk_plot_df, dataset_type, target_col)
-        xo_fig = _build_quantile_plot(xo_plot_df, dataset_type, target_col)
-
-        # Composite: sklearn (left) | xorq (right)
-        fig, axes = plt.subplots(1, 2, figsize=(16, 6))
-        axes[0].imshow(fig_to_image(sk_fig))
-        axes[0].axis("off")
-        axes[1].imshow(fig_to_image(xo_fig))
-        axes[1].axis("off")
-
-        fig.suptitle(
-            f"Quantile Regression ({dataset_type}): sklearn vs xorq", fontsize=16
-        )
-        fig.tight_layout()
-        out = f"imgs/quantile_regression_{dataset_type}.png"
-        fig.savefig(out, dpi=150)
-        plt.close(fig)
-        print(f"Plot saved to {out}")
+        comparator.assert_values(sk, xo)
+        comparator.plot(sk, xo)
 
 
 if __name__ in ("__main__", "__pytest_main__"):

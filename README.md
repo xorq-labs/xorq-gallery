@@ -7,7 +7,7 @@ Side-by-side examples comparing **sklearn** (eager) and **xorq** (deferred) appr
 Run any example directly with `uv`:
 
 ```bash
-uv tool run --isolated --python 3.12 --with git+ssh://git@github.com/xorq-labs/xorq-gallery xorq-gallery run plot_topics_extraction_with_nmf_lda
+uv tool run --isolated --python 3.12 --with git+ssh://git@github.com/xorq-labs/xorq-gallery xorq-gallery run imgs/plot_kmeans_assumptions
 ```
 
 Or run locally:

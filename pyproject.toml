@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Gallery of xorq examples demonstrating deferred ML pipelines"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "xorq",
+    "xorq>=0.3.11",
     "scikit-learn",
     "matplotlib",
     "pandas",
