@@ -11,7 +11,7 @@ Same topic extraction, same results.
 Dataset: 20 Newsgroups (2000 documents)
 """
 
-import os
+from functools import cache
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,7 +24,12 @@ from sklearn.pipeline import Pipeline as SklearnPipeline
 from toolz import curry
 from xorq.expr.ml.pipeline_lib import Pipeline
 
-from xorq_gallery.utils import deferred_matplotlib_plot, fig_to_image, load_plot_bytes
+from xorq_gallery.utils import (
+    deferred_matplotlib_plot,
+    fig_to_image,
+    load_plot_bytes,
+    save_fig,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -44,6 +49,7 @@ count_params = dict(
 )
 
 
+@cache
 def _load_data():
     newsgroups = fetch_20newsgroups(
         remove=("headers", "footers", "quotes"),
@@ -212,8 +218,6 @@ def xorq_way(texts, targets, pipelines):
 
 
 def main():
-    os.makedirs("imgs", exist_ok=True)
-
     texts, targets = _load_data()
     pipelines = _build_pipelines()
 
@@ -251,12 +255,9 @@ def main():
         fig.tight_layout()
 
         fname = name.lower().replace(" ", "_").replace("(", "").replace(")", "")
-        out = f"imgs/topics_{fname}.png"
-        fig.savefig(out, dpi=150)
-        plt.close(fig)
-        print(f"Plot saved to {out}")
+        save_fig(f"imgs/topics_{fname}.png", fig)
 
 
-if __name__ in ("__main__", "__pytest_main__"):
+if __name__ in ("__pytest_main__",):
     main()
     pytest_examples_passed = True

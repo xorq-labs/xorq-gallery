@@ -15,7 +15,7 @@ Both produce identical cross-validation scores.
 Dataset: Bike Sharing Demand (OpenML)
 """
 
-import os
+from functools import cache
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -31,7 +31,7 @@ from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, SplineTransformer
 from xorq.expr.ml.cross_validation import deferred_cross_val_score
 from xorq.expr.ml.pipeline_lib import Pipeline
 
-from xorq_gallery.utils import fig_to_image
+from xorq_gallery.utils import fig_to_image, save_fig
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +55,7 @@ CV_SPLITTER = TimeSeriesSplit(n_splits=N_SPLITS)
 # ---------------------------------------------------------------------------
 
 
+@cache
 def _load_data():
     bike_sharing = fetch_openml(
         "Bike_Sharing_Demand", version=2, as_frame=True, parser="pandas"
@@ -237,8 +238,6 @@ def xorq_way(data, pipelines):
 
 
 def main():
-    os.makedirs("imgs", exist_ok=True)
-
     df = _load_data()
     # Sort by ROW_IDX so sklearn TimeSeriesSplit sees the same row order as xorq
     df = df.sort_values(ROW_IDX).reset_index(drop=True)
@@ -289,12 +288,9 @@ def main():
         y=0.98,
     )
     fig.tight_layout()
-    out = "imgs/cyclical_feature_engineering.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"\nPlot saved to {out}")
+    save_fig("imgs/cyclical_feature_engineering.png", fig, bbox_inches="tight")
 
 
-if __name__ in ("__main__", "__pytest_main__"):
+if __name__ in ("__pytest_main__",):
     main()
     pytest_examples_passed = True

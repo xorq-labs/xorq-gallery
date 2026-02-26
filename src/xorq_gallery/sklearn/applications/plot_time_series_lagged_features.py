@@ -16,7 +16,7 @@ rows independently.
 Dataset: Bike Sharing Demand (OpenML)
 """
 
-import os
+from functools import cache
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -34,6 +34,7 @@ from xorq_gallery.utils import (
     deferred_sequential_split,
     fig_to_image,
     load_plot_bytes,
+    save_fig,
 )
 
 
@@ -60,6 +61,7 @@ lagged_features_ns = (
 # ---------------------------------------------------------------------------
 
 
+@cache
 def _load_data():
     bike_sharing = fetch_openml(
         "Bike_Sharing_Demand", version=2, as_frame=True, parser="pandas"
@@ -196,8 +198,6 @@ def xorq_way(df):
 
 
 def main():
-    os.makedirs("imgs", exist_ok=True)
-
     df = _load_data()
 
     print("=== SKLEARN WAY ===")
@@ -249,12 +249,9 @@ def main():
 
     fig.suptitle("Lagged Features Forecasting: sklearn vs xorq (last 96h)", fontsize=14)
     fig.tight_layout()
-    out = "imgs/time_series_lagged_features.png"
-    fig.savefig(out, dpi=150)
-    plt.close(fig)
-    print(f"Plot saved to {out}")
+    save_fig("imgs/time_series_lagged_features.png", fig)
 
 
-if __name__ in ("__main__", "__pytest_main__"):
+if __name__ in ("__pytest_main__",):
     main()
     pytest_examples_passed = True

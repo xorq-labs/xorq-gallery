@@ -11,7 +11,7 @@ Lasso via Pipeline.from_instance. Same results, deferred execution.
 Dataset: Synthetic binary image (128x128)
 """
 
-import os
+from functools import cache
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -23,7 +23,12 @@ from sklearn.pipeline import Pipeline as SklearnPipeline
 from toolz import curry
 from xorq.expr.ml.pipeline_lib import Pipeline
 
-from xorq_gallery.utils import deferred_matplotlib_plot, fig_to_image, load_plot_bytes
+from xorq_gallery.utils import (
+    deferred_matplotlib_plot,
+    fig_to_image,
+    load_plot_bytes,
+    save_fig,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +84,7 @@ def generate_synthetic_data(l_x):
     return np.logical_xor(res, ndimage.binary_erosion(res)).astype(float)
 
 
+@cache
 def _generate_data():
     n_angles = img_size // 7
     proj_operator = build_projection_operator(img_size, n_angles)
@@ -198,8 +204,6 @@ def xorq_way(proj_operator, image, proj_flat, n_angles):
 
 
 def main():
-    os.makedirs("imgs", exist_ok=True)
-
     proj_operator, image, proj_flat, n_angles = _generate_data()
 
     print("=== SKLEARN WAY ===")
@@ -244,12 +248,9 @@ def main():
         fontsize=13,
     )
     fig.tight_layout()
-    out = "imgs/tomography_l1_reconstruction.png"
-    fig.savefig(out, dpi=150)
-    plt.close(fig)
-    print(f"Plot saved to {out}")
+    save_fig("imgs/tomography_l1_reconstruction.png", fig)
 
 
-if __name__ in ("__main__", "__pytest_main__"):
+if __name__ in ("__pytest_main__",):
     main()
     pytest_examples_passed = True
