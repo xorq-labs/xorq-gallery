@@ -4,7 +4,6 @@ import runpy
 
 import click
 
-
 from xorq_gallery.sklearn import (
     get_scripts_for_group,
     groups,
@@ -56,7 +55,9 @@ def list_groups():
 
 
 @cli.command("list")
-@click.option("--group", default=None, shell_complete=_complete_group, help="Filter by group.")
+@click.option(
+    "--group", default=None, shell_complete=_complete_group, help="Filter by group."
+)
 def list_scripts(group):
     """List available scripts."""
     pool = _scripts_for_group(group) if group else scripts
@@ -65,7 +66,12 @@ def list_scripts(group):
 
 @cli.command("run")
 @click.argument("script_name", shell_complete=_complete_script_name)
-@click.option("--group", default=None, shell_complete=_complete_group, help="Restrict search to a group.")
+@click.option(
+    "--group",
+    default=None,
+    shell_complete=_complete_group,
+    help="Restrict search to a group.",
+)
 def run_one(script_name, group):
     """Run a single script by name."""
     pool = _scripts_for_group(group) if group else scripts
@@ -80,7 +86,9 @@ def run_one(script_name, group):
 
 
 @cli.command("run-all")
-@click.option("--group", default=None, shell_complete=_complete_group, help="Restrict to a group.")
+@click.option(
+    "--group", default=None, shell_complete=_complete_group, help="Restrict to a group."
+)
 def run_all_scripts(group):
     """Run all scripts."""
     pool = _scripts_for_group(group) if group else scripts
@@ -89,7 +97,9 @@ def run_all_scripts(group):
 
 
 _COMPLETION_INSTALL_PATHS = {
-    "bash": pathlib.Path("~/.local/share/bash-completion/completions/xorq-gallery").expanduser(),
+    "bash": pathlib.Path(
+        "~/.local/share/bash-completion/completions/xorq-gallery"
+    ).expanduser(),
     "zsh": pathlib.Path("~/.zfunc/_xorq-gallery").expanduser(),
     "fish": pathlib.Path("~/.config/fish/completions/xorq-gallery.fish").expanduser(),
 }
