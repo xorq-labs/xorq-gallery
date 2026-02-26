@@ -38,6 +38,7 @@ from xorq.expr.ml.pipeline_lib import Pipeline
 from xorq_gallery.utils import (
     deferred_sequential_split,
     fig_to_image,
+    save_fig,
 )
 
 
@@ -168,15 +169,7 @@ def _build_coefficient_heatmap(coef_matrix, row_labels, r2_scores, title_prefix)
     return fig
 
 
-methods = (LASSO, ARD, ELASTICNET) = ("Lasso", "ARD", "ElasticNet")
-PIPELINES = {
-    LASSO: SklearnPipeline([("lasso", Lasso(alpha=LASSO_ALPHA))]),
-    ARD: SklearnPipeline([("ard", ARDRegression())]),
-    ELASTICNET: SklearnPipeline([("elasticnet", ElasticNet(alpha=ELASTICNET_ALPHA, l1_ratio=ELASTICNET_L1_RATIO))]),
-}
-
-
-def _fit_xorq_pipeline(sklearn_pipeline, train_data, test_data):
+def _deferred_fit_xorq_pipeline(sklearn_pipeline, train_data, test_data):
     fitted = Pipeline.from_instance(sklearn_pipeline).fit(train_data, features=FEATURE_COLS, target=TARGET_COL)
     preds = fitted.predict(test_data, name=PRED_COL)
     return {
@@ -229,7 +222,7 @@ def _fit_sklearn_pipeline(name, pipeline, X_train, X_test, y_train, y_test):
     return {"r2": r2, "coef": fitted[-1].coef_, "fit_time": fit_time}
 
 
-def compute_with_sklearn(df):
+def compute_with_sklearn(name_to_pipeline, df):
     """Eager sklearn: time-ordered split, fit three L1-based models, score.
 
     Returns
@@ -249,13 +242,21 @@ def compute_with_sklearn(df):
 
     results = {
         name: _fit_sklearn_pipeline(name, pipeline, X_train, X_test, y_train, y_test)
-        for name, pipeline in PIPELINES.items()
+        for name, pipeline in name_to_pipeline.items()
     }
     sk_r2_scores, sk_coefs, sk_fit_times = (
         toolz.valmap(toolz.curried.get(key), results)
         for key in ("r2", "coef", "fit_time")
     )
     return sk_r2_scores, sk_coefs, sk_fit_times
+
+
+methods = (LASSO, ARD, ELASTICNET) = ("Lasso", "ARD", "ElasticNet")
+name_to_pipeline = {
+    LASSO: SklearnPipeline([("lasso", Lasso(alpha=LASSO_ALPHA))]),
+    ARD: SklearnPipeline([("ard", ARDRegression())]),
+    ELASTICNET: SklearnPipeline([("elasticnet", ElasticNet(alpha=ELASTICNET_ALPHA, l1_ratio=ELASTICNET_L1_RATIO))]),
+}
 
 
 # =========================================================================
@@ -265,7 +266,6 @@ def compute_with_sklearn(df):
 con = xo.connect()
 data = con.register(_load_data(), "sparse_signal")
 
-
 # Sequential split (first ~67% train, last ~33% test)
 train_data, test_data = deferred_sequential_split(
     data,
@@ -274,8 +274,8 @@ train_data, test_data = deferred_sequential_split(
     order_by=ROW_IDX,
 )
 name_to_xorq_exprs = {
-    name: _fit_xorq_pipeline(sklearn_pipeline, train_data, test_data)
-    for name, sklearn_pipeline in PIPELINES.items()
+    name: _deferred_fit_xorq_pipeline(sklearn_pipeline, train_data, test_data)
+    for name, sklearn_pipeline in name_to_pipeline.items()
 }
 # expose the exprs in the script to invoke `xorq build plot_lasso_and_elasticnet.py --expr $expr_name`
 (xorq_lasso_preds, xorq_ard_preds, xorq_elastic_net_preds) = (
@@ -284,26 +284,12 @@ name_to_xorq_exprs = {
 )
 
 
-
 # =========================================================================
 # Run and plot side by side
 # =========================================================================
 
 
-def main():
-    os.makedirs("imgs", exist_ok=True)
-
-    df = _load_data()
-    true_coef = df.attrs["true_coef"]
-
-    print("=== SKLEARN WAY ===")
-    sk_r2_scores, sk_coefs, sk_fit_times = compute_with_sklearn(df)
-
-    print("\n=== XORQ WAY ===")
-    xo_r2_scores, xo_coefs = compute_with_xorq(name_to_xorq_exprs)
-
-    # Execute deferred expressions
-
+def compare_results(sk_coefs, sk_r2_scores, xo_coefs, xo_r2_scores):
     # ---- Compare results ----
     # Note: Results may differ slightly due to subtle differences in how
     # TimeSeriesSplit and train_test_split handle the splits. Both methods
@@ -322,10 +308,8 @@ def main():
         coef_diff = np.max(np.abs(sk_coef - xo_coef))
         print(f"{name} max coef difference: {coef_diff:.6f}")
 
-    print(
-        "\nBoth approaches produce L1-regularized sparse models with similar sparsity patterns."
-    )
 
+def save_comparison_plot(true_coef, sk_coefs, sk_r2_scores, xo_coefs, xo_r2_scores):
     # Build coefficient matrices
     row_labels = ["True coefficients", *methods]
     sk_coef_matrix, xo_coef_matrix = (
@@ -362,9 +346,26 @@ def main():
     fig.suptitle("L1-based models for Sparse Signals: sklearn vs xorq", fontsize=16)
     fig.tight_layout()
     out = "imgs/lasso_and_elasticnet.png"
-    fig.savefig(out, dpi=150)
-    plt.close(fig)
-    print(f"\nPlot saved to {out}")
+    save_fig(out, fig, bbox_inches=None)
+
+
+def main():
+    df = _load_data()
+    true_coef = df.attrs["true_coef"]
+
+    print("=== SKLEARN WAY ===")
+    sk_r2_scores, sk_coefs, _ = compute_with_sklearn(name_to_pipeline, df)
+
+    # Execute deferred expressions
+    print("\n=== XORQ WAY ===")
+    xo_r2_scores, xo_coefs = compute_with_xorq(name_to_xorq_exprs)
+
+    compare_results(sk_coefs, sk_r2_scores, xo_coefs, xo_r2_scores)
+
+    print(
+        "\nBoth approaches produce L1-regularized sparse models with similar sparsity patterns."
+    )
+    save_comparison_plot(true_coef, sk_coefs, sk_r2_scores, xo_coefs, xo_r2_scores)
 
 
 if __name__ in ("__pytest_main__",):

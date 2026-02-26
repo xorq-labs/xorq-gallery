@@ -61,12 +61,12 @@ def deferred_sequential_split(expr, *, features, target, order_by):
 # ---------------------------------------------------------------------------
 
 
-def _fig_to_png_bytes(fig, close=True):
+def _fig_to_png_bytes(fig, dpi=150, close=True, bbox_inches="tight"):
     """Serialize a matplotlib Figure to PNG bytes."""
     import matplotlib.pyplot as plt
 
     buf = BytesIO()
-    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    fig.savefig(buf, format="png", dpi=dpi, bbox_inches=bbox_inches)
     if close:
         plt.close(fig)
     return buf.getvalue()
@@ -106,7 +106,7 @@ def deferred_matplotlib_plot(expr, fn, name="plot"):
     return plot_udaf.on_expr(expr)
 
 
-def save_plot(img_bytes, path):
+def save_fig(path, fig, close=True, **kwargs):
     """Write a deferred plot result to disk.
 
     Parameters
@@ -116,7 +116,9 @@ def save_plot(img_bytes, path):
     path : str
         File path to write the PNG to.
     """
-    Path(path).write_bytes(img_bytes)
+    (path := Path(path)).parent.mkdir(exist_ok=True, parents=True)
+    img_bytes = _fig_to_png_bytes(fig, close=close, **kwargs)
+    path.write_bytes(img_bytes)
     print(f"Plot saved to {path}")
 
 
