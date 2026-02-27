@@ -40,6 +40,7 @@ from xorq_gallery.sklearn.sklearn_lib import (
 )
 from xorq_gallery.utils import (
     fig_to_image,
+    save_fig,
 )
 
 
@@ -275,6 +276,12 @@ def plot_results(comparator):
     return fig
 
 
+def save_comparison_plot(comparator, path):
+    fig = comparator.plot_results()
+    save_fig(path, fig, bbox_inches=None)
+    return path
+
+
 methods = (LASSO, ARD, ELASTICNET) = ("Lasso", "ARD", "ElasticNet")
 names_pipelines = (
     (LASSO, SklearnPipeline([("lasso", Lasso(alpha=LASSO_ALPHA))])),
@@ -318,7 +325,7 @@ def main():
         "\nBoth approaches produce L1-regularized sparse models with similar sparsity patterns."
     )
     comparator.result_comparison
-    comparator.save_comparison_plot("imgs/lasso_and_elasticnet.png")
+    save_comparison_plot(comparator, "imgs/lasso_and_elasticnet.png")
 
 
 if __name__ in ("__pytest_main__",):

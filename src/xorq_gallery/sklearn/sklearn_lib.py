@@ -17,10 +17,6 @@ from xorq.common.utils.func_utils import return_constant
 from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
 
-from xorq_gallery.utils import (
-    save_fig,
-)
-
 
 @curry
 def make_sklearn_result(
@@ -187,8 +183,3 @@ class SklearnXorqComparator:
 
     def plot_results(self):
         return self.plot_results_fn(self)
-
-    def save_comparison_plot(self, path):
-        fig = self.plot_results()
-        save_fig(path, fig, bbox_inches=None)
-        return path
