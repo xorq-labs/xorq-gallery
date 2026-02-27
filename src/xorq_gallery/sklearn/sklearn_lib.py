@@ -39,6 +39,7 @@ class SklearnXorqComparator:
         return self.load_data()
 
     def get_split_data(self):
+        # DataFrame.attrs can cause issues, copy removes them
         df = self.df.pipe(lambda t: pd.DataFrame(t, columns=t.columns))
         return self.split_data(df)
 
