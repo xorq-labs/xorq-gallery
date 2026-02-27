@@ -3,12 +3,12 @@
 
 sklearn: Generate synthetic sparse signals with correlated features, fit Lasso,
 ARDRegression, and ElasticNet models eagerly on numpy arrays, evaluate R^2 score
-and compare estimated coefficients with ground-truth. Split with
-train_test_split(shuffle=False) to preserve temporal order.
+and compare estimated coefficients with ground-truth. Split with a row-index
+cutoff to preserve temporal order.
 
 xorq: Same models wrapped in Pipeline.from_instance. Data is an ibis expression,
-split via deferred_sequential_split, fit/predict deferred, metrics via
-deferred_sklearn_metric, coefficients extracted via deferred UDAFs.
+split via row-index filter on the expression graph, fit/predict deferred, metrics
+via deferred_sklearn_metric, coefficients extracted from the fitted pipeline.
 
 Both produce identical R^2 scores and coefficient patterns.
 
@@ -24,16 +24,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.colors import SymLogNorm
+from sklearn.base import clone
 from sklearn.linear_model import ARDRegression, ElasticNet, Lasso
 from sklearn.metrics import r2_score
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
 
-from xorq_gallery.sklearn.sklearn_lib import SklearnXorqComparator
-from xorq_gallery.utils import (
-    fig_to_image,
-)
+from xorq_gallery.sklearn.sklearn_lib import SklearnXorqComparator, assert_results
+from xorq_gallery.utils import fig_to_image
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +54,11 @@ FEATURE_COLS = tuple(f"feature_{i}" for i in range(N_FEATURES))
 TARGET_COL = "target"
 ROW_IDX = "row_idx"
 PRED_COL = "pred"
+
+# TODO(xorq): train_test_splits needs shuffle=False mode for full match;
+# until then we use a manual row_idx cutoff to guarantee identical splits.
+TEST_SIZE = 0.25
+CUTOFF = int(N_SAMPLES * (1 - TEST_SIZE))  # row_idx < CUTOFF -> train
 
 
 # ---------------------------------------------------------------------------
@@ -145,41 +149,18 @@ def _build_coefficient_heatmap(coef_matrix, row_labels, r2_scores, title_prefix)
 
 
 # ---------------------------------------------------------------------------
-# Splits: defined here — reader sees both strategies
+# build_exprs: the full xorq expression chain including split
 # ---------------------------------------------------------------------------
 
 
-# TODO(xorq): train_test_splits needs shuffle=False mode for full match;
-# until then we use a manual row_idx cutoff to guarantee identical splits.
-TEST_SIZE = 0.25
-CUTOFF = int(N_SAMPLES * (1 - TEST_SIZE))  # row_idx < CUTOFF → train
+def build_exprs(sklearn_pipeline, input_expr, features, target, pred_name):
+    """Split + Pipeline.from_instance + fit + predict + r2 metric.
 
-
-def sklearn_split(df, features, target):
-    """Temporal split at fixed cutoff — shuffle=False semantics."""
-    train_df = df[df[ROW_IDX] < CUTOFF]
-    test_df = df[df[ROW_IDX] >= CUTOFF]
-    X_train = train_df[list(features)].values
-    X_test = test_df[list(features)].values
-    y_train = train_df[target].values
-    y_test = test_df[target].values
-    return X_train, X_test, y_train, y_test
-
-
-def xorq_split(input_expr, features, target):
-    """Deferred temporal split at same fixed cutoff."""
+    The split is part of the expression graph: filter on row_idx cutoff.
+    """
     train_expr = input_expr.filter(input_expr[ROW_IDX] < CUTOFF)
     test_expr = input_expr.filter(input_expr[ROW_IDX] >= CUTOFF)
-    return train_expr, test_expr
 
-
-# ---------------------------------------------------------------------------
-# Expr builder: defined here — reader sees what gets built
-# ---------------------------------------------------------------------------
-
-
-def build_exprs(sklearn_pipeline, train_expr, test_expr, features, target, pred_name):
-    """Pipeline.from_instance + fit + predict + r2 metric."""
     pipeline = Pipeline.from_instance(sklearn_pipeline)
     fitted = pipeline.fit(train_expr, features=features, target=target)
     preds = fitted.predict(test_expr, name=pred_name)
@@ -197,18 +178,31 @@ def build_exprs(sklearn_pipeline, train_expr, test_expr, features, target, pred_
 
 
 # ---------------------------------------------------------------------------
-# Compute: defined here — reader sees every sklearn and xorq call
+# compute_sklearn: pure sklearn, no xorq imports
 # ---------------------------------------------------------------------------
 
 
-def compute_sklearn(comparator):
-    """Eager sklearn: time-ordered split, fit three L1-based models, score."""
-    X_train, X_test, y_train, y_test = comparator.sklearn_split
+def compute_sklearn(df, pipelines):
+    """Eager sklearn: time-ordered split, fit three L1-based models, score.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The full dataset with row_idx column.
+    pipelines : tuple[tuple[str, SklearnPipeline], ...]
+        Named sklearn pipelines to fit.
+    """
+    train_df = df[df[ROW_IDX] < CUTOFF]
+    test_df = df[df[ROW_IDX] >= CUTOFF]
+    X_train = train_df[list(FEATURE_COLS)].values
+    X_test = test_df[list(FEATURE_COLS)].values
+    y_train = train_df[TARGET_COL].values
+    y_test = test_df[TARGET_COL].values
 
     results = {}
-    for name in comparator.names:
+    for name, pipe_template in pipelines:
         t0 = time()
-        pipe = comparator.sklearn_pipeline(name)
+        pipe = clone(pipe_template)
         fitted = pipe.fit(X_train, y_train)
         fit_time = time() - t0
         preds = fitted.predict(X_test)
@@ -219,11 +213,21 @@ def compute_sklearn(comparator):
     return results
 
 
-def compute_xorq(comparator):
-    """Deferred xorq: execute deferred predictions, metrics, coef extraction."""
+# ---------------------------------------------------------------------------
+# compute_xorq: execute deferred expressions
+# ---------------------------------------------------------------------------
+
+
+def compute_xorq(deferred_exprs):
+    """Execute deferred predictions, metrics, and coef extraction.
+
+    Parameters
+    ----------
+    deferred_exprs : dict[str, dict[str, Expr]]
+        ``{pipeline_name: {"preds": expr, "metrics": expr, ...}, ...}``
+    """
     results = {}
-    for name in comparator.names:
-        e = comparator.deferred_exprs[name]
+    for name, e in deferred_exprs.items():
         r2 = e["metrics"].execute()["r2"].iloc[0]
         coef = e["fitted_pipeline"].fitted_steps[-1].model.coef_
         print(f"  xorq   {name}: R^2 = {r2:.3f}")
@@ -232,20 +236,23 @@ def compute_xorq(comparator):
 
 
 # ---------------------------------------------------------------------------
-# Assertions: defined here — reader sees what gets compared
+# build_assertions: what gets compared
 # ---------------------------------------------------------------------------
 
 
-def build_assertions(sk, xo, comparator):
+PIPELINE_NAMES = ("Lasso", "ARD", "ElasticNet")
+
+
+def build_assertions(sk, xo):
     """Build assertion pairs for R^2 scores and coefficients."""
-    sk_r2_df, sk_coef_df = (
-        pd.DataFrame({n: [sk[n]["r2"]] for n in comparator.names}, index=["r2"]),
-        pd.DataFrame({n: sk[n]["coef"] for n in comparator.names}),
+    sk_r2_df = pd.DataFrame(
+        {n: [sk[n]["r2"]] for n in PIPELINE_NAMES}, index=["r2"]
     )
-    xo_r2_df, xo_coef_df = (
-        pd.DataFrame({n: [xo[n]["r2"]] for n in comparator.names}, index=["r2"]),
-        pd.DataFrame({n: xo[n]["coef"] for n in comparator.names}),
+    xo_r2_df = pd.DataFrame(
+        {n: [xo[n]["r2"]] for n in PIPELINE_NAMES}, index=["r2"]
     )
+    sk_coef_df = pd.DataFrame({n: sk[n]["coef"] for n in PIPELINE_NAMES})
+    xo_coef_df = pd.DataFrame({n: xo[n]["coef"] for n in PIPELINE_NAMES})
     return [
         ("R^2 scores", sk_r2_df, xo_r2_df),
         ("Coefficients", sk_coef_df, xo_coef_df),
@@ -253,26 +260,25 @@ def build_assertions(sk, xo, comparator):
 
 
 # ---------------------------------------------------------------------------
-# Plot: defined here — reader sees figure creation and compositing
+# plot: composite figure
 # ---------------------------------------------------------------------------
 
 
-def plot(sk, xo, comparator):
+def plot(sk, xo, df):
     """Build coefficient heatmaps and composite plot."""
-    true_coef = comparator.df.attrs["true_coef"]
-    row_labels = ["True coefficients", *comparator.names]
+    true_coef = df.attrs["true_coef"]
+    row_labels = ["True coefficients", *PIPELINE_NAMES]
 
-    # Build heatmaps
     sk_fig = _build_coefficient_heatmap(
-        np.vstack([true_coef, *(sk[n]["coef"] for n in comparator.names)]),
+        np.vstack([true_coef, *(sk[n]["coef"] for n in PIPELINE_NAMES)]),
         row_labels,
-        {n: sk[n]["r2"] for n in comparator.names},
+        {n: sk[n]["r2"] for n in PIPELINE_NAMES},
         "sklearn",
     )
     xo_fig = _build_coefficient_heatmap(
-        np.vstack([true_coef, *(xo[n]["coef"] for n in comparator.names)]),
+        np.vstack([true_coef, *(xo[n]["coef"] for n in PIPELINE_NAMES)]),
         row_labels,
-        {n: xo[n]["r2"] for n in comparator.names},
+        {n: xo[n]["r2"] for n in PIPELINE_NAMES},
         "xorq",
     )
 
@@ -325,19 +331,13 @@ comparator = SklearnXorqComparator(
     named_pipelines=SHARED_SKLEARN_PIPELINES,
     df=_load_data(),
     features=FEATURE_COLS,
+    build_exprs_fn=build_exprs,
     target=TARGET_COL,
     pred_col=PRED_COL,
     metrics=(("r2", r2_score),),
-    sklearn_split_fn=sklearn_split,
-    xorq_split_fn=xorq_split,
-    build_exprs_fn=build_exprs,
-    compute_sklearn_fn=compute_sklearn,
-    compute_xorq_fn=compute_xorq,
-    build_assertions_fn=build_assertions,
-    plot_fn=plot,
 )
 
-# ── Module-level exprs (for xorq build --expr) ────────────────
+# -- Module-level exprs (for xorq build --expr) ----------------------------
 xorq_exprs = comparator.deferred_exprs
 
 xorq_lasso_fitted_pipeline = xorq_exprs["Lasso"]["fitted_pipeline"]
@@ -358,13 +358,13 @@ xorq_elasticnet_metrics = xorq_exprs["ElasticNet"]["metrics"]
 
 def main():
     print("=== SKLEARN WAY ===")
-    sk = comparator.compute_with_sklearn()
+    sk = compute_sklearn(comparator.df, SHARED_SKLEARN_PIPELINES)
 
     print("\n=== XORQ WAY ===")
-    xo = comparator.compute_with_xorq()
+    xo = compute_xorq(comparator.deferred_exprs)
 
-    comparator.assert_values(sk, xo)
-    comparator.plot(sk, xo)
+    assert_results(build_assertions(sk, xo))
+    plot(sk, xo, comparator.df)
 
 
 if __name__ in ("__main__", "__pytest_main__"):
