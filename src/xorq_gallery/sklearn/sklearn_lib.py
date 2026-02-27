@@ -12,6 +12,7 @@ from attrs import (
     frozen,
 )
 from sklearn.base import clone
+from toolz import curry
 from xorq.common.utils.func_utils import return_constant
 from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
@@ -21,6 +22,7 @@ from xorq_gallery.utils import (
 )
 
 
+@curry
 def make_sklearn_result(
     pipeline,
     train_data,
@@ -39,17 +41,16 @@ def make_sklearn_result(
         metric_name: metric_func(y_test, preds)
         for metric_name, metric_func in metrics_names_funcs
     }
-    other = make_other(
-        pipeline, train_data, test_data, features, target, metrics_names_funcs
-    )
+    other = make_other(fitted)
     result = {
-        "fitted_model": fitted.steps[-1],
+        "fitted": fitted,
         "preds": preds,
         "metrics": metrics,
-    } | (other if other else {})
+    } | ({"other": other} if other else {})
     return result
 
 
+@curry
 def make_deferred_xorq_result(
     pipeline,
     train_data,
@@ -74,14 +75,12 @@ def make_deferred_xorq_result(
         )
         for name, metric_fn in metrics_names_funcs
     }
-    other = make_other(
-        pipeline, train_data, test_data, features, target, metrics_names_funcs, pred
-    )
+    other = make_other(xorq_fitted)
     deferred_xorq_result = {
         "xorq_fitted": xorq_fitted,
         "preds": preds,
         "metrics": metrics,
-        "other": other,
+        "other": other if other else {},
     }
     return deferred_xorq_result
 
@@ -96,11 +95,12 @@ def make_xorq_result(deferred_xorq_result):
             "other",
         )
     )
+    other = {k: v() for k, v in other.items()}
     result = {
         "fitted_model": xorq_fitted.fitted_steps[-1].model,
         "preds": preds.execute(),
         "metrics": {name: expr.as_scalar().execute() for name, expr in metrics.items()},
-    } | {k: v.execute() for k, v in other.items()}
+    } | ({"other": other} if other else {})
     return result
 
 

@@ -18,22 +18,26 @@ Dataset: Synthetic sparse sinusoidal signals with Gaussian noise
 from __future__ import annotations
 
 from functools import partial
-from time import time
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import toolz
 from matplotlib.colors import SymLogNorm
-from sklearn.base import clone
 from sklearn.linear_model import ARDRegression, ElasticNet, Lasso
 from sklearn.metrics import r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline as SklearnPipeline
-from xorq.expr.ml.metrics import deferred_sklearn_metric
-from xorq.expr.ml.pipeline_lib import Pipeline
 
-from xorq_gallery.sklearn.sklearn_lib import SklearnXorqComparator
+from xorq_gallery.sklearn.sklearn_lib import (
+    SklearnXorqComparator,
+)
+from xorq_gallery.sklearn.sklearn_lib import (
+    make_deferred_xorq_result as _make_deferred_xorq_result,
+)
+from xorq_gallery.sklearn.sklearn_lib import (
+    make_sklearn_result as _make_sklearn_result,
+)
 from xorq_gallery.utils import (
     fig_to_image,
 )
@@ -181,75 +185,18 @@ def _build_coefficient_heatmap(coef_matrix, row_labels, r2_scores, title_prefix)
     return fig
 
 
-def make_deferred_xorq_result(
-    pipeline, train_data, test_data, features, target, metrics_names_funcs, pred
-):
-    xorq_fitted = Pipeline.from_instance(pipeline).fit(
-        train_data, features=features, target=target
-    )
-    preds = xorq_fitted.predict(test_data, name=pred)
-    metrics = {
-        name: preds.agg(
-            **{
-                name: deferred_sklearn_metric(
-                    target=target, pred=pred, metric=metric_fn
-                )
-            }
-        )
-        for name, metric_fn in metrics_names_funcs
-    }
-    deferred_xorq_result = {
-        "xorq_fitted": xorq_fitted,
-        "preds": preds,
-        "metrics": metrics,
-    }
-    return deferred_xorq_result
+def make_xorq_other(xorq_fitted):
+    return {"coef": lambda: xorq_fitted.fitted_steps[-1].model.coef_}
 
 
-def make_xorq_result(deferred_xorq_result):
-    xorq_fitted, preds, metrics = (
-        deferred_xorq_result[name]
-        for name in (
-            "xorq_fitted",
-            "preds",
-            "metrics",
-        )
-    )
-    result = {
-        "fitted_model": xorq_fitted.fitted_steps[-1].model,
-        "preds": preds.execute(),
-        "metrics": {name: expr.as_scalar().execute() for name, expr in metrics.items()},
-        "other": {
-            "coef": xorq_fitted.fitted_steps[-1].model.coef_,
-        },
-    }
-    return result
+make_deferred_xorq_result = _make_deferred_xorq_result(make_other=make_xorq_other)
 
 
-def make_sklearn_result(
-    pipeline, train_data, test_data, features, target, metrics_names_funcs
-):
-    ((X_train, y_train), (X_test, y_test)) = (
-        (df[list(features)], df[target]) for df in (train_data, test_data)
-    )
-    t0 = time()
-    fitted = clone(pipeline).fit(X_train, y_train)
-    fit_time = time() - t0
-    preds = fitted.predict(X_test)
-    metrics = {
-        metric_name: metric_func(y_test, preds)
-        for metric_name, metric_func in metrics_names_funcs
-    }
-    result = {
-        "fitted_model": fitted.steps[-1],
-        "preds": preds,
-        "metrics": metrics,
-        "other": {
-            "coef": fitted[-1].coef_,
-            "fit_time": fit_time,
-        },
-    }
-    return result
+def make_sklearn_other(fitted):
+    return {"coef": fitted[-1].coef_}
+
+
+make_sklearn_result = _make_sklearn_result(make_other=make_sklearn_other)
 
 
 def compare_result(name, sklearn_result, xorq_result):
@@ -357,7 +304,6 @@ comparator = SklearnXorqComparator(
     split_data=partial(train_test_split, test_size=0.3333, shuffle=False),
     make_sklearn_result=make_sklearn_result,
     make_deferred_xorq_result=make_deferred_xorq_result,
-    make_xorq_result=make_xorq_result,
     compare_results_fn=compare_results,
     plot_results_fn=plot_results,
 )
