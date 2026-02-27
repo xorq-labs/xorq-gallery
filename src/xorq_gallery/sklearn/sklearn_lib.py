@@ -39,7 +39,7 @@ def make_sklearn_result(
     }
     other = make_other(fitted)
     result = {
-        "fitted": fitted,
+        "fitted": fitted.steps[-1][-1],
         "preds": preds,
         "metrics": metrics,
     } | ({"other": other} if other else {})
@@ -93,7 +93,7 @@ def make_xorq_result(deferred_xorq_result):
     )
     other = {k: v() for k, v in other.items()}
     result = {
-        "fitted_model": xorq_fitted.fitted_steps[-1].model,
+        "fitted": xorq_fitted.fitted_steps[-1].model,
         "preds": preds.execute(),
         "metrics": {name: expr.as_scalar().execute() for name, expr in metrics.items()},
     } | ({"other": other} if other else {})
