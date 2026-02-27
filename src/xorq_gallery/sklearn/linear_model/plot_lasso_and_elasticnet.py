@@ -181,80 +181,6 @@ def _build_coefficient_heatmap(coef_matrix, row_labels, r2_scores, title_prefix)
     return fig
 
 
-def compare_result(name, sklearn_result, xorq_result):
-    # ---- Compare result ----
-    # Note: Results may differ slightly due to subtle differences in how
-    # TimeSeriesSplit and train_test_split handle the splits. Both methods
-    # preserve temporal order and use roughly the same train/test proportions,
-    # but TimeSeriesSplit uses fold-based splitting while train_test_split
-    # uses a simple cutoff.
-    sk_r2, xo_r2 = (dct["metrics"]["r2"] for dct in (sklearn_result, xorq_result))
-    r2_diff = abs(sk_r2 - xo_r2)
-    print(f"{name} R^2 - sklearn: {sk_r2:.3f}, xorq: {xo_r2:.3f}, diff: {r2_diff:.4f}")
-
-    sk_coef, xo_coef = (dct["other"]["coef"] for dct in (sklearn_result, xorq_result))
-    coef_diff = np.max(np.abs(sk_coef - xo_coef))
-    print(f"{name} max coef difference: {coef_diff:.6f}")
-
-
-def compare_results(sklearn_results, xorq_results):
-    assert sorted(sklearn_results) == sorted(xorq_results)
-    print("\n=== Comparing Results ===")
-    for name, sklearn_result in sklearn_results.items():
-        xorq_result = xorq_results[name]
-        compare_result(name, sklearn_result, xorq_result)
-
-
-def plot_results(comparator):
-    names = tuple(name for name, _ in comparator.names_pipelines)
-
-    # Build coefficient matrices
-    true_coef = comparator.df.attrs["true_coef"]
-    sk_coefs, xo_coefs = (
-        tuple(result["other"]["coef"] for result in (results[name] for name in names))
-        for results in (comparator.sklearn_results, comparator.xorq_results)
-    )
-    row_labels = ["True coefficients", *names]
-    sk_coef_matrix, xo_coef_matrix = (
-        np.vstack(
-            [
-                true_coef,
-                *coefs,
-            ]
-        )
-        for coefs in (sk_coefs, xo_coefs)
-    )
-
-    # Build r2 scores
-    (sk_r2_scores, xo_r2_scores) = (
-        {name: results[name]["metrics"]["r2"] for name in names}
-        for results in (comparator.sklearn_results, comparator.xorq_results)
-    )
-
-    # Build sklearn heatmap
-    sk_fig = _build_coefficient_heatmap(
-        sk_coef_matrix, row_labels, sk_r2_scores, "sklearn"
-    )
-
-    # Build xorq heatmap
-    xo_fig = _build_coefficient_heatmap(
-        xo_coef_matrix, row_labels, xo_r2_scores, "xorq"
-    )
-
-    # Composite: sklearn (left) | xorq (right)
-    fig, axes = plt.subplots(1, 2, figsize=(20, 6))
-
-    axes[0].imshow(fig_to_image(sk_fig))
-    axes[0].axis("off")
-
-    axes[1].imshow(fig_to_image(xo_fig))
-    axes[1].axis("off")
-
-    fig.suptitle("L1-based models for Sparse Signals: sklearn vs xorq", fontsize=16)
-    fig.tight_layout()
-    return fig
-
-
 def make_deferred_xorq_result(
     pipeline, train_data, test_data, features, target, metrics_names_funcs, pred
 ):
@@ -326,6 +252,82 @@ def make_sklearn_result(
     return result
 
 
+def compare_result(name, sklearn_result, xorq_result):
+    # ---- Compare result ----
+    # Note: Results may differ slightly due to subtle differences in how
+    # TimeSeriesSplit and train_test_split handle the splits. Both methods
+    # preserve temporal order and use roughly the same train/test proportions,
+    # but TimeSeriesSplit uses fold-based splitting while train_test_split
+    # uses a simple cutoff.
+    sk_r2, xo_r2 = (dct["metrics"]["r2"] for dct in (sklearn_result, xorq_result))
+    r2_diff = abs(sk_r2 - xo_r2)
+    print(f"{name} R^2 - sklearn: {sk_r2:.3f}, xorq: {xo_r2:.3f}, diff: {r2_diff:.4f}")
+
+    sk_coef, xo_coef = (dct["other"]["coef"] for dct in (sklearn_result, xorq_result))
+    coef_diff = np.max(np.abs(sk_coef - xo_coef))
+    print(f"{name} max coef difference: {coef_diff:.6f}")
+
+
+def compare_results(comparator):
+    assert sorted(sklearn_results := comparator.sklearn_results) == sorted(
+        xorq_results := comparator.xorq_results
+    )
+    print("\n=== Comparing Results ===")
+    for name, sklearn_result in sklearn_results.items():
+        xorq_result = xorq_results[name]
+        compare_result(name, sklearn_result, xorq_result)
+
+
+def plot_results(comparator):
+    names = tuple(name for name, _ in comparator.names_pipelines)
+
+    # Build coefficient matrices
+    true_coef = comparator.df.attrs["true_coef"]
+    sk_coefs, xo_coefs = (
+        tuple(result["other"]["coef"] for result in (results[name] for name in names))
+        for results in (comparator.sklearn_results, comparator.xorq_results)
+    )
+    row_labels = ["True coefficients", *names]
+    sk_coef_matrix, xo_coef_matrix = (
+        np.vstack(
+            [
+                true_coef,
+                *coefs,
+            ]
+        )
+        for coefs in (sk_coefs, xo_coefs)
+    )
+
+    # Build r2 scores
+    (sk_r2_scores, xo_r2_scores) = (
+        {name: results[name]["metrics"]["r2"] for name in names}
+        for results in (comparator.sklearn_results, comparator.xorq_results)
+    )
+
+    # Build sklearn heatmap
+    sk_fig = _build_coefficient_heatmap(
+        sk_coef_matrix, row_labels, sk_r2_scores, "sklearn"
+    )
+
+    # Build xorq heatmap
+    xo_fig = _build_coefficient_heatmap(
+        xo_coef_matrix, row_labels, xo_r2_scores, "xorq"
+    )
+
+    # Composite: sklearn (left) | xorq (right)
+    fig, axes = plt.subplots(1, 2, figsize=(20, 6))
+
+    axes[0].imshow(fig_to_image(sk_fig))
+    axes[0].axis("off")
+
+    axes[1].imshow(fig_to_image(xo_fig))
+    axes[1].axis("off")
+
+    fig.suptitle("L1-based models for Sparse Signals: sklearn vs xorq", fontsize=16)
+    fig.tight_layout()
+    return fig
+
+
 methods = (LASSO, ARD, ELASTICNET) = ("Lasso", "ARD", "ElasticNet")
 names_pipelines = (
     (LASSO, SklearnPipeline([("lasso", Lasso(alpha=LASSO_ALPHA))])),
@@ -370,7 +372,7 @@ def main():
         "\nBoth approaches produce L1-regularized sparse models with similar sparsity patterns."
     )
     comparator.result_comparison
-    comparator.save_comparison_plot()
+    comparator.save_comparison_plot("imgs/lasso_and_elasticnet.png")
 
 
 if __name__ in ("__pytest_main__",):

@@ -11,10 +11,97 @@ from attrs import (
     field,
     frozen,
 )
+from sklearn.base import clone
+from xorq.common.utils.func_utils import return_constant
+from xorq.expr.ml.metrics import deferred_sklearn_metric
+from xorq.expr.ml.pipeline_lib import Pipeline
 
 from xorq_gallery.utils import (
     save_fig,
 )
+
+
+def make_sklearn_result(
+    pipeline,
+    train_data,
+    test_data,
+    features,
+    target,
+    metrics_names_funcs,
+    make_other=return_constant(None),
+):
+    ((X_train, y_train), (X_test, y_test)) = (
+        (df[list(features)], df[target]) for df in (train_data, test_data)
+    )
+    fitted = clone(pipeline).fit(X_train, y_train)
+    preds = fitted.predict(X_test)
+    metrics = {
+        metric_name: metric_func(y_test, preds)
+        for metric_name, metric_func in metrics_names_funcs
+    }
+    other = make_other(
+        pipeline, train_data, test_data, features, target, metrics_names_funcs
+    )
+    result = {
+        "fitted_model": fitted.steps[-1],
+        "preds": preds,
+        "metrics": metrics,
+    } | (other if other else {})
+    return result
+
+
+def make_deferred_xorq_result(
+    pipeline,
+    train_data,
+    test_data,
+    features,
+    target,
+    metrics_names_funcs,
+    pred,
+    make_other=return_constant(None),
+):
+    xorq_fitted = Pipeline.from_instance(pipeline).fit(
+        train_data, features=features, target=target
+    )
+    preds = xorq_fitted.predict(test_data, name=pred)
+    metrics = {
+        name: preds.agg(
+            **{
+                name: deferred_sklearn_metric(
+                    target=target, pred=pred, metric=metric_fn
+                )
+            }
+        )
+        for name, metric_fn in metrics_names_funcs
+    }
+    other = make_other(
+        pipeline, train_data, test_data, features, target, metrics_names_funcs, pred
+    )
+    deferred_xorq_result = {
+        "xorq_fitted": xorq_fitted,
+        "preds": preds,
+        "metrics": metrics,
+        "other": other,
+    }
+    return deferred_xorq_result
+
+
+def make_xorq_result(deferred_xorq_result):
+    xorq_fitted, preds, metrics, other = (
+        deferred_xorq_result[name]
+        for name in (
+            "xorq_fitted",
+            "preds",
+            "metrics",
+            "other",
+        )
+    )
+    result = {
+        "fitted_model": xorq_fitted.fitted_steps[-1].model,
+        "preds": preds.execute(),
+        "metrics": {name: expr.as_scalar().execute() for name, expr in metrics.items()},
+    } | {k: v.execute() for k, v in other.items()}
+    return result
 
 
 @frozen
@@ -28,14 +115,17 @@ class SklearnXorqComparator:
     metrics_names_funcs = field(
         validator=deep_iterable(instance_of(tuple), instance_of(tuple)),
     )
+    #
     load_data = field(validator=is_callable())
     split_data = field(validator=is_callable())
-    #
-    make_sklearn_result = field(validator=is_callable())
-    make_deferred_xorq_result = field(validator=is_callable())
-    make_xorq_result = field(validator=is_callable())
     compare_results_fn = field(validator=is_callable())
     plot_results_fn = field(validator=is_callable())
+    #
+    make_sklearn_result = field(validator=is_callable(), default=make_sklearn_result)
+    make_deferred_xorq_result = field(
+        validator=is_callable(), default=make_deferred_xorq_result
+    )
+    make_xorq_result = field(validator=is_callable(), default=make_xorq_result)
 
     @property
     @cache
@@ -93,10 +183,10 @@ class SklearnXorqComparator:
 
     @property
     def result_comparison(self):
-        return self.compare_results_fn(self.sklearn_results, self.xorq_results)
+        return self.compare_results_fn(self)
 
     def plot_results(self):
-        return self.plot_result_fn(self.sklearn_results, self.xorq_results)
+        return self.plot_results_fn(self)
 
     def save_comparison_plot(self, path):
         fig = self.plot_results()
