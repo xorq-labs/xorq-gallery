@@ -248,7 +248,7 @@ def save_comparison_plot(comparator):
     save_fig(out, fig, bbox_inches=None)
 
 
-def make_xorq_result(
+def make_deferred_xorq_result(
     pipeline, train_data, test_data, features, target, metrics_names_funcs, pred
 ):
     xorq_fitted = Pipeline.from_instance(pipeline).fit(
@@ -265,17 +265,29 @@ def make_xorq_result(
         )
         for name, metric_fn in metrics_names_funcs
     }
+    deferred_xorq_result = {
+        "xorq_fitted": xorq_fitted,
+        "preds": preds,
+        "metrics": metrics,
+    }
+    return deferred_xorq_result
+
+
+def make_xorq_result(deferred_xorq_result):
+    xorq_fitted, preds, metrics = (
+        deferred_xorq_result[name]
+        for name in (
+            "xorq_fitted",
+            "preds",
+            "metrics",
+        )
+    )
     result = {
         "fitted_model": xorq_fitted.fitted_steps[-1].model,
         "preds": preds.execute(),
         "metrics": {name: expr.as_scalar().execute() for name, expr in metrics.items()},
         "other": {
             "coef": xorq_fitted.fitted_steps[-1].model.coef_,
-            "deferred": {
-                "xorq_fitted": xorq_fitted,
-                "preds": preds,
-                "metrics": metrics,
-            },
         },
     }
     return result
@@ -349,13 +361,14 @@ comparator = SklearnXorqComparator(
     load_data=load_data,
     split_data=partial(train_test_split, test_size=0.3333, shuffle=False),
     make_sklearn_result=make_sklearn_result,
+    make_deferred_xorq_result=make_deferred_xorq_result,
     make_xorq_result=make_xorq_result,
     compare_results_fn=compare_results,
     plot_results_fn=plot_results,
 )
 # expose the exprs in the script to invoke `xorq build plot_lasso_and_elasticnet.py --expr $expr_name`
 (xorq_lasso_preds, xorq_ard_preds, xorq_elastic_net_preds) = (
-    comparator.xorq_results[name]["other"]["deferred"]["preds"] for name in methods
+    comparator.deferred_xorq_results[name]["preds"] for name in methods
 )
 
 

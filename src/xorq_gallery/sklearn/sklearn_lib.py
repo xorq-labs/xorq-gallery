@@ -28,6 +28,7 @@ class SklearnXorqComparator:
     split_data = field(validator=is_callable())
     #
     make_sklearn_result = field(validator=is_callable())
+    make_deferred_xorq_result = field(validator=is_callable())
     make_xorq_result = field(validator=is_callable())
     compare_results_fn = field(validator=is_callable())
     plot_results_fn = field(validator=is_callable())
@@ -60,10 +61,10 @@ class SklearnXorqComparator:
 
     @property
     @cache
-    def xorq_results(self):
+    def deferred_xorq_results(self):
         train, test = (xo.memtable(el) for el in self.get_split_data())
         results = {
-            name: self.make_xorq_result(
+            name: self.make_deferred_xorq_result(
                 pipeline,
                 train,
                 test,
@@ -73,6 +74,15 @@ class SklearnXorqComparator:
                 self.pred,
             )
             for name, pipeline in self.names_pipelines
+        }
+        return results
+
+    @property
+    @cache
+    def xorq_results(self):
+        results = {
+            name: self.make_xorq_result(deferred_xorq_result)
+            for name, deferred_xorq_result in self.deferred_xorq_results.items()
         }
         return results
 
