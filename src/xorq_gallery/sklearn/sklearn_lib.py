@@ -12,6 +12,10 @@ from attrs import (
     frozen,
 )
 
+from xorq_gallery.utils import (
+    save_fig,
+)
+
 
 @frozen
 class SklearnXorqComparator:
@@ -93,3 +97,8 @@ class SklearnXorqComparator:
 
     def plot_results(self):
         return self.plot_result_fn(self.sklearn_results, self.xorq_results)
+
+    def save_comparison_plot(self, path):
+        fig = self.plot_results()
+        save_fig(path, fig, bbox_inches=None)
+        return path

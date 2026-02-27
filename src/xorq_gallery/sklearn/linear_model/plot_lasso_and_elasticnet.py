@@ -36,7 +36,6 @@ from xorq.expr.ml.pipeline_lib import Pipeline
 from xorq_gallery.sklearn.sklearn_lib import SklearnXorqComparator
 from xorq_gallery.utils import (
     fig_to_image,
-    save_fig,
 )
 
 
@@ -113,6 +112,20 @@ def load_data():
     df.attrs["true_coef"] = true_coef
 
     return df
+
+
+@toolz.curry
+def split_data(f, features, target, df):
+    X, y = (df[list(features)], df[target])
+    X_train, X_test, y_train, y_test = f(X, y)
+    train_data, test_data = (
+        pd.DataFrame(X, columns=features).assign(**{target: y})
+        for X, y in (
+            (X_train, y_train),
+            (X_test, y_test),
+        )
+    )
+    return train_data, test_data
 
 
 # ---------------------------------------------------------------------------
@@ -242,12 +255,6 @@ def plot_results(comparator):
     return fig
 
 
-def save_comparison_plot(comparator):
-    fig = plot_results(comparator)
-    out = "imgs/lasso_and_elasticnet.png"
-    save_fig(out, fig, bbox_inches=None)
-
-
 def make_deferred_xorq_result(
     pipeline, train_data, test_data, features, target, metrics_names_funcs, pred
 ):
@@ -319,20 +326,6 @@ def make_sklearn_result(
     return result
 
 
-@toolz.curry
-def split_data(f, features, target, df):
-    X, y = (df[list(features)], df[target])
-    X_train, X_test, y_train, y_test = f(X, y)
-    train_data, test_data = (
-        pd.DataFrame(X, columns=features).assign(**{target: y})
-        for X, y in (
-            (X_train, y_train),
-            (X_test, y_test),
-        )
-    )
-    return train_data, test_data
-
-
 methods = (LASSO, ARD, ELASTICNET) = ("Lasso", "ARD", "ElasticNet")
 names_pipelines = (
     (LASSO, SklearnPipeline([("lasso", Lasso(alpha=LASSO_ALPHA))])),
@@ -377,7 +370,7 @@ def main():
         "\nBoth approaches produce L1-regularized sparse models with similar sparsity patterns."
     )
     comparator.result_comparison
-    save_comparison_plot(comparator)
+    comparator.save_comparison_plot()
 
 
 if __name__ in ("__pytest_main__",):
