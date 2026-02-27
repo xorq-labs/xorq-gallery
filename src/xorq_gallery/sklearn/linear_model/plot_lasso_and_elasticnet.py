@@ -245,12 +245,8 @@ PIPELINE_NAMES = ("Lasso", "ARD", "ElasticNet")
 
 def build_assertions(sk, xo):
     """Build assertion pairs for R^2 scores and coefficients."""
-    sk_r2_df = pd.DataFrame(
-        {n: [sk[n]["r2"]] for n in PIPELINE_NAMES}, index=["r2"]
-    )
-    xo_r2_df = pd.DataFrame(
-        {n: [xo[n]["r2"]] for n in PIPELINE_NAMES}, index=["r2"]
-    )
+    sk_r2_df = pd.DataFrame({n: [sk[n]["r2"]] for n in PIPELINE_NAMES}, index=["r2"])
+    xo_r2_df = pd.DataFrame({n: [xo[n]["r2"]] for n in PIPELINE_NAMES}, index=["r2"])
     sk_coef_df = pd.DataFrame({n: sk[n]["coef"] for n in PIPELINE_NAMES})
     xo_coef_df = pd.DataFrame({n: xo[n]["coef"] for n in PIPELINE_NAMES})
     return [

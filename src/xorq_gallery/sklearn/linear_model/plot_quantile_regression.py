@@ -457,9 +457,7 @@ def main():
         sk = compute_sklearn(_df, SHARED_SKLEARN_PIPELINES, comparator.target)
 
         print("\n=== XORQ WAY ===")
-        xo = compute_xorq(
-            comparator.deferred_exprs, _df, comparator.target, PRED_COL
-        )
+        xo = compute_xorq(comparator.deferred_exprs, _df, comparator.target, PRED_COL)
 
         assert_results(build_assertions(sk, xo))
         plot(sk, xo, _df, comparator.target, dataset_type)

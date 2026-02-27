@@ -8,7 +8,7 @@ conventionally-named functions defined inline in the example file.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Callable
 
 import pandas as pd
 import xorq.api as xo
@@ -64,9 +64,7 @@ class SklearnXorqComparator:
     )
     df: pd.DataFrame = field(validator=instance_of(pd.DataFrame), eq=False, hash=False)
     features: tuple = field(validator=instance_of(tuple))
-    build_exprs_fn: Callable = field(
-        validator=is_callable(), eq=False, hash=False
-    )
+    build_exprs_fn: Callable = field(validator=is_callable(), eq=False, hash=False)
     target: str | None = field(validator=optional(instance_of(str)), default=None)
     pred_col: str = field(validator=instance_of(str), default="pred")
     metrics: tuple = field(
