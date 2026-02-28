@@ -30,6 +30,8 @@ from sklearn.preprocessing import StandardScaler
 
 from xorq_gallery.sklearn.sklearn_lib import (
     SklearnXorqComparator,
+)
+from xorq_gallery.sklearn.sklearn_lib import (
     make_sklearn_result as _make_sklearn_result,
 )
 from xorq_gallery.utils import (
@@ -64,7 +66,9 @@ def load_data():
     """Load iris dataset, select sepal length and petal length (2 features)."""
     dataset = datasets.load_iris()
     X = dataset.data[:, [0, 2]]
-    return pd.DataFrame(X, columns=list(FEATURE_COLS)).assign(**{TARGET_COL: dataset.target})
+    return pd.DataFrame(X, columns=list(FEATURE_COLS)).assign(
+        **{TARGET_COL: dataset.target}
+    )
 
 
 def split_data(df):
@@ -112,7 +116,13 @@ def _plot_decision_boundary(ax, X, y, clf, title, score):
     ax.set_ylim(yy.min(), yy.max())
     ax.set_title(title)
     ax.text(
-        0.9, 0.1, f"{score:.2f}", size=15, ha="center", va="center", transform=ax.transAxes
+        0.9,
+        0.1,
+        f"{score:.2f}",
+        size=15,
+        ha="center",
+        va="center",
+        transform=ax.transAxes,
     )
 
 
@@ -149,7 +159,9 @@ def plot_results(comparator):
         _plot_decision_boundary(axes_sk[col], X, y, sk_clf, name, sk_score)
 
         xo_fitted = comparator.deferred_xorq_results[name]["xorq_fitted"]
-        _plot_decision_boundary(axes_xo[col], X, y, _XorqClfWrapper(xo_fitted), name, xo_score)
+        _plot_decision_boundary(
+            axes_xo[col], X, y, _XorqClfWrapper(xo_fitted), name, xo_score
+        )
 
     fig_sk.suptitle("sklearn: KNN vs NCA+KNN", fontsize=14)
     fig_sk.tight_layout()

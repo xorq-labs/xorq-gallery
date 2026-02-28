@@ -28,8 +28,10 @@ from sklearn.preprocessing import PolynomialFeatures, SplineTransformer, Standar
 
 from xorq_gallery.sklearn.sklearn_lib import (
     SklearnXorqComparator,
-    make_sklearn_result as _make_sklearn_result,
     split_data_nop,
+)
+from xorq_gallery.sklearn.sklearn_lib import (
+    make_sklearn_result as _make_sklearn_result,
 )
 from xorq_gallery.utils import (
     fig_to_image,
@@ -135,7 +137,12 @@ def _spline_ridge():
 
 def _hgbt():
     return SklearnPipeline(
-        [("histgradientboostingregressor", HistGradientBoostingRegressor(random_state=0))]
+        [
+            (
+                "histgradientboostingregressor",
+                HistGradientBoostingRegressor(random_state=0),
+            )
+        ]
     )
 
 
@@ -281,9 +288,12 @@ comparator = SklearnXorqComparator(
     plot_results_fn=plot_results,
 )
 # expose the exprs to invoke `xorq build plot_stack_predictors.py --expr $expr_name`
-(xorq_linear_ridge_preds, xorq_spline_ridge_preds, xorq_hgbt_preds, xorq_stacking_preds) = (
-    comparator.deferred_xorq_results[name]["preds"] for name in methods
-)
+(
+    xorq_linear_ridge_preds,
+    xorq_spline_ridge_preds,
+    xorq_hgbt_preds,
+    xorq_stacking_preds,
+) = (comparator.deferred_xorq_results[name]["preds"] for name in methods)
 
 
 def main():

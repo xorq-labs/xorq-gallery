@@ -3,22 +3,22 @@
 
 sklearn: Train several probabilistic classifiers (Logistic Regression with
 varying regularization, Gradient Boosting) on the first two features of the
-Iris dataset.  Compute per-class predicted probabilities on a test set,
-evaluate accuracy / ROC-AUC / log-loss, and plot decision-boundary probability
-maps for each class plus an overall "max class" column.
+Iris dataset. Compute per-class predicted probabilities on a test set,
+evaluate accuracy, and plot decision-boundary probability maps for each
+class plus an overall "max class" column.
 
 xorq: Same classifiers wrapped in Pipeline.from_instance, deferred
-fit / predict_proba, deferred accuracy via deferred_sklearn_metric, and
-deferred decision-boundary plots via deferred_matplotlib_plot.
+fit/predict, accuracy via deferred_sklearn_metric. Decision-boundary plots
+refit classifiers inside deferred_matplotlib_plot.
 
-Both produce equivalent evaluation metrics.
+Both produce equivalent accuracy metrics.
 
 Dataset: Iris (sklearn) -- first two features only
 """
 
 from __future__ import annotations
 
-import os
+from functools import partial
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -27,17 +27,23 @@ import xorq.api as xo
 from sklearn.datasets import load_iris
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, log_loss, roc_auc_score
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from sklearn.preprocessing import StandardScaler
 from toolz import curry
-from xorq.expr.ml.metrics import deferred_sklearn_metric
-from xorq.expr.ml.pipeline_lib import Pipeline
 
+from xorq_gallery.sklearn.sklearn_lib import (
+    SklearnXorqComparator,
+)
+from xorq_gallery.sklearn.sklearn_lib import (
+    make_sklearn_result as _make_sklearn_result,
+)
 from xorq_gallery.utils import (
     deferred_matplotlib_plot,
     fig_to_image,
     load_plot_bytes,
+    save_fig,
 )
 
 
@@ -47,66 +53,60 @@ from xorq_gallery.utils import (
 
 RANDOM_STATE = 42
 TEST_SIZE = 0.5
+FEATURE_COLS = ("sepal_length", "sepal_width")
 TARGET_COL = "target"
 PRED_COL = "pred"
-PROBA_COL = "predict_proba"
-ROW_IDX = "row_idx"
+CLASS_NAMES = ("setosa", "versicolor", "virginica")
 H = 0.02  # meshgrid step size
 
 
 # ---------------------------------------------------------------------------
-# Data loading (shared)
+# Data loading
 # ---------------------------------------------------------------------------
 
 
-def _load_data():
-    """Load Iris dataset (first two features only) and return as DataFrame."""
+def load_data():
+    """Load Iris dataset (first two features only) as DataFrame."""
     iris = load_iris()
-    X = iris.data[:, :2]  # first two features for 2-D visualisation
-    y = iris.target
+    X = iris.data[:, :2]
+    return pd.DataFrame(X, columns=list(FEATURE_COLS)).assign(
+        **{TARGET_COL: iris.target}
+    )
 
-    feature_cols = ("sepal_length", "sepal_width")
-    df = pd.DataFrame(X, columns=feature_cols)
-    df[TARGET_COL] = y
-    df[ROW_IDX] = range(len(df))
 
-    return df, feature_cols, iris.target_names
+# ---------------------------------------------------------------------------
+# Pipeline builders (shared between sklearn and xorq-refit)
+# ---------------------------------------------------------------------------
 
 
 def _build_classifiers():
-    """Return list of (SklearnPipeline, display_name) tuples.
-
-    Uses explicit Pipeline([("step", ...)]) -- never make_pipeline.
-    """
+    """Return list of (name, SklearnPipeline) matching names_pipelines order."""
     return [
         (
+            LR_C01_NAME,
             SklearnPipeline(
                 [
                     ("scaler", StandardScaler()),
                     ("lr", LogisticRegression(C=0.1, max_iter=1000)),
                 ]
             ),
-            "Logistic Regression (C=0.1)",
         ),
         (
+            LR_C100_NAME,
             SklearnPipeline(
                 [
                     ("scaler", StandardScaler()),
                     ("lr", LogisticRegression(C=100, max_iter=1000)),
                 ]
             ),
-            "Logistic Regression (C=100)",
         ),
         (
+            HGB_NAME,
             SklearnPipeline(
                 [
-                    (
-                        "hgb",
-                        HistGradientBoostingClassifier(random_state=RANDOM_STATE),
-                    ),
+                    ("hgb", HistGradientBoostingClassifier(random_state=RANDOM_STATE)),
                 ]
             ),
-            "Gradient Boosting",
         ),
     ]
 
@@ -117,14 +117,10 @@ def _build_classifiers():
 
 
 def _plot_proba_grid(classifiers_results, class_names, title_prefix=""):
-    """Plot per-class probability maps and a max-class column.
-
-    classifiers_results: list of dicts with keys
-        name, clf (fitted), X_train, X_test, y_test, y_pred
-    """
+    """Plot per-class probability maps and a max-class column."""
     n_clf = len(classifiers_results)
     n_classes = len(class_names)
-    n_cols = n_classes + 1  # one per class + max-class column
+    n_cols = n_classes + 1
 
     fig, axes = plt.subplots(
         nrows=n_clf, ncols=n_cols, figsize=(n_cols * 2.6, n_clf * 2.6)
@@ -132,7 +128,6 @@ def _plot_proba_grid(classifiers_results, class_names, title_prefix=""):
     if n_clf == 1:
         axes = axes[np.newaxis, :]
 
-    # Shared meshgrid bounds across all classifiers
     first = classifiers_results[0]
     X_all = first["X_train"]
     x_min, x_max = X_all[:, 0].min() - 1, X_all[:, 0].max() + 1
@@ -146,23 +141,19 @@ def _plot_proba_grid(classifiers_results, class_names, title_prefix=""):
         X_test = res["X_test"]
         y_test = res["y_test"]
         y_pred = res["y_pred"]
-
         grid_pts = np.column_stack([xx.ravel(), yy.ravel()])
         probas = clf.predict_proba(grid_pts)
 
-        # Per-class probability maps
         for label in range(n_classes):
             ax = axes[row, label]
             Z = probas[:, label].reshape(xx.shape)
             ax.contourf(xx, yy, Z, levels=100, vmin=0, vmax=1, cmap="Blues")
-            # Show test points predicted as this class
             mask = y_pred == label
             ax.scatter(X_test[mask, 0], X_test[mask, 1], c="w", **scatter_kw)
             ax.set(xticks=(), yticks=())
             if row == 0:
                 ax.set_title(f"Class {class_names[label]}", fontsize=9)
 
-        # Max-class column
         ax_max = axes[row, n_classes]
         Z_max = probas.max(axis=1).reshape(xx.shape)
         ax_max.contourf(xx, yy, Z_max, levels=100, vmin=0, vmax=1, cmap="Blues")
@@ -178,7 +169,6 @@ def _plot_proba_grid(classifiers_results, class_names, title_prefix=""):
         if row == 0:
             ax_max.set_title("Max class", fontsize=9)
 
-        # Row label
         axes[row, 0].set_ylabel(res["name"], fontsize=8, fontweight="bold")
 
     fig.suptitle(f"{title_prefix}Classification Probability", fontsize=12)
@@ -188,17 +178,11 @@ def _plot_proba_grid(classifiers_results, class_names, title_prefix=""):
 
 @curry
 def _build_proba_plot(df, class_names, feature_cols):
-    """Curried plot function for deferred_matplotlib_plot.
-
-    Rebuilds classifiers internally (avoids unhashable sklearn objects in
-    curry kwargs), fits on the materialised DataFrame, and produces the
-    probability grid plot.  Returns the Figure.
-    """
+    """Refit classifiers on materialised DataFrame and build probability grid plot."""
     X = df[list(feature_cols)].values
     y = df[TARGET_COL].values
-
     results = []
-    for clf, name in _build_classifiers():
+    for name, clf in _build_classifiers():
         clf.fit(X, y)
         y_pred = clf.predict(X)
         results.append(
@@ -211,181 +195,113 @@ def _build_proba_plot(df, class_names, feature_cols):
                 "y_pred": y_pred,
             }
         )
-
-    fig = _plot_proba_grid(results, class_names, title_prefix="xorq: ")
-    return fig
+    return _plot_proba_grid(results, class_names, title_prefix="xorq: ")
 
 
-# =========================================================================
-# SKLEARN WAY -- eager fit/predict_proba, evaluation metrics
-# =========================================================================
+# ---------------------------------------------------------------------------
+# make_other override: store full fitted pipeline for predict_proba on meshgrid
+# ---------------------------------------------------------------------------
 
 
-def sklearn_way(train_df, test_df, feature_cols, class_names):
-    """Eager sklearn: fit classifiers, predict, evaluate metrics.
+def _make_sklearn_other(fitted):
+    return {"full_pipeline": fitted}
 
-    Returns dict with fitted-classifier results and evaluation metrics.
-    No plotting here -- that belongs in main().
-    """
-    X_train = train_df[list(feature_cols)].values
+
+make_sklearn_result = _make_sklearn_result(make_other=_make_sklearn_other)
+
+
+# ---------------------------------------------------------------------------
+# Comparator callbacks
+# ---------------------------------------------------------------------------
+
+
+def compare_results(comparator):
+    assert sorted(sklearn_results := comparator.sklearn_results) == sorted(
+        xorq_results := comparator.xorq_results
+    )
+    print("\n=== Comparing Results ===")
+    for name, sklearn_result in sklearn_results.items():
+        xorq_result = xorq_results[name]
+        sk_acc = sklearn_result["metrics"]["accuracy"]
+        xo_acc = xorq_result["metrics"]["accuracy"]
+        print(f"  {name:35s} accuracy - sklearn: {sk_acc:.4f}, xorq: {xo_acc:.4f}")
+
+
+def plot_results(comparator):
+    train_df, _ = comparator.get_split_data()
+    X_train = train_df[list(FEATURE_COLS)].values
     y_train = train_df[TARGET_COL].values
-    X_test = test_df[list(feature_cols)].values
-    y_test = test_df[TARGET_COL].values
 
-    clf_list = _build_classifiers()
-    classifiers_results = []
-    eval_results = []
-
-    for clf, name in clf_list:
-        clf.fit(X_train, y_train)
-        y_pred_test = clf.predict(X_test)
-        y_proba_test = clf.predict_proba(X_test)
-        y_pred_train = clf.predict(X_train)
-
-        acc = accuracy_score(y_test, y_pred_test)
-        auc_val = roc_auc_score(y_test, y_proba_test, multi_class="ovr")
-        ll = log_loss(y_test, y_proba_test)
-
-        print(
-            f"  sklearn: {name:35s} | acc={acc:.3f}  auc={auc_val:.3f}  log_loss={ll:.3f}"
-        )
-        eval_results.append(
-            {"name": name, "accuracy": acc, "roc_auc": auc_val, "log_loss": ll}
-        )
-        # Plot uses train data for both grid bounds and scatter overlay
-        # so that the visual matches the xorq deferred plot (which only
-        # receives train_data).
-        classifiers_results.append(
-            {
-                "name": name,
-                "clf": clf,
-                "X_train": X_train,
-                "X_test": X_train,
-                "y_test": y_train,
-                "y_pred": y_pred_train,
-            }
-        )
-
-    return {"eval": eval_results, "classifiers_results": classifiers_results}
-
-
-# =========================================================================
-# XORQ WAY -- deferred fit/predict_proba, deferred metrics
-# =========================================================================
-
-
-def xorq_way(train_data, test_data, feature_cols):
-    """Deferred xorq: Pipeline.from_instance + predict_proba + deferred metrics.
-
-    Returns dict of classifier_name -> {preds, proba_expr, metrics}.
-    No .execute() calls here.
-    """
-    make_accuracy = deferred_sklearn_metric(target=TARGET_COL, pred=PRED_COL)
-
-    clf_list = _build_classifiers()
-    results = {}
-
-    for clf, name in clf_list:
-        xorq_pipe = Pipeline.from_instance(clf)
-        fitted = xorq_pipe.fit(
-            train_data, features=tuple(feature_cols), target=TARGET_COL
-        )
-        preds = fitted.predict(test_data, name=PRED_COL)
-        proba_expr = fitted.predict_proba(test_data, name=PROBA_COL)
-        metrics = preds.agg(accuracy=make_accuracy(metric=accuracy_score))
-
-        results[name] = {
-            "preds": preds,
-            "proba_expr": proba_expr,
-            "metrics": metrics,
+    sk_classifiers_results = [
+        {
+            "name": name,
+            "clf": comparator.sklearn_results[name]["other"]["full_pipeline"],
+            "X_train": X_train,
+            "X_test": X_train,
+            "y_test": y_train,
+            "y_pred": comparator.sklearn_results[name]["other"][
+                "full_pipeline"
+            ].predict(X_train),
         }
+        for name in methods
+    ]
+    sk_fig = _plot_proba_grid(sk_classifiers_results, CLASS_NAMES, "sklearn: ")
 
-    return results
-
-
-# =========================================================================
-# Run and plot side by side
-# =========================================================================
-
-
-def main():
-    os.makedirs("imgs", exist_ok=True)
-
-    df, feature_cols, class_names = _load_data()
-
-    # Hash-based split via xorq -- single source of truth
-    con = xo.connect()
-    table = con.register(df, "iris_2d")
-    train_data, test_data = xo.train_test_splits(
-        table,
-        test_sizes=TEST_SIZE,
-        unique_key=ROW_IDX,
-        random_seed=RANDOM_STATE,
-    )
-    train_data = train_data.order_by(ROW_IDX)
-    test_data = test_data.order_by(ROW_IDX)
-
-    # Materialise for sklearn
-    train_df = train_data.execute()
-    test_df = test_data.execute()
-
-    print("=== SKLEARN WAY ===")
-    sk_results = sklearn_way(train_df, test_df, feature_cols, class_names)
-
-    print("\n=== XORQ WAY ===")
-    xo_results = xorq_way(train_data, test_data, feature_cols)
-
-    # --- Execute deferred metrics and assert equivalence ---
-    print("\n=== ASSERTIONS ===")
-    sk_eval = {r["name"]: r for r in sk_results["eval"]}
-
-    for name, res in xo_results.items():
-        xo_metrics = res["metrics"].execute()
-        xo_acc = xo_metrics["accuracy"].iloc[0]
-        sk_acc = sk_eval[name]["accuracy"]
-        print(f"  {name:35s} | sklearn acc={sk_acc:.3f}  xorq acc={xo_acc:.3f}")
-        np.testing.assert_allclose(sk_acc, xo_acc, rtol=0.05)
-
-    print("Assertions passed: sklearn and xorq accuracy values match.")
-
-    # --- Plotting ---
-    print("\n=== PLOTTING ===")
-
-    # sklearn plot (eager, built in main)
-    sk_fig = _plot_proba_grid(
-        sk_results["classifiers_results"], class_names, "sklearn: "
-    )
-
-    # xorq deferred plot: fit on train_data (same data xorq_way fits on)
     xo_plot_fn = _build_proba_plot(
-        class_names=tuple(class_names),
-        feature_cols=feature_cols,
+        class_names=CLASS_NAMES,
+        feature_cols=FEATURE_COLS,
     )
-    xo_png = deferred_matplotlib_plot(train_data, xo_plot_fn).execute()
-    xo_img = load_plot_bytes(xo_png)
+    xo_png = deferred_matplotlib_plot(xo.memtable(train_df), xo_plot_fn).execute()
 
-    # Composite side-by-side
     fig, axes = plt.subplots(1, 2, figsize=(22, 10))
     axes[0].imshow(fig_to_image(sk_fig))
     axes[0].set_title("sklearn", fontsize=14, fontweight="bold")
     axes[0].axis("off")
-
-    axes[1].imshow(xo_img)
+    axes[1].imshow(load_plot_bytes(xo_png))
     axes[1].set_title("xorq", fontsize=14, fontweight="bold")
     axes[1].axis("off")
-
-    fig.suptitle(
-        "Classification Probability: sklearn vs xorq",
-        fontsize=16,
-        fontweight="bold",
-    )
+    fig.suptitle("Classification Probability: sklearn vs xorq", fontsize=16)
     fig.tight_layout()
-    out = "imgs/plot_classification_probability.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"\nComposite plot saved to {out}")
+    return fig
 
 
-if __name__ in ("__main__", "__pytest_main__"):
+# ---------------------------------------------------------------------------
+# Module-level setup
+# ---------------------------------------------------------------------------
+
+methods = (LR_C01_NAME, LR_C100_NAME, HGB_NAME) = (
+    "Logistic Regression (C=0.1)",
+    "Logistic Regression (C=100)",
+    "Gradient Boosting",
+)
+names_pipelines = tuple((name, pipe) for name, pipe in _build_classifiers())
+metrics_names_funcs = (("accuracy", accuracy_score),)
+
+comparator = SklearnXorqComparator(
+    names_pipelines=names_pipelines,
+    features=FEATURE_COLS,
+    target=TARGET_COL,
+    pred=PRED_COL,
+    metrics_names_funcs=metrics_names_funcs,
+    load_data=load_data,
+    split_data=partial(
+        train_test_split, test_size=TEST_SIZE, random_state=RANDOM_STATE
+    ),
+    make_sklearn_result=make_sklearn_result,
+    compare_results_fn=compare_results,
+    plot_results_fn=plot_results,
+)
+# expose the exprs to invoke `xorq build plot_classification_probability.py --expr $expr_name`
+(xorq_lr_c01_preds, xorq_lr_c100_preds, xorq_hgb_preds) = (
+    comparator.deferred_xorq_results[name]["preds"] for name in methods
+)
+
+
+def main():
+    comparator.result_comparison
+    save_fig("imgs/plot_classification_probability.png", comparator.plot_results())
+
+
+if __name__ in ("__pytest_main__",):
     main()
     pytest_examples_passed = True

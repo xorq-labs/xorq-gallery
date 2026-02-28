@@ -15,21 +15,23 @@ Dataset: Synthetic 1D sine wave with noise (40 samples)
 
 from __future__ import annotations
 
-import os
-
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xorq.api as xo
+from sklearn.metrics import r2_score
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from sklearn.svm import SVR
 from toolz import curry
-from xorq.expr.ml.pipeline_lib import Pipeline
-from xorq.ibis_yaml.utils import freeze
 
+from xorq_gallery.sklearn.sklearn_lib import (
+    SklearnXorqComparator,
+    split_data_nop,
+)
 from xorq_gallery.utils import (
     deferred_matplotlib_plot,
     load_plot_bytes,
+    save_fig,
 )
 
 
@@ -39,6 +41,10 @@ from xorq_gallery.utils import (
 
 RANDOM_SEED = 42
 N_SAMPLES = 40
+FEATURE_COLS = ("x",)
+TARGET_COL = "y"
+PRED_COL = "pred"
+
 KERNELS = ("rbf", "linear", "poly")
 KERNEL_PARAMS = {
     "rbf": {"C": 100, "gamma": 0.1, "epsilon": 0.1},
@@ -50,26 +56,17 @@ MODEL_COLORS = {"rbf": "m", "linear": "c", "poly": "g"}
 
 
 # ---------------------------------------------------------------------------
-# Data loading (shared)
+# Data loading
 # ---------------------------------------------------------------------------
 
 
-def _load_data():
-    """Generate synthetic 1D sine wave data with noise.
-
-    Matches the sklearn example exactly: 40 samples sorted along x-axis,
-    sine wave + noise on every 5th point.
-    """
+def load_data():
+    """Generate synthetic 1D sine wave data with noise."""
     np.random.seed(RANDOM_SEED)
     X = np.sort(5 * np.random.rand(N_SAMPLES, 1), axis=0)
     y = np.sin(X).ravel()
-
-    # Add noise to every 5th target
     y[::5] += 3 * (0.5 - np.random.rand(8))
-
-    df = pd.DataFrame(X, columns=["x"])
-    df["y"] = y
-    return df
+    return pd.DataFrame({FEATURE_COLS[0]: X[:, 0], TARGET_COL: y})
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +79,6 @@ def _plot_svr_result(ax, X, y, svr, kernel, color):
     lw = 2
     y_pred = svr.predict(X)
     ax.plot(X, y_pred, color=color, lw=lw, label=f"{KERNEL_LABELS[kernel]} model")
-
     support_indices = svr.support_
     ax.scatter(
         X[support_indices],
@@ -92,7 +88,6 @@ def _plot_svr_result(ax, X, y, svr, kernel, color):
         s=50,
         label=f"{KERNEL_LABELS[kernel]} support vectors",
     )
-
     other_indices = np.setdiff1d(np.arange(len(X)), support_indices)
     ax.scatter(
         X[other_indices],
@@ -102,7 +97,6 @@ def _plot_svr_result(ax, X, y, svr, kernel, color):
         s=50,
         label="other training data",
     )
-
     ax.legend(
         loc="upper center",
         bbox_to_anchor=(0.5, 1.15),
@@ -116,120 +110,45 @@ def _plot_svr_result(ax, X, y, svr, kernel, color):
 
 
 @curry
-def _build_svr_plot(pred_df, kernel, X_data, y_data, pipe_template, color):
-    """Build SVR regression plot from materialized predictions.
-
-    X_data and y_data are passed as tuples (for xorq hashability) and
-    converted back to numpy arrays inside this function.
-    """
-    X_data = np.array(X_data)
-    y_data = np.array(y_data)
-    fitted_pipe = pipe_template.fit(X_data, y_data)
-    fitted_svr = fitted_pipe.named_steps["svr"]
+def _build_svr_refit_plot(df, kernel, color):
+    """Refit SVR from materialised DataFrame and build regression plot."""
+    X = df[[FEATURE_COLS[0]]].values
+    y = df[TARGET_COL].values
+    params = KERNEL_PARAMS[kernel]
+    svr = SVR(kernel=kernel, **params)
+    svr.fit(X, y)
     fig, ax = plt.subplots(figsize=(6, 5))
-    _plot_svr_result(ax, X_data, y_data, fitted_svr, kernel, color)
+    _plot_svr_result(ax, X, y, svr, kernel, color)
     fig.tight_layout()
     return fig
 
 
-# =========================================================================
-# SKLEARN WAY -- eager fit and predict
-# =========================================================================
+# ---------------------------------------------------------------------------
+# Comparator callbacks
+# ---------------------------------------------------------------------------
 
 
-def sklearn_way(df):
-    """Eager sklearn: fit SVR with each kernel type, predict, collect support vectors."""
-    X = df[["x"]].values
-    y = df["y"].values
-
-    results = {}
-    for kernel in KERNELS:
-        params = KERNEL_PARAMS[kernel]
-        svr = SVR(kernel=kernel, **params)
-        svr.fit(X, y)
-        y_pred = svr.predict(X)
-        print(f"  sklearn: kernel={kernel:8s} | n_support={len(svr.support_):2d}")
-        results[kernel] = {
-            "svr": svr,
-            "predictions": y_pred,
-            "n_support": len(svr.support_),
-        }
-
-    return results
+def compare_results(comparator):
+    assert sorted(sklearn_results := comparator.sklearn_results) == sorted(
+        xorq_results := comparator.xorq_results
+    )
+    print("\n=== Comparing Results ===")
+    for name, sklearn_result in sklearn_results.items():
+        xorq_result = xorq_results[name]
+        sk_r2 = sklearn_result["metrics"]["r2"]
+        xo_r2 = xorq_result["metrics"]["r2"]
+        print(f"  {name:8s} r2 - sklearn: {sk_r2:.4f}, xorq: {xo_r2:.4f}")
 
 
-# =========================================================================
-# XORQ WAY -- deferred fit and predict
-# =========================================================================
+def plot_results(comparator):
+    X = comparator.df[[FEATURE_COLS[0]]].values
+    y = comparator.df[TARGET_COL].values
 
-
-def xorq_way(df):
-    """Deferred xorq: wrap SVR in Pipeline.from_instance, fit/predict deferred."""
-    con = xo.connect()
-    table = con.register(df, "svr_data")
-
-    results = {}
-    for kernel in KERNELS:
-        params = KERNEL_PARAMS[kernel]
-        sklearn_pipe = SklearnPipeline([("svr", SVR(kernel=kernel, **params))])
-        xorq_pipe = Pipeline.from_instance(sklearn_pipe)
-        fitted = xorq_pipe.fit(table, features=("x",), target="y")
-        preds = fitted.predict(table, name="pred")
-        results[kernel] = {"preds": preds, "sklearn_pipe": sklearn_pipe}
-
-    return results
-
-
-# =========================================================================
-# Run and plot side by side
-# =========================================================================
-
-
-def main():
-    os.makedirs("imgs", exist_ok=True)
-
-    df = _load_data()
-
-    print("=== SKLEARN WAY ===")
-    sk_results = sklearn_way(df)
-
-    print("\n=== XORQ WAY ===")
-    xo_results = xorq_way(df)
-
-    # Execute deferred predictions and verify they match
-    print("\n=== ASSERTIONS ===")
-    X = df[["x"]].values
-    y = df["y"].values
-
-    for kernel in KERNELS:
-        xo_preds_df = xo_results[kernel]["preds"].execute()
-        sk_preds = sk_results[kernel]["predictions"]
-        xo_preds = xo_preds_df["pred"].values
-        np.testing.assert_allclose(sk_preds, xo_preds, rtol=1e-10)
-        print(f"  xorq:   kernel={kernel:8s} | predictions match sklearn")
-
-    print("Assertions passed: sklearn and xorq predictions match.")
-
-    # Generate deferred plots
-    xo_plots = {}
-    for kernel in KERNELS:
-        plot_fn = _build_svr_plot(
-            kernel=kernel,
-            X_data=freeze(X.tolist()),
-            y_data=freeze(y.tolist()),
-            pipe_template=xo_results[kernel]["sklearn_pipe"],
-            color=MODEL_COLORS[kernel],
-        )
-        xo_plots[kernel] = deferred_matplotlib_plot(
-            xo_results[kernel]["preds"], plot_fn
-        ).execute()
-
-    # Build composite plot: 2 rows x 3 cols
     fig, axes = plt.subplots(2, len(KERNELS), figsize=(15, 10))
 
     for idx, kernel in enumerate(KERNELS):
-        # Top row: sklearn
-        svr = sk_results[kernel]["svr"]
+        # Top row: sklearn — result["fitted"] IS the SVR instance (last step)
+        svr = comparator.sklearn_results[kernel]["fitted"]
         _plot_svr_result(axes[0, idx], X, y, svr, kernel, MODEL_COLORS[kernel])
         if idx == 0:
             axes[0, idx].text(
@@ -243,9 +162,12 @@ def main():
                 rotation=90,
             )
 
-        # Bottom row: xorq
-        img = load_plot_bytes(xo_plots[kernel])
-        axes[1, idx].imshow(img)
+        # Bottom row: xorq — refit inside deferred_matplotlib_plot
+        xo_png = deferred_matplotlib_plot(
+            xo.memtable(comparator.df),
+            _build_svr_refit_plot(kernel=kernel, color=MODEL_COLORS[kernel]),
+        ).execute()
+        axes[1, idx].imshow(load_plot_bytes(xo_png))
         axes[1, idx].axis("off")
         if idx == 0:
             axes[1, idx].text(
@@ -261,12 +183,48 @@ def main():
 
     fig.suptitle("Support Vector Regression: sklearn vs xorq", fontsize=16, y=0.995)
     fig.tight_layout()
-    out = "imgs/svm_regression.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"\nComposite plot saved to {out}")
+    return fig
 
 
-if __name__ in ("__main__", "__pytest_main__"):
+# ---------------------------------------------------------------------------
+# Module-level setup
+# ---------------------------------------------------------------------------
+
+methods = tuple(KERNELS)
+names_pipelines = tuple(
+    (kernel, SklearnPipeline([("svr", SVR(kernel=kernel, **KERNEL_PARAMS[kernel]))]))
+    for kernel in KERNELS
+)
+metrics_names_funcs = (("r2", r2_score),)
+
+comparator = SklearnXorqComparator(
+    names_pipelines=names_pipelines,
+    features=FEATURE_COLS,
+    target=TARGET_COL,
+    pred=PRED_COL,
+    metrics_names_funcs=metrics_names_funcs,
+    load_data=load_data,
+    split_data=split_data_nop,
+    compare_results_fn=compare_results,
+    plot_results_fn=plot_results,
+)
+# expose the exprs to invoke `xorq build plot_svm_regression.py --expr $expr_name`
+(xorq_rbf_preds, xorq_linear_preds, xorq_poly_preds) = (
+    comparator.deferred_xorq_results[name]["preds"] for name in methods
+)
+
+
+def main():
+    comparator.result_comparison
+
+    print("\n=== Support Vector Counts ===")
+    for kernel in KERNELS:
+        svr = comparator.sklearn_results[kernel]["fitted"]
+        print(f"  {kernel:8s}: n_support={len(svr.support_)}")
+
+    save_fig("imgs/plot_svm_regression.png", comparator.plot_results())
+
+
+if __name__ in ("__pytest_main__",):
     main()
     pytest_examples_passed = True

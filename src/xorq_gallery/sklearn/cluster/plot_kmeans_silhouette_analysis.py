@@ -6,31 +6,34 @@ candidate cluster counts (2-6), fit KMeans for each, compute silhouette scores
 per sample and overall average, visualize silhouette plots and cluster scatter
 plots to identify optimal cluster count.
 
-xorq: Same KMeans models wrapped in Pipeline.from_instance, deferred
-fit/predict for multiple cluster counts, deferred silhouette score computation,
-deferred plotting of silhouette analysis and cluster visualization.
+xorq: Same KMeans models wrapped in Pipeline.from_instance, fit/predict
+deferred for multiple cluster counts, silhouette scores computed outside
+comparator (require raw feature data alongside cluster labels).
 
-Both produce identical silhouette scores and visualizations.
+Both produce identical silhouette scores and cluster assignments.
 
 Dataset: make_blobs (synthetic 2D clustered data with 500 samples, 4 centers)
 """
 
 from __future__ import annotations
 
-import os
-
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import xorq.api as xo
+from sklearn import metrics as sk_metrics
 from sklearn.cluster import KMeans
 from sklearn.datasets import make_blobs
-from sklearn.metrics import silhouette_samples, silhouette_score
 from sklearn.pipeline import Pipeline as SklearnPipeline
-from xorq.expr.ml.pipeline_lib import Pipeline
 
-from xorq_gallery.utils import fig_to_image
+from xorq_gallery.sklearn.sklearn_lib import (
+    SklearnXorqComparator,
+    split_data_nop,
+)
+from xorq_gallery.utils import (
+    fig_to_image,
+    save_fig,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -38,19 +41,18 @@ from xorq_gallery.utils import fig_to_image
 # ---------------------------------------------------------------------------
 
 RANGE_N_CLUSTERS = (2, 3, 4, 5, 6)
-FEATURES = ("f0", "f1")
+FEATURE_COLS = ("f0", "f1")
+TARGET_COL = "true_label"
+PRED_COL = "pred"
 
 
 # ---------------------------------------------------------------------------
-# Data loading (shared)
+# Data loading
 # ---------------------------------------------------------------------------
 
 
-def _load_data():
-    """Generate synthetic clustered data using make_blobs.
-
-    Returns pandas DataFrame with features f0, f1 and true labels.
-    """
+def load_data():
+    """Generate synthetic clustered data using make_blobs."""
     X, y = make_blobs(
         n_samples=500,
         n_features=2,
@@ -60,9 +62,7 @@ def _load_data():
         shuffle=True,
         random_state=1,
     )
-    df = pd.DataFrame(X, columns=["f0", "f1"])
-    df["true_label"] = y
-    return df
+    return pd.DataFrame(X, columns=list(FEATURE_COLS)).assign(**{TARGET_COL: y})
 
 
 # ---------------------------------------------------------------------------
@@ -73,46 +73,24 @@ def _load_data():
 def _plot_silhouette_analysis(
     X, n_clusters, cluster_labels, silhouette_avg, sample_silhouette_values, centers
 ):
-    """Build silhouette analysis plot (silhouette plot + cluster scatter).
-
-    Parameters
-    ----------
-    X : ndarray
-        Data array (n_samples, 2)
-    n_clusters : int
-        Number of clusters
-    cluster_labels : ndarray
-        Cluster assignments
-    silhouette_avg : float
-        Average silhouette score
-    sample_silhouette_values : ndarray
-        Silhouette score per sample
-    centers : ndarray
-        Cluster centers (n_clusters, 2)
-
-    Returns
-    -------
-    matplotlib.figure.Figure
-    """
+    """Build silhouette analysis plot (silhouette plot + cluster scatter)."""
     fig, (ax1, ax2) = plt.subplots(1, 2)
     fig.set_size_inches(18, 7)
 
-    # Silhouette plot
     ax1.set_xlim([-0.1, 1])
     ax1.set_ylim([0, len(X) + (n_clusters + 1) * 10])
 
     y_lower = 10
     for i in range(n_clusters):
-        ith_cluster_silhouette_values = sample_silhouette_values[cluster_labels == i]
-        ith_cluster_silhouette_values.sort()
-        size_cluster_i = ith_cluster_silhouette_values.shape[0]
+        ith_values = sample_silhouette_values[cluster_labels == i]
+        ith_values.sort()
+        size_cluster_i = ith_values.shape[0]
         y_upper = y_lower + size_cluster_i
-
         color = cm.nipy_spectral(float(i) / n_clusters)
         ax1.fill_betweenx(
             np.arange(y_lower, y_upper),
             0,
-            ith_cluster_silhouette_values,
+            ith_values,
             facecolor=color,
             edgecolor=color,
             alpha=0.7,
@@ -127,20 +105,10 @@ def _plot_silhouette_analysis(
     ax1.set_yticks([])
     ax1.set_xticks([-0.1, 0, 0.2, 0.4, 0.6, 0.8, 1])
 
-    # Cluster scatter plot
     colors = cm.nipy_spectral(cluster_labels.astype(float) / n_clusters)
     ax2.scatter(
-        X[:, 0],
-        X[:, 1],
-        marker=".",
-        s=30,
-        lw=0,
-        alpha=0.7,
-        c=colors,
-        edgecolor="k",
+        X[:, 0], X[:, 1], marker=".", s=30, lw=0, alpha=0.7, c=colors, edgecolor="k"
     )
-
-    # Draw cluster centers
     ax2.scatter(
         centers[:, 0],
         centers[:, 1],
@@ -150,10 +118,8 @@ def _plot_silhouette_analysis(
         s=200,
         edgecolor="k",
     )
-
     for i, c in enumerate(centers):
         ax2.scatter(c[0], c[1], marker="$%d$" % i, alpha=1, s=50, edgecolor="k")
-
     ax2.set_title("The visualization of the clustered data.")
     ax2.set_xlabel("Feature space for the 1st feature")
     ax2.set_ylabel("Feature space for the 2nd feature")
@@ -167,273 +133,122 @@ def _plot_silhouette_analysis(
     return fig
 
 
-# =========================================================================
-# SKLEARN WAY -- eager fit/predict, silhouette analysis
-# =========================================================================
+# ---------------------------------------------------------------------------
+# Comparator callbacks
+# ---------------------------------------------------------------------------
 
 
-def sklearn_way(df):
-    """Eager sklearn: fit KMeans for all n_clusters values, compute
-    silhouette scores, store results for plotting.
-
-    Returns dict with results for each n_clusters value.
-    """
-    X = df[["f0", "f1"]].values
-
-    # KMeans for n_clusters = 2
-    clusterer_2 = KMeans(n_clusters=2, random_state=10)
-    cluster_labels_2 = clusterer_2.fit_predict(X)
-    silhouette_avg_2 = silhouette_score(X, cluster_labels_2)
-    sample_silhouette_values_2 = silhouette_samples(X, cluster_labels_2)
-    centers_2 = clusterer_2.cluster_centers_
-
-    # KMeans for n_clusters = 3
-    clusterer_3 = KMeans(n_clusters=3, random_state=10)
-    cluster_labels_3 = clusterer_3.fit_predict(X)
-    silhouette_avg_3 = silhouette_score(X, cluster_labels_3)
-    sample_silhouette_values_3 = silhouette_samples(X, cluster_labels_3)
-    centers_3 = clusterer_3.cluster_centers_
-
-    # KMeans for n_clusters = 4
-    clusterer_4 = KMeans(n_clusters=4, random_state=10)
-    cluster_labels_4 = clusterer_4.fit_predict(X)
-    silhouette_avg_4 = silhouette_score(X, cluster_labels_4)
-    sample_silhouette_values_4 = silhouette_samples(X, cluster_labels_4)
-    centers_4 = clusterer_4.cluster_centers_
-
-    # KMeans for n_clusters = 5
-    clusterer_5 = KMeans(n_clusters=5, random_state=10)
-    cluster_labels_5 = clusterer_5.fit_predict(X)
-    silhouette_avg_5 = silhouette_score(X, cluster_labels_5)
-    sample_silhouette_values_5 = silhouette_samples(X, cluster_labels_5)
-    centers_5 = clusterer_5.cluster_centers_
-
-    # KMeans for n_clusters = 6
-    clusterer_6 = KMeans(n_clusters=6, random_state=10)
-    cluster_labels_6 = clusterer_6.fit_predict(X)
-    silhouette_avg_6 = silhouette_score(X, cluster_labels_6)
-    sample_silhouette_values_6 = silhouette_samples(X, cluster_labels_6)
-    centers_6 = clusterer_6.cluster_centers_
-
-    return {
-        2: {
-            "cluster_labels": cluster_labels_2,
-            "silhouette_avg": silhouette_avg_2,
-            "sample_silhouette_values": sample_silhouette_values_2,
-            "centers": centers_2,
-        },
-        3: {
-            "cluster_labels": cluster_labels_3,
-            "silhouette_avg": silhouette_avg_3,
-            "sample_silhouette_values": sample_silhouette_values_3,
-            "centers": centers_3,
-        },
-        4: {
-            "cluster_labels": cluster_labels_4,
-            "silhouette_avg": silhouette_avg_4,
-            "sample_silhouette_values": sample_silhouette_values_4,
-            "centers": centers_4,
-        },
-        5: {
-            "cluster_labels": cluster_labels_5,
-            "silhouette_avg": silhouette_avg_5,
-            "sample_silhouette_values": sample_silhouette_values_5,
-            "centers": centers_5,
-        },
-        6: {
-            "cluster_labels": cluster_labels_6,
-            "silhouette_avg": silhouette_avg_6,
-            "sample_silhouette_values": sample_silhouette_values_6,
-            "centers": centers_6,
-        },
-    }
-
-
-# =========================================================================
-# XORQ WAY -- deferred fit/predict, deferred silhouette analysis
-# =========================================================================
-
-
-def xorq_way(df):
-    """Deferred xorq: wrap KMeans in Pipeline.from_instance, fit/predict
-    deferred for all n_clusters values.
-
-    Returns deferred prediction expressions for each n_clusters value.
-    Nothing is executed until ``.execute()``.
-    """
-    con = xo.connect()
-    table = con.register(df, "blobs")
-
-    # KMeans for n_clusters = 2
-    sklearn_pipe_2 = SklearnPipeline(
-        [("kmeans", KMeans(n_clusters=2, random_state=10))]
+def compare_results(comparator):
+    assert sorted(sklearn_results := comparator.sklearn_results) == sorted(
+        xorq_results := comparator.xorq_results
     )
-    xorq_pipe_2 = Pipeline.from_instance(sklearn_pipe_2)
-    fitted_2 = xorq_pipe_2.fit(table, features=FEATURES, target="true_label")
-    preds_2 = fitted_2.predict(table, name="pred")
-
-    # KMeans for n_clusters = 3
-    sklearn_pipe_3 = SklearnPipeline(
-        [("kmeans", KMeans(n_clusters=3, random_state=10))]
-    )
-    xorq_pipe_3 = Pipeline.from_instance(sklearn_pipe_3)
-    fitted_3 = xorq_pipe_3.fit(table, features=FEATURES, target="true_label")
-    preds_3 = fitted_3.predict(table, name="pred")
-
-    # KMeans for n_clusters = 4
-    sklearn_pipe_4 = SklearnPipeline(
-        [("kmeans", KMeans(n_clusters=4, random_state=10))]
-    )
-    xorq_pipe_4 = Pipeline.from_instance(sklearn_pipe_4)
-    fitted_4 = xorq_pipe_4.fit(table, features=FEATURES, target="true_label")
-    preds_4 = fitted_4.predict(table, name="pred")
-
-    # KMeans for n_clusters = 5
-    sklearn_pipe_5 = SklearnPipeline(
-        [("kmeans", KMeans(n_clusters=5, random_state=10))]
-    )
-    xorq_pipe_5 = Pipeline.from_instance(sklearn_pipe_5)
-    fitted_5 = xorq_pipe_5.fit(table, features=FEATURES, target="true_label")
-    preds_5 = fitted_5.predict(table, name="pred")
-
-    # KMeans for n_clusters = 6
-    sklearn_pipe_6 = SklearnPipeline(
-        [("kmeans", KMeans(n_clusters=6, random_state=10))]
-    )
-    xorq_pipe_6 = Pipeline.from_instance(sklearn_pipe_6)
-    fitted_6 = xorq_pipe_6.fit(table, features=FEATURES, target="true_label")
-    preds_6 = fitted_6.predict(table, name="pred")
-
-    return {
-        2: preds_2,
-        3: preds_3,
-        4: preds_4,
-        5: preds_5,
-        6: preds_6,
-    }
+    print("\n=== Comparing Results ===")
+    for name, sklearn_result in sklearn_results.items():
+        xorq_result = xorq_results[name]
+        sk_h = sklearn_result["metrics"]["homogeneity"]
+        xo_h = xorq_result["metrics"]["homogeneity"]
+        print(
+            f"  n_clusters={name:2s} homogeneity - sklearn: {sk_h:.4f}, xorq: {xo_h:.4f}"
+        )
 
 
-# =========================================================================
-# Run and plot side by side
-# =========================================================================
+def plot_results(comparator):
+    X = comparator.df[list(FEATURE_COLS)].values
+    row_figs = []
+
+    for name in methods:
+        n_clusters = int(name)
+        km = comparator.sklearn_results[name]["fitted"]
+        sk_labels = comparator.sklearn_results[name]["preds"]
+        xo_labels = comparator.xorq_results[name]["preds"][PRED_COL].values
+        centers = km.cluster_centers_
+
+        sk_sil_avg = sk_metrics.silhouette_score(X, sk_labels)
+        sk_sil_samples = sk_metrics.silhouette_samples(X, sk_labels)
+        xo_sil_avg = sk_metrics.silhouette_score(X, xo_labels)
+        xo_sil_samples = sk_metrics.silhouette_samples(X, xo_labels)
+
+        sk_fig = _plot_silhouette_analysis(
+            X, n_clusters, sk_labels, sk_sil_avg, sk_sil_samples, centers
+        )
+        xo_fig = _plot_silhouette_analysis(
+            X, n_clusters, xo_labels, xo_sil_avg, xo_sil_samples, centers
+        )
+
+        row_fig, row_axes = plt.subplots(1, 2, figsize=(36, 7))
+        row_axes[0].imshow(fig_to_image(sk_fig))
+        row_axes[0].set_title("sklearn", fontsize=14)
+        row_axes[0].axis("off")
+        row_axes[1].imshow(fig_to_image(xo_fig))
+        row_axes[1].set_title("xorq", fontsize=14)
+        row_axes[1].axis("off")
+        row_fig.suptitle(f"n_clusters={n_clusters}", fontsize=14)
+        row_fig.tight_layout()
+        row_figs.append(row_fig)
+        plt.close(sk_fig)
+        plt.close(xo_fig)
+
+    fig, axes = plt.subplots(len(methods), 1, figsize=(36, 7 * len(methods)))
+    for row, rf in enumerate(row_figs):
+        axes[row].imshow(fig_to_image(rf))
+        axes[row].axis("off")
+        plt.close(rf)
+    fig.suptitle("Silhouette Analysis: sklearn vs xorq", fontsize=16)
+    fig.tight_layout()
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Module-level setup
+# ---------------------------------------------------------------------------
+
+methods = tuple(str(n) for n in RANGE_N_CLUSTERS)
+names_pipelines = tuple(
+    (str(n), SklearnPipeline([("kmeans", KMeans(n_clusters=n, random_state=10))]))
+    for n in RANGE_N_CLUSTERS
+)
+metrics_names_funcs = (("homogeneity", sk_metrics.homogeneity_score),)
+
+comparator = SklearnXorqComparator(
+    names_pipelines=names_pipelines,
+    features=FEATURE_COLS,
+    target=TARGET_COL,
+    pred=PRED_COL,
+    metrics_names_funcs=metrics_names_funcs,
+    load_data=load_data,
+    split_data=split_data_nop,
+    compare_results_fn=compare_results,
+    plot_results_fn=plot_results,
+)
+# expose the exprs to invoke `xorq build plot_kmeans_silhouette_analysis.py --expr $expr_name`
+(
+    xorq_k2_preds,
+    xorq_k3_preds,
+    xorq_k4_preds,
+    xorq_k5_preds,
+    xorq_k6_preds,
+) = (comparator.deferred_xorq_results[name]["preds"] for name in methods)
 
 
 def main():
-    os.makedirs("imgs", exist_ok=True)
+    comparator.result_comparison
 
-    print("=== GENERATING DATA ===")
-    df = _load_data()
-    print(f"Generated {len(df)} samples with 2 features")
-    X = df[["f0", "f1"]].values
+    # Silhouette: needs raw feature data, computed outside comparator
+    X = comparator.df[list(FEATURE_COLS)].values
+    print("\n=== Silhouette Scores ===")
+    for name in methods:
+        n_clusters = int(name)
+        sk_labels = comparator.sklearn_results[name]["preds"]
+        xo_labels = comparator.xorq_results[name]["preds"][PRED_COL].values
+        sk_sil = sk_metrics.silhouette_score(X, sk_labels)
+        xo_sil = sk_metrics.silhouette_score(X, xo_labels)
+        print(f"  n_clusters={n_clusters}: sklearn={sk_sil:.3f}, xorq={xo_sil:.3f}")
+        np.testing.assert_allclose(sk_sil, xo_sil, rtol=1e-5)
+    print("Silhouette scores match.")
 
-    print("\n=== SKLEARN WAY ===")
-    sk_results = sklearn_way(df)
-    for n_clusters in RANGE_N_CLUSTERS:
-        print(
-            f"For n_clusters = {n_clusters}, the average silhouette_score is: {sk_results[n_clusters]['silhouette_avg']:.3f}"
-        )
-
-    print("\n=== XORQ WAY ===")
-    xo_preds = xorq_way(df)
-
-    # Execute deferred predictions and compute silhouette scores
-    print("\n=== COMPUTING XORQ SILHOUETTE SCORES ===")
-    xo_silhouette_scores = {}
-
-    for n_clusters in RANGE_N_CLUSTERS:
-        preds_df = xo_preds[n_clusters].execute()
-        cluster_labels = preds_df["pred"].values
-
-        silhouette_avg = silhouette_score(X, cluster_labels)
-        sample_silhouette_values = silhouette_samples(X, cluster_labels)
-
-        print(
-            f"For n_clusters = {n_clusters}, the average silhouette_score is: {silhouette_avg:.3f}"
-        )
-
-        xo_silhouette_scores[n_clusters] = {
-            "silhouette_avg": silhouette_avg,
-            "sample_silhouette_values": sample_silhouette_values,
-            "cluster_labels": cluster_labels,
-        }
-
-    # Assert numerical equivalence BEFORE plotting
-    print("\n=== ASSERTIONS ===")
-    print("Comparing silhouette scores (sklearn vs xorq):")
-    sk_silhouettes = pd.DataFrame(
-        {
-            "silhouette_avg": {
-                n: sk_results[n]["silhouette_avg"] for n in RANGE_N_CLUSTERS
-            }
-        }
-    )
-    xo_silhouettes = pd.DataFrame(
-        {
-            "silhouette_avg": {
-                n: xo_silhouette_scores[n]["silhouette_avg"] for n in RANGE_N_CLUSTERS
-            }
-        }
-    )
-    pd.testing.assert_frame_equal(sk_silhouettes, xo_silhouettes, rtol=1e-5)
-    print("Assertions passed: sklearn and xorq silhouette scores match.")
-
-    # Create composite plots for each n_clusters value
-    print("\n=== PLOTTING ===")
-    for n_clusters in RANGE_N_CLUSTERS:
-        # Sklearn plot
-        sk_res = sk_results[n_clusters]
-        sk_fig = _plot_silhouette_analysis(
-            X,
-            n_clusters,
-            sk_res["cluster_labels"],
-            sk_res["silhouette_avg"],
-            sk_res["sample_silhouette_values"],
-            sk_res["centers"],
-        )
-
-        # Xorq plot - refit to get centers (matching sklearn approach)
-        kmeans_viz = KMeans(n_clusters=n_clusters, random_state=10)
-        kmeans_viz.fit(X)
-        centers = kmeans_viz.cluster_centers_
-
-        xo_fig = _plot_silhouette_analysis(
-            X,
-            n_clusters,
-            xo_silhouette_scores[n_clusters]["cluster_labels"],
-            xo_silhouette_scores[n_clusters]["silhouette_avg"],
-            xo_silhouette_scores[n_clusters]["sample_silhouette_values"],
-            centers,
-        )
-
-        # Composite: sklearn (left) | xorq (right)
-        sk_img = fig_to_image(sk_fig)
-        xo_img = fig_to_image(xo_fig)
-
-        fig, axes = plt.subplots(1, 2, figsize=(36, 7))
-        axes[0].imshow(sk_img)
-        axes[0].set_title("sklearn", fontsize=16)
-        axes[0].axis("off")
-
-        axes[1].imshow(xo_img)
-        axes[1].set_title("xorq", fontsize=16)
-        axes[1].axis("off")
-
-        fig.suptitle(
-            f"Silhouette Analysis: sklearn vs xorq (n_clusters={n_clusters})",
-            fontsize=18,
-            fontweight="bold",
-        )
-        fig.tight_layout()
-        out = f"imgs/plot_kmeans_silhouette_analysis_n{n_clusters}.png"
-        fig.savefig(out, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        plt.close(sk_fig)
-        plt.close(xo_fig)
-        print(f"Saved: {out}")
-
-    print("\nAll composite plots saved to imgs/")
+    save_fig("imgs/plot_kmeans_silhouette_analysis.png", comparator.plot_results())
 
 
-if __name__ in ("__main__", "__pytest_main__"):
+if __name__ in ("__pytest_main__",):
     main()
     pytest_examples_passed = True
