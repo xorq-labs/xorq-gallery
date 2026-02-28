@@ -44,11 +44,16 @@
 ## Migration priority
 
 **Easy** (standard fit/predict/metric, single dataset — do these first):
+- ~~`cluster/plot_kmeans_digits.py`~~ — done (reference implementation)
+- ~~`linear_model/plot_lasso_and_elasticnet.py`~~ — done (reference implementation)
+- ~~`linear_model/plot_logistic_multinomial.py`~~ — done
+- ~~`linear_model/plot_quantile_regression.py`~~ — done
 - ~~`model_selection/plot_confusion_matrix.py`~~ — done
 - ~~`cluster/plot_affinity_propagation.py`~~ — done
 - ~~`neighbors/plot_nca_classification.py`~~ — done
 - ~~`compose/plot_column_transformer_mixed_types.py`~~ — done
 - ~~`classification/plot_lda_qda.py`~~ — done
+- `tree/plot_tree_regression.py` — not yet migrated (still uses sklearn_way/xorq_way)
 
 **Medium** (extra model attributes, ensemble wrappers, or multi-dataset):
 - ~~`cluster/plot_kmeans_silhouette_analysis.py`~~ — done
@@ -65,7 +70,7 @@
 - `applications/plot_cyclical_feature_engineering.py` — skip (TimeSeriesSplit CV; `xorq_spline_ridge_cv`/`xorq_hgbr_cv` are score arrays, not `Expr`)
 - `applications/plot_topics_extraction_with_nmf_lda.py` — skip (unsupervised NMF/LDA, no predict)
 
-**Hard / out of scope** (CV-based, transform-only, or no model):
+**Hard / out of scope** (CV-based, transform-only, unsupervised, or no model):
 - `model_selection/plot_cv_indices.py` — no model
 - `compose/plot_feature_union.py` — GridSearchCV
 - `preprocessing/plot_all_scaling.py` — fit_transform only
@@ -75,3 +80,7 @@
 - `neural_networks/plot_mlp_alpha.py` — large param grid, complex deferred plot
 - `classification/plot_classifier_comparison.py` — 8 classifiers × 3 datasets
 - `ensemble/plot_gradient_boosting_categorical.py` — cross_val_score
+- `decomposition/plot_faces_decomposition.py` — unsupervised fit/transform only (PCA, NMF, FastICA, etc.)
+- `feature_selection/plot_select_from_model_diabetes.py` — SequentialFeatureSelector + cross_val_score
+- `text/plot_document_classification_20newsgroups.py` — TfidfVectorizer.fit_transform on raw text; sparse matrix pipeline
+- `calibration/plot_compare_calibration.py` — calibration_curve / predict_proba; no standard predict output to compare
