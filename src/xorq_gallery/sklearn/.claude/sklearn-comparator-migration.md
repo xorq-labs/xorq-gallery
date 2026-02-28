@@ -30,6 +30,8 @@
 | `plot_results` needs to predict on a different grid (e.g. smooth linspace) | Use `make_sklearn_result` override with `make_other` to store full fitted pipeline; use `comparator.deferred_xorq_results[name]["xorq_fitted"].predict(xo.memtable(plot_df), name=PRED_COL).execute()` for xorq |
 | Multiple datasets × multiple models | One `comparator` per dataset, or a `dict[str, SklearnXorqComparator]` keyed by dataset name |
 | Ensemble wrappers (Stacking/Voting tuple→list) | Keep existing wrapper class; pass wrapped pipeline into `names_pipelines`; add `self.n_features_in_ = X.shape[1]` in wrapper's `fit` so `check_is_fitted` passes inside `SklearnPipeline` |
+| `deferred_matplotlib_plot` called in a loop with `functools.partial` | DataFusion UDF naming breaks (`compose_0` vs `Compose_0`). Use `toolz.curry` instead — it preserves `__name__` so xorq generates a stable lowercase UDF name |
+| xorq can't handle estimator as last pipeline step (e.g. `RFE`) | `ValueError: Can't handle RFE`. Override `make_deferred_xorq_result` to fit via `Pipeline.from_instance`, then manually predict using `xorq_fitted.fitted_steps[i].model`. Also override `make_xorq_result` to pass pre-computed scalars. |
 | CV-based metrics (`cross_val_score`, `deferred_cross_val_score`) | Does not fit comparator pattern — leave as-is |
 | No model fitting (pure visualization, e.g. CV split plots) | Skip — `SklearnXorqComparator` does not apply |
 | fit_transform pipelines (scalers, discretizers) | Skip — comparator assumes fit/predict; transform-only steps don't have a `predict` |
@@ -44,13 +46,13 @@
 - ~~`classification/plot_lda_qda.py`~~ — done
 
 **Medium** (extra model attributes, ensemble wrappers, or multi-dataset):
-- `cluster/plot_kmeans_silhouette_analysis.py`
-- `feature_selection/plot_rfe_digits.py`
+- ~~`cluster/plot_kmeans_silhouette_analysis.py`~~ — done
+- ~~`feature_selection/plot_rfe_digits.py`~~ — done (custom make_deferred_xorq_result/make_xorq_result; RFE not in xorq registry)
 - ~~`ensemble/plot_voting_regressor.py`~~ — done
 - ~~`ensemble/plot_stack_predictors.py`~~ — done
-- `classification/plot_classification_probability.py`
-- `svm/plot_svm_regression.py`
-- `svm/plot_svm_kernels.py`
+- ~~`classification/plot_classification_probability.py`~~ — done
+- ~~`svm/plot_svm_regression.py`~~ — done
+- ~~`svm/plot_svm_kernels.py`~~ — done
 
 **Hard / out of scope** (CV-based, transform-only, or no model):
 - `model_selection/plot_cv_indices.py` — no model
