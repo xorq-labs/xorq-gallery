@@ -5,8 +5,8 @@ sklearn: Generate synthetic data (sinusoid + linear trend + drop), fit three bas
 regressors (linear ridge, spline ridge, histogram gradient boosting), stack them
 with StackingRegressor using RidgeCV as final estimator, evaluate predictions.
 
-xorq: Same base estimators and stacking regressor wrapped in Pipeline.from_instance,
-fit/predict deferred via xorq, predictions match sklearn exactly.
+xorq: Same base estimators and stacking regressor wrapped in Pipeline.from_instance
+via StackingRegressorWrapper, fit/predict deferred, predictions match sklearn.
 
 Both produce identical predictions.
 
@@ -15,8 +15,6 @@ Dataset: Synthetic sinusoid with trend and drop
 
 from __future__ import annotations
 
-import os
-
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -24,12 +22,18 @@ import xorq.api as xo
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.ensemble import HistGradientBoostingRegressor, StackingRegressor
 from sklearn.linear_model import RidgeCV
+from sklearn.metrics import r2_score
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from sklearn.preprocessing import PolynomialFeatures, SplineTransformer, StandardScaler
-from xorq.expr.ml.pipeline_lib import Pipeline
 
+from xorq_gallery.sklearn.sklearn_lib import (
+    SklearnXorqComparator,
+    make_sklearn_result as _make_sklearn_result,
+    split_data_nop,
+)
 from xorq_gallery.utils import (
     fig_to_image,
+    save_fig,
 )
 
 
@@ -51,7 +55,6 @@ class StackingRegressorWrapper(BaseEstimator, RegressorMixin):
         self.final_estimator = final_estimator
 
     def fit(self, X, y):
-        # Ensure estimators is a list before fitting
         estimators_list = (
             list(self.estimators)
             if not isinstance(self.estimators, list)
@@ -61,6 +64,7 @@ class StackingRegressorWrapper(BaseEstimator, RegressorMixin):
             estimators=estimators_list, final_estimator=self.final_estimator
         )
         self._stacking_regressor.fit(X, y)
+        self.n_features_in_ = X.shape[1]
         return self
 
     def predict(self, X):
@@ -89,15 +93,14 @@ RANDOM_STATE = 42
 TARGET_COL = "y"
 FEATURE_COLS = ("X",)
 PRED_COL = "pred"
-ROW_IDX = "row_idx"
 
 
 # ---------------------------------------------------------------------------
-# Data loading (shared)
+# Data loading
 # ---------------------------------------------------------------------------
 
 
-def _load_data():
+def load_data():
     """Generate synthetic data: sinusoid + linear trend + drop + noise."""
     rng = np.random.RandomState(RANDOM_STATE)
     X = rng.uniform(-3, 3, size=500)
@@ -106,35 +109,22 @@ def _load_data():
     drop = 10.0 * (X > 2).astype(float)
     sigma = 0.75 + 0.75 * X**2
     y = trend + seasonal - drop + rng.normal(loc=0.0, scale=np.sqrt(sigma))
-
-    df = pd.DataFrame({FEATURE_COLS[0]: X, TARGET_COL: y})
-    df[ROW_IDX] = range(len(df))
-
-    print(f"Number of samples: {len(df)}")
-
-    return df
+    return pd.DataFrame({FEATURE_COLS[0]: X, TARGET_COL: y})
 
 
 # ---------------------------------------------------------------------------
-# Shared model definitions
+# Pipeline builders (sub-pipelines reused inside StackingRegressorWrapper)
 # ---------------------------------------------------------------------------
 
 
-def _build_models():
-    """Build base estimators and stacking regressor.
-
-    Returns:
-        Dict of model_name -> sklearn estimator instance
-    """
-    # Base estimators
-    linear_ridge = SklearnPipeline(
-        [
-            ("standardscaler", StandardScaler()),
-            ("ridgecv", RidgeCV()),
-        ]
+def _linear_ridge():
+    return SklearnPipeline(
+        [("standardscaler", StandardScaler()), ("ridgecv", RidgeCV())]
     )
 
-    spline_ridge = SklearnPipeline(
+
+def _spline_ridge():
+    return SklearnPipeline(
         [
             ("splinetransformer", SplineTransformer(n_knots=6, degree=3)),
             ("polynomialfeatures", PolynomialFeatures(interaction_only=True)),
@@ -142,40 +132,11 @@ def _build_models():
         ]
     )
 
-    hgbt = HistGradientBoostingRegressor(random_state=0)
 
-    # Create fresh instances for StackingRegressor
-    stack_linear_ridge = SklearnPipeline(
-        [
-            ("standardscaler", StandardScaler()),
-            ("ridgecv", RidgeCV()),
-        ]
+def _hgbt():
+    return SklearnPipeline(
+        [("histgradientboostingregressor", HistGradientBoostingRegressor(random_state=0))]
     )
-    stack_spline_ridge = SklearnPipeline(
-        [
-            ("splinetransformer", SplineTransformer(n_knots=6, degree=3)),
-            ("polynomialfeatures", PolynomialFeatures(interaction_only=True)),
-            ("ridgecv", RidgeCV()),
-        ]
-    )
-    stack_hgbt = HistGradientBoostingRegressor(random_state=0)
-
-    estimators = [
-        ("Linear Ridge", stack_linear_ridge),
-        ("Spline Ridge", stack_spline_ridge),
-        ("HGBT", stack_hgbt),
-    ]
-
-    stacking_regressor = StackingRegressor(
-        estimators=estimators, final_estimator=RidgeCV()
-    )
-
-    return {
-        "Linear Ridge": linear_ridge,
-        "Spline Ridge": spline_ridge,
-        "HGBT": hgbt,
-        "Stacking": stacking_regressor,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -184,40 +145,17 @@ def _build_models():
 
 
 def _plot_predictions(predictions_dict, X, y, title):
-    """Build plot comparing predictions from base models and stacking regressor.
-
-    Args:
-        predictions_dict: Dict of model_name -> predictions array
-        X: Input feature array
-        y: True target values
-        title: Plot title
-    """
+    """Build plot comparing predictions from base models and stacking regressor."""
     fig, axes = plt.subplots(2, 2, figsize=(10, 8), sharex=True, sharey=True)
     axes = axes.ravel()
 
-    model_names = ["Linear Ridge", "Spline Ridge", "HGBT", "Stacking"]
+    model_names = [LINEAR_RIDGE, SPLINE_RIDGE, HGBT, STACKING]
 
     for ax, name in zip(axes, model_names):
         y_pred = predictions_dict[name]
-
-        ax.scatter(
-            X[:, 0],
-            y,
-            s=6,
-            alpha=0.35,
-            linewidths=0,
-            label="observed (sample)",
-        )
-
-        # Sort for line plotting
+        ax.scatter(X[:, 0], y, s=6, alpha=0.35, linewidths=0, label="observed (sample)")
         sort_idx = np.argsort(X[:, 0])
-        ax.plot(
-            X[sort_idx, 0],
-            y_pred[sort_idx],
-            linewidth=2,
-            alpha=0.9,
-            label=name,
-        )
+        ax.plot(X[sort_idx, 0], y_pred[sort_idx], linewidth=2, alpha=0.9, label=name)
         ax.set_title(name)
         ax.set_xlabel("x")
         ax.set_ylabel("y")
@@ -225,182 +163,134 @@ def _plot_predictions(predictions_dict, X, y, title):
 
     fig.suptitle(title, y=1.0)
     fig.tight_layout()
-
     return fig
 
 
-# =========================================================================
-# SKLEARN WAY -- eager fit/predict on base models and stacking regressor
-# =========================================================================
+# ---------------------------------------------------------------------------
+# make_other override: store full fitted pipeline for smooth-grid prediction
+# ---------------------------------------------------------------------------
 
 
-def sklearn_way(df, models):
-    """Eager sklearn: fit base models and stacking regressor, predict.
+def make_sklearn_other(fitted):
+    # full pipeline needed in plot_results to predict on x_plot with preprocessing
+    return {"full_pipeline": fitted}
 
-    Returns:
-        Dict of model_name -> predictions
-    """
-    X = df[[FEATURE_COLS[0]]].values
-    y = df[TARGET_COL].values
 
-    # Generate grid for smooth plotting
+make_sklearn_result = _make_sklearn_result(make_other=make_sklearn_other)
+
+
+# ---------------------------------------------------------------------------
+# Comparator callbacks
+# ---------------------------------------------------------------------------
+
+
+def compare_results(comparator):
+    assert sorted(sklearn_results := comparator.sklearn_results) == sorted(
+        xorq_results := comparator.xorq_results
+    )
+    print("\n=== Comparing Results ===")
+    for name, sklearn_result in sklearn_results.items():
+        xorq_result = xorq_results[name]
+        sk_r2 = sklearn_result["metrics"]["r2"]
+        xo_r2 = xorq_result["metrics"]["r2"]
+        print(f"  {name:15s} r2 - sklearn: {sk_r2:.3f}, xorq: {xo_r2:.3f}")
+
+
+def plot_results(comparator):
+    X = comparator.df[[FEATURE_COLS[0]]].values
     x_plot = np.linspace(X.min() - 0.1, X.max() + 0.1, 500).reshape(-1, 1)
-
-    # Fit all models on full dataset - smart flattening with comprehension
-    model_names = ["Linear Ridge", "Spline Ridge", "HGBT", "Stacking"]
-    fitted_models = {name: models[name].fit(X, y) for name in model_names}
-    predictions = {name: fitted_models[name].predict(x_plot) for name in model_names}
-
-    for name in model_names:
-        print(f"  sklearn: {name:20s} fitted and predicted")
-
-    return {"predictions": predictions, "X": x_plot, "y": y}
-
-
-# =========================================================================
-# XORQ WAY -- deferred fit/predict via xorq Pipeline
-# =========================================================================
-
-
-def xorq_way(df, models, x_plot):
-    """Deferred xorq: wrap models in Pipeline.from_instance, fit/predict deferred.
-
-    Returns deferred prediction expressions for each model.
-    Nothing is executed until ``.execute()``.
-    """
-    con = xo.connect()
-    data = con.register(df, "synthetic")
-
-    # Register plot grid
     plot_df = pd.DataFrame({FEATURE_COLS[0]: x_plot[:, 0]})
-    plot_data = con.register(plot_df, "plot_grid")
+    y = comparator.df[TARGET_COL].values
 
-    # Linear Ridge
-    linear_ridge_pipe = Pipeline.from_instance(models["Linear Ridge"])
-    linear_ridge_fitted = linear_ridge_pipe.fit(
-        data, features=FEATURE_COLS, target=TARGET_COL
-    )
-    linear_ridge_preds = linear_ridge_fitted.predict(plot_data, name=PRED_COL)
-
-    # Spline Ridge
-    spline_ridge_pipe = Pipeline.from_instance(models["Spline Ridge"])
-    spline_ridge_fitted = spline_ridge_pipe.fit(
-        data, features=FEATURE_COLS, target=TARGET_COL
-    )
-    spline_ridge_preds = spline_ridge_fitted.predict(plot_data, name=PRED_COL)
-
-    # HGBT
-    hgbt_pipe = Pipeline.from_instance(
-        SklearnPipeline([("histgradientboostingregressor", models["HGBT"])])
-    )
-    hgbt_fitted = hgbt_pipe.fit(data, features=FEATURE_COLS, target=TARGET_COL)
-    hgbt_preds = hgbt_fitted.predict(plot_data, name=PRED_COL)
-
-    # Stacking - needs special wrapper
-    wrapped_stacking = StackingRegressorWrapper(
-        estimators=models["Stacking"].estimators,
-        final_estimator=models["Stacking"].final_estimator,
-    )
-    stacking_pipeline = SklearnPipeline(
-        [("stackingregressorwrapper", wrapped_stacking)]
-    )
-    stacking_pipe = Pipeline.from_instance(stacking_pipeline)
-    stacking_fitted = stacking_pipe.fit(data, features=FEATURE_COLS, target=TARGET_COL)
-    stacking_preds = stacking_fitted.predict(plot_data, name=PRED_COL)
-
-    return {
-        "Linear Ridge": linear_ridge_preds,
-        "Spline Ridge": spline_ridge_preds,
-        "HGBT": hgbt_preds,
-        "Stacking": stacking_preds,
+    sk_predictions = {
+        name: result["other"]["full_pipeline"].predict(x_plot)
+        for name, result in comparator.sklearn_results.items()
+    }
+    xo_predictions = {
+        name: comparator.deferred_xorq_results[name]["xorq_fitted"]
+        .predict(xo.memtable(plot_df), name=PRED_COL)
+        .execute()[PRED_COL]
+        .values
+        for name in methods
     }
 
-
-# =========================================================================
-# Run and plot side by side
-# =========================================================================
-
-
-def main():
-    os.makedirs("imgs", exist_ok=True)
-
-    df = _load_data()
-
-    # Generate grid for smooth plotting (in main, shared by both)
-    X = df[[FEATURE_COLS[0]]].values
-    x_plot = np.linspace(X.min() - 0.1, X.max() + 0.1, 500).reshape(-1, 1)
-    y = df[TARGET_COL].values
-
-    # Build separate model instances for sklearn and xorq to avoid state sharing
-    sk_models = _build_models()
-    xo_models = _build_models()
-
-    print("\n=== SKLEARN WAY ===")
-    sk_results = sklearn_way(df, sk_models)
-
-    print("\n=== XORQ WAY ===")
-    deferred = xorq_way(df, xo_models, x_plot)
-
-    # Execute deferred predictions
-    print("\n=== EXECUTING DEFERRED PREDICTIONS ===")
-    xo_predictions = {}
-    model_names = ["Linear Ridge", "Spline Ridge", "HGBT", "Stacking"]
-    for name in model_names:
-        pred_df = deferred[name].execute()
-        xo_predictions[name] = pred_df[PRED_COL].values
-        print(f"  xorq:   {name:20s} executed")
-
-    # ---- Assert numerical equivalence BEFORE plotting ----
-    print("\n=== ASSERTIONS ===")
-    for name in model_names:
-        sk_preds = sk_results["predictions"][name]
-        xo_preds = xo_predictions[name]
-        np.testing.assert_allclose(sk_preds, xo_preds, rtol=1e-5)
-        print(
-            f"  {name:20s}: predictions match (max_diff={np.max(np.abs(sk_preds - xo_preds)):.2e})"
-        )
-
-    print("Assertions passed: sklearn and xorq predictions match.")
-
-    # Build sklearn plot
     sk_fig = _plot_predictions(
-        sk_results["predictions"],
-        sk_results["X"],
-        sk_results["y"],
-        "sklearn - Base Models vs Stacked Predictions",
+        sk_predictions, x_plot, y, "sklearn - Base Models vs Stacked Predictions"
     )
-
-    # Build xorq plot
     xo_fig = _plot_predictions(
-        xo_predictions,
-        x_plot,
-        y,
-        "xorq - Base Models vs Stacked Predictions",
+        xo_predictions, x_plot, y, "xorq - Base Models vs Stacked Predictions"
     )
 
-    # Composite: sklearn (left) | xorq (right)
     fig, axes = plt.subplots(1, 2, figsize=(18, 10))
-
     axes[0].imshow(fig_to_image(sk_fig))
     axes[0].axis("off")
     axes[0].set_title("sklearn", fontsize=14, pad=10)
-
     axes[1].imshow(fig_to_image(xo_fig))
     axes[1].axis("off")
     axes[1].set_title("xorq", fontsize=14, pad=10)
-
-    fig.suptitle(
-        "Stacking Regressor: sklearn vs xorq",
-        fontsize=16,
-        y=0.98,
-    )
+    fig.suptitle("Stacking Regressor: sklearn vs xorq", fontsize=16, y=0.98)
     fig.tight_layout()
-    out = "imgs/plot_stack_predictors.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"\nPlot saved to {out}")
+    return fig
 
 
-if __name__ in ("__main__", "__pytest_main__"):
+# ---------------------------------------------------------------------------
+# Module-level setup
+# ---------------------------------------------------------------------------
+
+methods = (LINEAR_RIDGE, SPLINE_RIDGE, HGBT, STACKING) = (
+    "Linear Ridge",
+    "Spline Ridge",
+    "HGBT",
+    "Stacking",
+)
+names_pipelines = (
+    (LINEAR_RIDGE, _linear_ridge()),
+    (SPLINE_RIDGE, _spline_ridge()),
+    (HGBT, _hgbt()),
+    (
+        STACKING,
+        SklearnPipeline(
+            [
+                (
+                    "stackingregressorwrapper",
+                    StackingRegressorWrapper(
+                        estimators=[
+                            ("Linear Ridge", _linear_ridge()),
+                            ("Spline Ridge", _spline_ridge()),
+                            ("HGBT", HistGradientBoostingRegressor(random_state=0)),
+                        ],
+                        final_estimator=RidgeCV(),
+                    ),
+                )
+            ]
+        ),
+    ),
+)
+metrics_names_funcs = (("r2", r2_score),)
+
+comparator = SklearnXorqComparator(
+    names_pipelines=names_pipelines,
+    features=FEATURE_COLS,
+    target=TARGET_COL,
+    pred=PRED_COL,
+    metrics_names_funcs=metrics_names_funcs,
+    load_data=load_data,
+    split_data=split_data_nop,
+    make_sklearn_result=make_sklearn_result,
+    compare_results_fn=compare_results,
+    plot_results_fn=plot_results,
+)
+# expose the exprs to invoke `xorq build plot_stack_predictors.py --expr $expr_name`
+(xorq_linear_ridge_preds, xorq_spline_ridge_preds, xorq_hgbt_preds, xorq_stacking_preds) = (
+    comparator.deferred_xorq_results[name]["preds"] for name in methods
+)
+
+
+def main():
+    comparator.result_comparison
+    save_fig("imgs/plot_stack_predictors.png", comparator.plot_results())
+
+
+if __name__ in ("__pytest_main__",):
     main()
     pytest_examples_passed = True
