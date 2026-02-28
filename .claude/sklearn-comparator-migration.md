@@ -53,7 +53,7 @@
 - ~~`neighbors/plot_nca_classification.py`~~ — done
 - ~~`compose/plot_column_transformer_mixed_types.py`~~ — done
 - ~~`classification/plot_lda_qda.py`~~ — done
-- `tree/plot_tree_regression.py` — not yet migrated (still uses sklearn_way/xorq_way)
+- ~~`tree/plot_tree_regression.py`~~ — done (`metrics_names_funcs = ()`, fine-grid preds via `xorq_fitted.predict` in plot_results)
 
 **Medium** (extra model attributes, ensemble wrappers, or multi-dataset):
 - ~~`cluster/plot_kmeans_silhouette_analysis.py`~~ — done
