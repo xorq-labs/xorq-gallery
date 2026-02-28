@@ -43,6 +43,7 @@ def make_sklearn_result(
     }
     other = make_other(fitted)
     result = {
+        # FIXME: include also the whole pipeline
         "fitted": fitted.steps[-1][-1],
         "preds": preds,
         "metrics": metrics,
@@ -97,6 +98,7 @@ def make_xorq_result(deferred_xorq_result):
     )
     other = {k: v() for k, v in other.items()}
     result = {
+        # FIXME: include also the whole pipeline
         "fitted": xorq_fitted.fitted_steps[-1].model,
         "preds": preds.execute(),
         "metrics": {name: expr.as_scalar().execute() for name, expr in metrics.items()},
