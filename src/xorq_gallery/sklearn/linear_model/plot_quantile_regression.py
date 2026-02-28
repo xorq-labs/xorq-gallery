@@ -87,12 +87,14 @@ def _load_data():
     datasets = _generate_datasets()
 
     # Build DataFrame with both targets
-    df = pd.DataFrame(datasets["normal"]["X"], columns=[FEATURE_COLS[0]]).assign(**{
-        "y_normal": datasets["normal"]["y"],
-        "y_pareto": datasets["pareto"]["y"],
-        "x": datasets["normal"]["x"],
-        "y_true_mean": datasets["normal"]["y_true_mean"],
-    })
+    df = pd.DataFrame(datasets["normal"]["X"], columns=[FEATURE_COLS[0]]).assign(
+        **{
+            "y_normal": datasets["normal"]["y"],
+            "y_pareto": datasets["pareto"]["y"],
+            "x": datasets["normal"]["x"],
+            "y_true_mean": datasets["normal"]["y_true_mean"],
+        }
+    )
 
     return df
 
@@ -189,8 +191,8 @@ PIPELINES = {
     "pred_q05": SklearnPipeline([("qr", QuantileRegressor(quantile=0.05, alpha=0))]),
     "pred_q50": SklearnPipeline([("qr", QuantileRegressor(quantile=0.50, alpha=0))]),
     "pred_q95": SklearnPipeline([("qr", QuantileRegressor(quantile=0.95, alpha=0))]),
-    "pred_lr":  SklearnPipeline([("lr", LinearRegression())]),
-    "pred_qr":  SklearnPipeline([("qr", QuantileRegressor(quantile=0.50, alpha=0))]),
+    "pred_lr": SklearnPipeline([("lr", LinearRegression())]),
+    "pred_qr": SklearnPipeline([("qr", QuantileRegressor(quantile=0.50, alpha=0))]),
 }
 
 _COMPARATORS = {
@@ -226,10 +228,16 @@ def sklearn_way(dataset_type="normal"):
     y_pred_05 = comparators["pred_q05"].sklearn_prediction
     y_pred_50 = comparators["pred_q50"].sklearn_prediction
     y_pred_95 = comparators["pred_q95"].sklearn_prediction
-    out_bounds = (y_pred_05 >= comparators["pred_q05"].y) | (y_pred_95 <= comparators["pred_q05"].y)
+    out_bounds = (y_pred_05 >= comparators["pred_q05"].y) | (
+        y_pred_95 <= comparators["pred_q05"].y
+    )
 
-    print(f"  sklearn LinearRegression:    MAE={comparators['pred_lr'].sklearn_metrics['mae']:.3f}, MSE={comparators['pred_lr'].sklearn_metrics['mse']:.3f}")
-    print(f"  sklearn QuantileRegressor:   MAE={comparators['pred_qr'].sklearn_metrics['mae']:.3f}, MSE={comparators['pred_qr'].sklearn_metrics['mse']:.3f}")
+    print(
+        f"  sklearn LinearRegression:    MAE={comparators['pred_lr'].sklearn_metrics['mae']:.3f}, MSE={comparators['pred_lr'].sklearn_metrics['mse']:.3f}"
+    )
+    print(
+        f"  sklearn QuantileRegressor:   MAE={comparators['pred_qr'].sklearn_metrics['mae']:.3f}, MSE={comparators['pred_qr'].sklearn_metrics['mse']:.3f}"
+    )
 
     return {
         "predictions": {0.05: y_pred_05, 0.5: y_pred_50, 0.95: y_pred_95},
@@ -265,7 +273,7 @@ def xorq_way(dataset_type="normal"):
     return {
         "predictions": {
             0.05: comparators["pred_q05"].xorq_prediction,
-            0.5:  comparators["pred_q50"].xorq_prediction,
+            0.5: comparators["pred_q50"].xorq_prediction,
             0.95: comparators["pred_q95"].xorq_prediction,
         },
         "lr_metrics": comparators["pred_lr"].xorq_metrics,
@@ -326,21 +334,29 @@ def main():
 
         # Build xorq plot dataframe
         target_col = f"y_{dataset_type}"
-        xo_plot_df = _DF.assign(**{
-            "pred_q05": xo_predictions[0.05],
-            "pred_q50": xo_predictions[0.5],
-            "pred_q95": xo_predictions[0.95],
-            # Compute out_bounds flag for xorq predictions
-            "out_bounds": (~_DF[target_col].between(xo_predictions[0.05], xo_predictions[0.95], inclusive="neither")).astype(int),
-        })
+        xo_plot_df = _DF.assign(
+            **{
+                "pred_q05": xo_predictions[0.05],
+                "pred_q50": xo_predictions[0.5],
+                "pred_q95": xo_predictions[0.95],
+                # Compute out_bounds flag for xorq predictions
+                "out_bounds": (
+                    ~_DF[target_col].between(
+                        xo_predictions[0.05], xo_predictions[0.95], inclusive="neither"
+                    )
+                ).astype(int),
+            }
+        )
 
         # Build sklearn plot
-        sk_plot_df = _DF.assign(**{
-            "pred_q05": sk_results["predictions"][0.05],
-            "pred_q50": sk_results["predictions"][0.5],
-            "pred_q95": sk_results["predictions"][0.95],
-            "out_bounds": sk_results["out_bounds"].astype(int),
-        })
+        sk_plot_df = _DF.assign(
+            **{
+                "pred_q05": sk_results["predictions"][0.05],
+                "pred_q50": sk_results["predictions"][0.5],
+                "pred_q95": sk_results["predictions"][0.95],
+                "out_bounds": sk_results["out_bounds"].astype(int),
+            }
+        )
 
         sk_fig = _build_quantile_plot(sk_plot_df, dataset_type, target_col)
         xo_fig = _build_quantile_plot(xo_plot_df, dataset_type, target_col)

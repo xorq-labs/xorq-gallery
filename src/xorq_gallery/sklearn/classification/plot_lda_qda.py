@@ -124,19 +124,38 @@ def _plot_result(estimator, X, y, ax):
     """Plot decision boundary, data points, means, and covariance ellipsoids."""
     cmap = colors.ListedColormap(["tab:red", "tab:blue"])
     DecisionBoundaryDisplay.from_estimator(
-        estimator, X, response_method="predict_proba", plot_method="pcolormesh",
-        ax=ax, cmap="RdBu", alpha=0.3,
+        estimator,
+        X,
+        response_method="predict_proba",
+        plot_method="pcolormesh",
+        ax=ax,
+        cmap="RdBu",
+        alpha=0.3,
     )
     DecisionBoundaryDisplay.from_estimator(
-        estimator, X, response_method="predict_proba", plot_method="contour",
-        ax=ax, alpha=1.0, levels=[0.5],
+        estimator,
+        X,
+        response_method="predict_proba",
+        plot_method="contour",
+        ax=ax,
+        alpha=1.0,
+        levels=[0.5],
     )
     y_pred = estimator.predict(X)
     X_right, y_right = X[y == y_pred], y[y == y_pred]
     X_wrong, y_wrong = X[y != y_pred], y[y != y_pred]
     ax.scatter(X_right[:, 0], X_right[:, 1], c=y_right, s=20, cmap=cmap, alpha=0.5)
-    ax.scatter(X_wrong[:, 0], X_wrong[:, 1], c=y_wrong, s=30, cmap=cmap, alpha=0.9, marker="x")
-    ax.scatter(estimator.means_[:, 0], estimator.means_[:, 1], c="yellow", s=200, marker="*", edgecolor="black")
+    ax.scatter(
+        X_wrong[:, 0], X_wrong[:, 1], c=y_wrong, s=30, cmap=cmap, alpha=0.9, marker="x"
+    )
+    ax.scatter(
+        estimator.means_[:, 0],
+        estimator.means_[:, 1],
+        c="yellow",
+        s=200,
+        marker="*",
+        edgecolor="black",
+    )
     covariance = (
         [estimator.covariance_] * 2
         if isinstance(estimator, LinearDiscriminantAnalysis)
@@ -233,11 +252,15 @@ methods = (LDA_NAME, QDA_NAME) = ("LDA", "QDA")
 names_pipelines = (
     (
         LDA_NAME,
-        SklearnPipeline([("lda", LinearDiscriminantAnalysis(solver="svd", store_covariance=True))]),
+        SklearnPipeline(
+            [("lda", LinearDiscriminantAnalysis(solver="svd", store_covariance=True))]
+        ),
     ),
     (
         QDA_NAME,
-        SklearnPipeline([("qda", QuadraticDiscriminantAnalysis(store_covariance=True))]),
+        SklearnPipeline(
+            [("qda", QuadraticDiscriminantAnalysis(store_covariance=True))]
+        ),
     ),
 )
 metrics_names_funcs = (("accuracy", accuracy_score),)
@@ -283,7 +306,9 @@ def main():
         axes[row].imshow(fig_to_image(row_fig))
         axes[row].set_ylabel(label, fontsize=11, labelpad=20)
         axes[row].axis("off")
-    fig.suptitle("Linear and Quadratic Discriminant Analysis: sklearn vs xorq", fontsize=16)
+    fig.suptitle(
+        "Linear and Quadratic Discriminant Analysis: sklearn vs xorq", fontsize=16
+    )
     fig.tight_layout()
     save_fig("imgs/plot_lda_qda.png", fig)
 

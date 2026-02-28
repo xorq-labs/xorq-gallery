@@ -80,7 +80,9 @@ def _build_pipeline():
             ("scaler", StandardScaler()),
         ]
     )
-    categorical_transformer = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
+    categorical_transformer = OneHotEncoder(
+        handle_unknown="ignore", sparse_output=False
+    )
     preprocessor = ColumnTransformer(
         transformers=[
             ("num", numeric_transformer, list(NUMERIC_FEATURES)),
@@ -90,7 +92,10 @@ def _build_pipeline():
     return SklearnPipeline(
         steps=[
             ("preprocessor", preprocessor),
-            ("classifier", LogisticRegression(random_state=RANDOM_STATE, max_iter=1000)),
+            (
+                "classifier",
+                LogisticRegression(random_state=RANDOM_STATE, max_iter=1000),
+            ),
         ]
     )
 
@@ -183,7 +188,9 @@ comparator = SklearnXorqComparator(
     pred=PRED_COL,
     metrics_names_funcs=metrics_names_funcs,
     load_data=load_data,
-    split_data=partial(train_test_split, test_size=TEST_SIZE, random_state=RANDOM_STATE),
+    split_data=partial(
+        train_test_split, test_size=TEST_SIZE, random_state=RANDOM_STATE
+    ),
     compare_results_fn=compare_results,
     plot_results_fn=plot_results,
 )

@@ -239,7 +239,10 @@ names_pipelines = (
                     "votingregressorwrapper",
                     VotingRegressorWrapper(
                         estimators=[
-                            ("gb", GradientBoostingRegressor(random_state=RANDOM_STATE)),
+                            (
+                                "gb",
+                                GradientBoostingRegressor(random_state=RANDOM_STATE),
+                            ),
                             ("rf", RandomForestRegressor(random_state=RANDOM_STATE)),
                             ("lr", LinearRegression()),
                         ]

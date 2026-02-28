@@ -69,9 +69,9 @@ def _plot_confusion_matrices(cm_raw, cm_norm, display_labels, title_prefix=""):
     """Plot both raw and normalized confusion matrices side by side."""
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    ConfusionMatrixDisplay(
-        confusion_matrix=cm_raw, display_labels=display_labels
-    ).plot(ax=axes[0], cmap="Blues", colorbar=True)
+    ConfusionMatrixDisplay(confusion_matrix=cm_raw, display_labels=display_labels).plot(
+        ax=axes[0], cmap="Blues", colorbar=True
+    )
     axes[0].set_title(f"{title_prefix}Confusion Matrix (counts)")
 
     ConfusionMatrixDisplay(
@@ -152,7 +152,9 @@ comparator = SklearnXorqComparator(
     pred=PRED_COL,
     metrics_names_funcs=metrics_names_funcs,
     load_data=load_data,
-    split_data=partial(train_test_split, test_size=TEST_SIZE, random_state=RANDOM_STATE),
+    split_data=partial(
+        train_test_split, test_size=TEST_SIZE, random_state=RANDOM_STATE
+    ),
     compare_results_fn=compare_results,
     plot_results_fn=plot_results,
 )
