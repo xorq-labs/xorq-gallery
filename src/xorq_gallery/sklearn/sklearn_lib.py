@@ -18,6 +18,10 @@ from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.pipeline_lib import Pipeline
 
 
+def split_data_nop(df):
+    return (df, df)
+
+
 @curry
 def make_sklearn_result(
     pipeline,
