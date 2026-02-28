@@ -16,43 +16,41 @@ Dataset: Titanic (OpenML)
 
 from __future__ import annotations
 
-import os
+from functools import partial
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import xorq.api as xo
 from sklearn.compose import ColumnTransformer
 from sklearn.datasets import fetch_openml
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from toolz import curry
-from xorq.expr.ml.metrics import deferred_sklearn_metric
-from xorq.expr.ml.pipeline_lib import Pipeline
 
+from xorq_gallery.sklearn.sklearn_lib import (
+    SklearnXorqComparator,
+)
 from xorq_gallery.utils import (
-    deferred_matplotlib_plot,
     fig_to_image,
-    load_plot_bytes,
+    save_fig,
 )
 
 
 # ---------------------------------------------------------------------------
-# Constants and feature groups
+# Constants
 # ---------------------------------------------------------------------------
 
 Y_COL = "survived"
 PRED_COL = "pred"
-ROW_IDX = "row_idx"
 TEST_SIZE = 0.2
 RANDOM_STATE = 0
 
 NUMERIC_FEATURES = ("age", "fare")
 CATEGORICAL_FEATURES = ("embarked", "sex", "pclass")
-ALL_FEATURE_COLS = NUMERIC_FEATURES + CATEGORICAL_FEATURES
+FEATURE_COLS = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 
 
 # ---------------------------------------------------------------------------
@@ -60,24 +58,12 @@ ALL_FEATURE_COLS = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 # ---------------------------------------------------------------------------
 
 
-def _load_data():
+def load_data():
     """Load Titanic dataset from OpenML."""
     X, y = fetch_openml("titanic", version=1, as_frame=True, return_X_y=True)
-
-    df = X.copy()
-    df[Y_COL] = y
-
-    # Select only the features we need
-    df = df[list(ALL_FEATURE_COLS) + [Y_COL]]
-
-    # Convert pclass to string (categorical) for consistency
+    df = X[list(FEATURE_COLS)].copy()
     df["pclass"] = df["pclass"].astype(str)
-
-    # Convert target to int (0 or 1)
-    df[Y_COL] = df[Y_COL].astype(int)
-
-    df[ROW_IDX] = range(len(df))
-
+    df[Y_COL] = y.astype(int)
     return df
 
 
@@ -94,37 +80,28 @@ def _build_pipeline():
             ("scaler", StandardScaler()),
         ]
     )
-
-    categorical_transformer = OneHotEncoder(
-        handle_unknown="ignore", sparse_output=False
-    )
-
+    categorical_transformer = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
     preprocessor = ColumnTransformer(
         transformers=[
             ("num", numeric_transformer, list(NUMERIC_FEATURES)),
             ("cat", categorical_transformer, list(CATEGORICAL_FEATURES)),
         ]
     )
-
     return SklearnPipeline(
         steps=[
             ("preprocessor", preprocessor),
-            (
-                "classifier",
-                LogisticRegression(random_state=RANDOM_STATE, max_iter=1000),
-            ),
+            ("classifier", LogisticRegression(random_state=RANDOM_STATE, max_iter=1000)),
         ]
     )
 
 
 # ---------------------------------------------------------------------------
-# Plotting helper
+# Plotting helpers
 # ---------------------------------------------------------------------------
 
 
-@curry
 def _confusion_matrix_figure(df, title):
-    """Plot confusion matrix from predictions DataFrame."""
+    """Plot confusion matrix from predictions DataFrame with Y_COL and PRED_COL."""
     y_test = df[Y_COL].values
     y_pred = df[PRED_COL].values
 
@@ -134,15 +111,13 @@ def _confusion_matrix_figure(df, title):
     fn = np.sum((y_test == 1) & (y_pred == 0))
 
     accuracy = (tp + tn) / (tp + tn + fp + fn)
-
     confusion = np.array([[tn, fp], [fn, tp]])
+
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.imshow(confusion, cmap="Blues", alpha=0.6)
-
     for i in range(2):
         for j in range(2):
             ax.text(j, i, str(confusion[i, j]), ha="center", va="center", fontsize=20)
-
     ax.set_xticks([0, 1])
     ax.set_yticks([0, 1])
     ax.set_xticklabels(["Predicted 0", "Predicted 1"])
@@ -152,149 +127,77 @@ def _confusion_matrix_figure(df, title):
     return fig
 
 
-# =========================================================================
-# SKLEARN WAY -- eager fit/predict
-# =========================================================================
+# ---------------------------------------------------------------------------
+# Comparator callbacks
+# ---------------------------------------------------------------------------
 
 
-def sklearn_way(train_df, test_df, clf):
-    """Eager sklearn: fit on train, predict/score on test."""
-    X_train = train_df[list(ALL_FEATURE_COLS)]
-    y_train = train_df[Y_COL]
-    X_test = test_df[list(ALL_FEATURE_COLS)]
-    y_test = test_df[Y_COL]
-
-    clf.fit(X_train, y_train)
-    accuracy = clf.score(X_test, y_test)
-    y_pred = clf.predict(X_test)
-
-    print(f"  sklearn accuracy: {accuracy:.4f}")
-
-    return {
-        "accuracy": accuracy,
-        "y_test": y_test.values,
-        "y_pred": y_pred,
-    }
-
-
-# =========================================================================
-# XORQ WAY -- deferred fit/predict
-# =========================================================================
-
-
-def xorq_way(train_data, test_data, clf):
-    """Deferred xorq: Pipeline.from_instance, deferred fit/predict/score.
-
-    Returns deferred predictions and metrics.
-    Nothing is executed until .execute().
-    """
-    xorq_pipe = Pipeline.from_instance(clf)
-    fitted = xorq_pipe.fit(train_data, features=ALL_FEATURE_COLS, target=Y_COL)
-    preds = fitted.predict(test_data, name=PRED_COL)
-
-    make_metric = deferred_sklearn_metric(target=Y_COL, pred=PRED_COL)
-    metrics = preds.agg(accuracy=make_metric(metric=accuracy_score))
-
-    return {
-        "predictions": preds,
-        "metrics": metrics,
-    }
-
-
-# =========================================================================
-# Run and plot side by side
-# =========================================================================
-
-
-def main():
-    os.makedirs("imgs", exist_ok=True)
-
-    print("Loading data...")
-    df = _load_data()
-
-    # Hash-based split via xorq -- single source of truth for both paths
-    con = xo.connect()
-    table = con.register(df, "titanic_data")
-    train_data, test_data = xo.train_test_splits(
-        table,
-        test_sizes=TEST_SIZE,
-        unique_key=ROW_IDX,
-        random_seed=RANDOM_STATE,
+def compare_results(comparator):
+    assert sorted(sklearn_results := comparator.sklearn_results) == sorted(
+        xorq_results := comparator.xorq_results
     )
+    print("\n=== Comparing Results ===")
+    for name, sklearn_result in sklearn_results.items():
+        xorq_result = xorq_results[name]
+        sk_acc = sklearn_result["metrics"]["accuracy"]
+        xo_acc = xorq_result["metrics"]["accuracy"]
+        print(f"  {name} accuracy - sklearn: {sk_acc:.4f}, xorq: {xo_acc:.4f}")
 
-    # Sort for deterministic ordering
-    train_data = train_data.order_by(ROW_IDX)
-    test_data = test_data.order_by(ROW_IDX)
 
-    # Materialize for sklearn
-    train_df = train_data.execute()
-    test_df = test_data.execute()
+def plot_results(comparator):
+    _, test_df = comparator.get_split_data()
+    y_test = test_df[Y_COL].values
 
-    print("=== SKLEARN WAY ===")
-    sk_clf = _build_pipeline()
-    sk_results = sklearn_way(train_df, test_df, sk_clf)
+    sk_preds = comparator.sklearn_results[CT_LR_NAME]["preds"]
+    xo_preds_df = comparator.xorq_results[CT_LR_NAME]["preds"]
 
-    print("\n=== XORQ WAY ===")
-    xo_clf = _build_pipeline()
-    xo_results = xorq_way(train_data, test_data, xo_clf)
-
-    # Execute deferred expressions
-    metrics_df = xo_results["metrics"].execute()
-    xo_accuracy = metrics_df["accuracy"].iloc[0]
-    print(f"  xorq   accuracy: {xo_accuracy:.4f}")
-
-    # Assert
-    print("\n=== ASSERTIONS ===")
-    sk_acc_df = pd.DataFrame({"accuracy": [sk_results["accuracy"]]})
-    xo_acc_df = pd.DataFrame({"accuracy": [xo_accuracy]})
-    pd.testing.assert_frame_equal(sk_acc_df, xo_acc_df, rtol=1e-9)
-    print("Assertions passed: sklearn and xorq accuracies match.")
-
-    # Plot
-    print("\n=== PLOTTING ===")
-    xo_preds_executed = (
-        xo_results["predictions"].execute().sort_values(ROW_IDX).reset_index(drop=True)
-    )
-
-    # sklearn confusion matrix
     sk_fig = _confusion_matrix_figure(
-        pd.DataFrame({Y_COL: sk_results["y_test"], PRED_COL: sk_results["y_pred"]}),
-        title="sklearn",
+        pd.DataFrame({Y_COL: y_test, PRED_COL: sk_preds}), title="sklearn"
     )
-
-    # xorq deferred confusion matrix
-    xo_plot_table = con.register(
-        xo_preds_executed[[Y_COL, PRED_COL]],
-        "titanic_preds",
-    )
-    xo_png = deferred_matplotlib_plot(
-        xo_plot_table,
-        _confusion_matrix_figure(title="xorq"),
-    ).execute()
-
-    xo_img = load_plot_bytes(xo_png)
+    xo_fig = _confusion_matrix_figure(xo_preds_df, title="xorq")
 
     fig, axes = plt.subplots(1, 2, figsize=(16, 5))
     axes[0].imshow(fig_to_image(sk_fig))
     axes[0].set_title("sklearn", fontsize=14, fontweight="bold")
     axes[0].axis("off")
-    axes[1].imshow(xo_img)
+    axes[1].imshow(fig_to_image(xo_fig))
     axes[1].set_title("xorq", fontsize=14, fontweight="bold")
     axes[1].axis("off")
-
-    fig.suptitle(
-        "Column Transformer with Mixed Types: sklearn vs xorq",
-        fontsize=16,
-        fontweight="bold",
-        y=0.98,
-    )
+    fig.suptitle("Column Transformer with Mixed Types: sklearn vs xorq", fontsize=16)
     fig.tight_layout()
-    out = "imgs/column_transformer_mixed_types.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"Composite plot saved to {out}")
+    return fig
 
 
-if __name__ in ("__main__", "__pytest_main__"):
+# ---------------------------------------------------------------------------
+# Module-level setup
+# ---------------------------------------------------------------------------
+
+methods = (CT_LR_NAME,) = ("CT+LR",)
+names_pipelines = ((CT_LR_NAME, _build_pipeline()),)
+metrics_names_funcs = (("accuracy", accuracy_score),)
+
+comparator = SklearnXorqComparator(
+    names_pipelines=names_pipelines,
+    features=FEATURE_COLS,
+    target=Y_COL,
+    pred=PRED_COL,
+    metrics_names_funcs=metrics_names_funcs,
+    load_data=load_data,
+    split_data=partial(train_test_split, test_size=TEST_SIZE, random_state=RANDOM_STATE),
+    compare_results_fn=compare_results,
+    plot_results_fn=plot_results,
+)
+# expose the exprs to invoke `xorq build plot_column_transformer_mixed_types.py --expr $expr_name`
+(xorq_ct_lr_preds,) = (
+    comparator.deferred_xorq_results[name]["preds"] for name in methods
+)
+
+
+def main():
+    comparator.result_comparison
+    save_fig("imgs/plot_column_transformer_mixed_types.png", comparator.plot_results())
+
+
+if __name__ in ("__pytest_main__",):
     main()
     pytest_examples_passed = True
