@@ -16,28 +16,37 @@ from functools import cache
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import xorq.api as xo
 from scipy import ndimage, sparse
 from sklearn.linear_model import Lasso, Ridge
 from sklearn.pipeline import Pipeline as SklearnPipeline
-from toolz import curry
-from xorq.expr.ml.pipeline_lib import Pipeline
 
+from xorq_gallery.sklearn.sklearn_lib import (
+    SklearnXorqComparator,
+    split_data_nop,
+)
 from xorq_gallery.utils import (
-    deferred_matplotlib_plot,
     fig_to_image,
-    load_plot_bytes,
     save_fig,
 )
 
 
 # ---------------------------------------------------------------------------
-# Shared: synthetic data generation
+# Constants
 # ---------------------------------------------------------------------------
 
-img_size = 128
-n_pixels = img_size * img_size
+IMG_SIZE = 128
+IMAGE_SHAPE = (IMG_SIZE, IMG_SIZE)
+N_PIXELS = IMG_SIZE * IMG_SIZE
+TARGET_COL = "projection"
+PRED_COL = "pred"
+FEATURE_COLS = tuple(f"px_{i}" for i in range(N_PIXELS))
+
 np.random.seed(0)
+
+
+# ---------------------------------------------------------------------------
+# Data generation helpers
+# ---------------------------------------------------------------------------
 
 
 def _weights(x, dx=1, orig=0):
@@ -85,170 +94,123 @@ def generate_synthetic_data(l_x):
 
 
 @cache
-def _generate_data():
-    n_angles = img_size // 7
-    proj_operator = build_projection_operator(img_size, n_angles)
-    image = generate_synthetic_data(img_size)
+def _generate_raw_data():
+    n_angles = IMG_SIZE // 7
+    proj_operator = build_projection_operator(IMG_SIZE, n_angles)
+    image = generate_synthetic_data(IMG_SIZE)
     proj = proj_operator @ image.ravel()[:, np.newaxis]
     proj += 0.15 * np.random.randn(*proj.shape)
     proj_flat = proj.ravel()
     return proj_operator, image, proj_flat, n_angles
 
 
-# ---------------------------------------------------------------------------
-# Plotting helpers (used by deferred_matplotlib_plot)
-# ---------------------------------------------------------------------------
-
-
-@curry
-def _build_reconstruction_figure(_df, image, rec_l2, rec_l1, l2_err, l1_err, n_angles):
-    """A UDAF-compatible plotting function for reconstruction results."""
-    (image, rec_l2, rec_l1) = map(np.array, (image, rec_l2, rec_l1))
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-
-    axes[0].imshow(image, cmap="gray", interpolation="nearest")
-    axes[0].set_title("Original")
-    axes[0].axis("off")
-
-    axes[1].imshow(rec_l2, cmap="gray", interpolation="nearest")
-    axes[1].set_title(f"Ridge (L2) err={l2_err:.2f}")
-    axes[1].axis("off")
-
-    axes[2].imshow(rec_l1, cmap="gray", interpolation="nearest")
-    axes[2].set_title(f"Lasso (L1) err={l1_err:.2f}")
-    axes[2].axis("off")
-
-    fig.suptitle(f"xorq - Tomography: {n_angles} projections", fontsize=13)
-    fig.tight_layout()
-    return fig
-
-
-# =========================================================================
-# SKLEARN WAY
-# =========================================================================
-
-
-def sklearn_way(proj_operator, image, proj_flat):
-    """Eager sklearn: fit Ridge and Lasso directly on sparse matrix."""
-    ridge = Ridge(alpha=0.2)
-    ridge.fit(proj_operator, proj_flat)
-    rec_l2 = ridge.coef_.reshape(img_size, img_size)
-
-    lasso = Lasso(alpha=0.001)
-    lasso.fit(proj_operator, proj_flat)
-    rec_l1 = lasso.coef_.reshape(img_size, img_size)
-
-    l2_err = np.linalg.norm(image.ravel() - rec_l2.ravel())
-    l1_err = np.linalg.norm(image.ravel() - rec_l1.ravel())
-    print(f"  sklearn Ridge L2 error: {l2_err:.2f}")
-    print(f"  sklearn Lasso L1 error: {l1_err:.2f}")
-
-    return {"l2": rec_l2, "l1": rec_l1}
-
-
-# =========================================================================
-# XORQ WAY
-# =========================================================================
-
-
-def xorq_way(proj_operator, image, proj_flat, n_angles):
-    """Deferred xorq: register matrix as ibis table, fit via Pipeline.
-
-    Returns a deferred plot expression (PNG bytes via UDAF).  The fit
-    goes through ibis data, then model coefficients are captured in the
-    closure for the deferred visualization.
-    """
-    con = xo.connect()
-
-    # Dense matrix as ibis table (small enough for this demo)
+def load_data():
+    """Return projection matrix as flat DataFrame (rows=rays, cols=px_0..px_N + target)."""
+    proj_operator, _image, proj_flat, _n_angles = _generate_raw_data()
     proj_dense = proj_operator.toarray()
-    pixel_cols = [f"px_{i}" for i in range(n_pixels)]
-    tbl = pd.DataFrame(proj_dense, columns=pixel_cols)
-    tbl["projection"] = proj_flat
-    data = con.register(tbl, "tomography")
-
-    features = tuple(pixel_cols)
-    target_col = "projection"
-
-    # Ridge (L2)
-    xorq_ridge = Pipeline.from_instance(SklearnPipeline([("ridge", Ridge(alpha=0.2))]))
-    fitted_ridge = xorq_ridge.fit(data, features=features, target=target_col)
-    rec_l2 = fitted_ridge.predict_step.model.coef_.reshape(img_size, img_size)
-
-    # Lasso (L1)
-    xorq_lasso = Pipeline.from_instance(
-        SklearnPipeline([("lasso", Lasso(alpha=0.001))])
-    )
-    fitted_lasso = xorq_lasso.fit(data, features=features, target=target_col)
-    rec_l1 = fitted_lasso.predict_step.model.coef_.reshape(img_size, img_size)
-
-    l2_err = np.linalg.norm(image.ravel() - rec_l2.ravel())
-    l1_err = np.linalg.norm(image.ravel() - rec_l1.ravel())
-    print(f"  xorq   Ridge L2 error: {l2_err:.2f}")
-    print(f"  xorq   Lasso L1 error: {l1_err:.2f}")
-
-    plot_fn = _build_reconstruction_figure(
-        image=tuple(tuple(el) for el in image),
-        rec_l2=tuple(tuple(el) for el in rec_l2),
-        rec_l1=tuple(tuple(el) for el in rec_l1),
-        l2_err=l2_err,
-        l1_err=l1_err,
-        n_angles=n_angles,
-    )
-    return deferred_matplotlib_plot(data, plot_fn)
+    df = pd.DataFrame(proj_dense, columns=FEATURE_COLS)
+    df[TARGET_COL] = proj_flat
+    return df
 
 
-# =========================================================================
-# Run and plot side by side
-# =========================================================================
+# ---------------------------------------------------------------------------
+# Comparator callbacks
+# ---------------------------------------------------------------------------
 
 
-def main():
-    proj_operator, image, proj_flat, n_angles = _generate_data()
+def compare_results(comparator):
+    _, image, _, _ = _generate_raw_data()
+    image_flat = image.ravel()
 
-    print("=== SKLEARN WAY ===")
-    sk = sklearn_way(proj_operator, image, proj_flat)
+    print("\n=== Reconstruction Errors ===")
+    for name, sklearn_result in comparator.sklearn_results.items():
+        coef = sklearn_result["fitted"].coef_
+        err = np.linalg.norm(image_flat - coef)
+        print(f"  sklearn {name}: ||image - coef|| = {err:.4f}")
 
-    print("\n=== XORQ WAY ===")
-    plot_expr = xorq_way(proj_operator, image, proj_flat, n_angles)
+    for name, xorq_result in comparator.xorq_results.items():
+        coef = xorq_result["fitted"].coef_
+        err = np.linalg.norm(image_flat - coef)
+        print(f"  xorq   {name}: ||image - coef|| = {err:.4f}")
 
-    # Execute deferred plot
-    xo_png = plot_expr.execute()
 
-    # Build sklearn figure natively
-    l2_err = np.linalg.norm(image.ravel() - sk["l2"].ravel())
-    l1_err = np.linalg.norm(image.ravel() - sk["l1"].ravel())
+def plot_results(comparator):
+    _, image, _, n_angles = _generate_raw_data()
 
-    sk_fig, sk_axes = plt.subplots(1, 3, figsize=(12, 4))
-    sk_axes[0].imshow(image, cmap="gray", interpolation="nearest")
-    sk_axes[0].set_title("Original")
-    sk_axes[0].axis("off")
-    sk_axes[1].imshow(sk["l2"], cmap="gray", interpolation="nearest")
-    sk_axes[1].set_title(f"Ridge (L2) err={l2_err:.2f}")
-    sk_axes[1].axis("off")
-    sk_axes[2].imshow(sk["l1"], cmap="gray", interpolation="nearest")
-    sk_axes[2].set_title(f"Lasso (L1) err={l1_err:.2f}")
-    sk_axes[2].axis("off")
-    sk_fig.suptitle(f"sklearn - Tomography: {n_angles} projections", fontsize=13)
-    sk_fig.tight_layout()
+    sk_ridge = comparator.sklearn_results[RIDGE]["fitted"].coef_.reshape(IMAGE_SHAPE)
+    sk_lasso = comparator.sklearn_results[LASSO]["fitted"].coef_.reshape(IMAGE_SHAPE)
+    xo_ridge = comparator.xorq_results[RIDGE]["fitted"].coef_.reshape(IMAGE_SHAPE)
+    xo_lasso = comparator.xorq_results[LASSO]["fitted"].coef_.reshape(IMAGE_SHAPE)
 
-    # Composite: sklearn (top) | xorq deferred (bottom)
-    xo_img = load_plot_bytes(xo_png)
+    image_flat = image.ravel()
+
+    def _make_fig(rec_l2, rec_l1, label):
+        l2_err = np.linalg.norm(image_flat - rec_l2.ravel())
+        l1_err = np.linalg.norm(image_flat - rec_l1.ravel())
+        fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+        axes[0].imshow(image, cmap="gray", interpolation="nearest")
+        axes[0].set_title("Original")
+        axes[0].axis("off")
+        axes[1].imshow(rec_l2, cmap="gray", interpolation="nearest")
+        axes[1].set_title(f"Ridge (L2) err={l2_err:.2f}")
+        axes[1].axis("off")
+        axes[2].imshow(rec_l1, cmap="gray", interpolation="nearest")
+        axes[2].set_title(f"Lasso (L1) err={l1_err:.2f}")
+        axes[2].axis("off")
+        fig.suptitle(f"{label} - Tomography: {n_angles} projections", fontsize=13)
+        fig.tight_layout()
+        return fig
+
+    sk_fig = _make_fig(sk_ridge, sk_lasso, "sklearn")
+    xo_fig = _make_fig(xo_ridge, xo_lasso, "xorq")
 
     fig, axes = plt.subplots(2, 1, figsize=(12, 8))
     axes[0].imshow(fig_to_image(sk_fig))
     axes[0].set_title("sklearn")
     axes[0].axis("off")
-    axes[1].imshow(xo_img)
+    axes[1].imshow(fig_to_image(xo_fig))
     axes[1].set_title("xorq")
     axes[1].axis("off")
 
     fig.suptitle(
-        f"Tomography Reconstruction: {n_angles} projections, {n_pixels} pixels",
+        f"Tomography Reconstruction: {n_angles} projections, {N_PIXELS} pixels",
         fontsize=13,
     )
     fig.tight_layout()
-    save_fig("imgs/tomography_l1_reconstruction.png", fig)
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Module-level setup
+# ---------------------------------------------------------------------------
+
+methods = (RIDGE, LASSO) = ("Ridge", "Lasso")
+names_pipelines = (
+    (RIDGE, SklearnPipeline([("ridge", Ridge(alpha=0.2))])),
+    (LASSO, SklearnPipeline([("lasso", Lasso(alpha=0.001))])),
+)
+metrics_names_funcs = ()
+
+comparator = SklearnXorqComparator(
+    names_pipelines=names_pipelines,
+    features=FEATURE_COLS,
+    target=TARGET_COL,
+    pred=PRED_COL,
+    metrics_names_funcs=metrics_names_funcs,
+    load_data=load_data,
+    split_data=split_data_nop,
+    compare_results_fn=compare_results,
+    plot_results_fn=plot_results,
+)
+# expose the exprs to invoke `xorq build plot_tomography_l1_reconstruction.py --expr $expr_name`
+(xorq_ridge_preds, xorq_lasso_preds) = (
+    comparator.deferred_xorq_results[name]["preds"] for name in methods
+)
+
+
+def main():
+    comparator.result_comparison
+    save_fig("imgs/tomography_l1_reconstruction.png", comparator.plot_results())
 
 
 if __name__ in ("__pytest_main__",):

@@ -35,6 +35,11 @@
 | CV-based metrics (`cross_val_score`, `deferred_cross_val_score`) | Does not fit comparator pattern — leave as-is |
 | No model fitting (pure visualization, e.g. CV split plots) | Skip — `SklearnXorqComparator` does not apply |
 | fit_transform pipelines (scalers, discretizers) | Skip — comparator assumes fit/predict; transform-only steps don't have a `predict` |
+| Unsupervised (NMF/LDA, no target column, no `.predict()`) | Skip — `SklearnXorqComparator` does not apply |
+| Reconstruction error from `model.coef_` (not per-sample `(y_true, y_pred)`) | Use `metrics_names_funcs = ()` and compute the error directly in `compare_results_fn` via `result["fitted"].coef_` |
+| Lag/window features needed before split | Compute via pandas `.shift()` inside `load_data()` — semantically equivalent to ibis `.lag().over()` after sorting by the time index. Do NOT use ibis window functions at module level (breaks `deferred_sklearn_metric`) |
+| Custom metric not known to `deferred_sklearn_metric` (e.g. hand-rolled `root_mean_squared_error`) | Use the nearest known sklearn metric instead (e.g. `mean_squared_error`) and derive the custom value in callbacks: `np.sqrt(result["metrics"]["mse"])` |
+| `plot_results` needs already-executed xorq predictions | Use `comparator.xorq_results[name]["preds"]` (a pandas DataFrame) directly rather than re-running `deferred_matplotlib_plot` on the ibis expression — avoids a redundant second execution |
 
 ## Migration priority
 
@@ -53,6 +58,12 @@
 - ~~`classification/plot_classification_probability.py`~~ — done
 - ~~`svm/plot_svm_regression.py`~~ — done
 - ~~`svm/plot_svm_kernels.py`~~ — done
+
+**applications/ scripts:**
+- ~~`applications/plot_tomography_l1_reconstruction.py`~~ — done (`metrics_names_funcs = ()`, coef_ error in compare_results_fn)
+- ~~`applications/plot_time_series_lagged_features.py`~~ — done (pandas shift lags, mse metric, plot_results uses xorq_results directly)
+- `applications/plot_cyclical_feature_engineering.py` — skip (TimeSeriesSplit CV; `xorq_spline_ridge_cv`/`xorq_hgbr_cv` are score arrays, not `Expr`)
+- `applications/plot_topics_extraction_with_nmf_lda.py` — skip (unsupervised NMF/LDA, no predict)
 
 **Hard / out of scope** (CV-based, transform-only, or no model):
 - `model_selection/plot_cv_indices.py` — no model
