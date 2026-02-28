@@ -19,7 +19,8 @@ from xorq.expr.ml.pipeline_lib import Pipeline
 
 
 def split_data_nop(df):
-    return (df, df)
+    # FIXME: remove when underlying xorq memtable issue is resolved
+    return (df, df.copy())
 
 
 @curry
@@ -131,8 +132,13 @@ class SklearnXorqComparator:
 
     @property
     @cache
-    def df(self):
+    def _df(self):
         return self.load_data()
+
+    @property
+    def df(self):
+        # FIXME: remove when underlying xorq memtable issue is resolved
+        return self._df.copy()
 
     def get_split_data(self):
         # DataFrame.attrs can cause issues, copy removes them
