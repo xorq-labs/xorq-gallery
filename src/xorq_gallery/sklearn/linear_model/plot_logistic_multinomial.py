@@ -326,7 +326,8 @@ def compare_results(comparator):
 
 
 def split_data(df):
-    return (df, df)
+    # FIXME: remove when underlying xorq memtable issue is resolved
+    return (df, df.copy())
 
 
 methods = (MULTINOMIAL, OVR) = ("multinomial", "ovr")
