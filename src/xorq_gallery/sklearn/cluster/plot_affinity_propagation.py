@@ -68,7 +68,9 @@ def load_data():
     X, labels_true = make_blobs(
         n_samples=300, centers=centers, cluster_std=0.5, random_state=RANDOM_STATE
     )
-    return pd.DataFrame(X, columns=list(FEATURE_COLS)).assign(**{TARGET_COL: labels_true})
+    return pd.DataFrame(X, columns=list(FEATURE_COLS)).assign(
+        **{TARGET_COL: labels_true}
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -83,10 +85,16 @@ def _plot_clusters(X, labels, cluster_centers_indices, n_clusters, title_prefix=
     for k, col in zip(range(n_clusters), colors):
         class_members = labels == k
         cluster_center = X[cluster_centers_indices[k]]
-        ax.scatter(X[class_members, 0], X[class_members, 1], color=col["color"], marker=".")
-        ax.scatter(cluster_center[0], cluster_center[1], s=14, color=col["color"], marker="o")
+        ax.scatter(
+            X[class_members, 0], X[class_members, 1], color=col["color"], marker="."
+        )
+        ax.scatter(
+            cluster_center[0], cluster_center[1], s=14, color=col["color"], marker="o"
+        )
         for x in X[class_members]:
-            ax.plot([cluster_center[0], x[0]], [cluster_center[1], x[1]], color=col["color"])
+            ax.plot(
+                [cluster_center[0], x[0]], [cluster_center[1], x[1]], color=col["color"]
+            )
     ax.set_title(f"{title_prefix}Estimated number of clusters: {n_clusters}")
     fig.tight_layout()
     return fig
@@ -100,7 +108,9 @@ def _build_cluster_plot(df):
     labels = af.labels_
     cluster_centers_indices = af.cluster_centers_indices_
     n_clusters = len(cluster_centers_indices)
-    return _plot_clusters(X, labels, cluster_centers_indices, n_clusters, title_prefix="xorq: ")
+    return _plot_clusters(
+        X, labels, cluster_centers_indices, n_clusters, title_prefix="xorq: "
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +128,9 @@ def compare_results(comparator):
         for metric_name, _ in CLUSTERING_METRICS:
             sk_val = sklearn_result["metrics"][metric_name]
             xo_val = xorq_result["metrics"][metric_name]
-            print(f"  {name} {metric_name:15s} - sklearn: {sk_val:.3f}, xorq: {xo_val:.3f}")
+            print(
+                f"  {name} {metric_name:15s} - sklearn: {sk_val:.3f}, xorq: {xo_val:.3f}"
+            )
 
 
 def plot_results(comparator):
@@ -131,7 +143,9 @@ def plot_results(comparator):
     sk_fig = _plot_clusters(
         X, labels, cluster_centers_indices, n_clusters, title_prefix="sklearn: "
     )
-    xo_png = deferred_matplotlib_plot(xo.memtable(comparator.df), _build_cluster_plot).execute()
+    xo_png = deferred_matplotlib_plot(
+        xo.memtable(comparator.df), _build_cluster_plot
+    ).execute()
 
     fig, axes = plt.subplots(1, 2, figsize=(16, 6))
     axes[0].imshow(fig_to_image(sk_fig))
@@ -154,7 +168,14 @@ names_pipelines = (
     (
         AP_NAME,
         SklearnPipeline(
-            [("af", AffinityPropagation(preference=PREFERENCE, random_state=RANDOM_STATE))]
+            [
+                (
+                    "af",
+                    AffinityPropagation(
+                        preference=PREFERENCE, random_state=RANDOM_STATE
+                    ),
+                )
+            ]
         ),
     ),
 )
