@@ -34,12 +34,19 @@
 | xorq can't handle estimator as last pipeline step (e.g. `RFE`) | `ValueError: Can't handle RFE`. Override `make_deferred_xorq_result` to fit via `Pipeline.from_instance`, then manually predict using `xorq_fitted.fitted_steps[i].model`. Also override `make_xorq_result` to pass pre-computed scalars. |
 | CV-based metrics (`cross_val_score`, `deferred_cross_val_score`) | Does not fit comparator pattern — leave as-is |
 | No model fitting (pure visualization, e.g. CV split plots) | Skip — `SklearnXorqComparator` does not apply |
-| fit_transform pipelines (scalers, discretizers) | Skip — comparator assumes fit/predict; transform-only steps don't have a `predict` |
-| Unsupervised (NMF/LDA, no target column, no `.predict()`) | Skip — `SklearnXorqComparator` does not apply |
+| fit_transform pipelines (scalers, discretizers) | Use `make_sklearn_fit_transform_result`, `make_deferred_xorq_fit_transform_result`, `make_xorq_fit_transform_result` from `sklearn_lib.py`; set `metrics_names_funcs = ()`; expose `deferred_xorq_results[name]["transformed"]` at module level |
+| Unsupervised (NMF/LDA, no target column, no `.predict()`) | Use the fit_transform trio above; set `TARGET_COL` to a dummy column (e.g. `"subject_id"`) that the functions accept but ignore; use `make_other` callbacks to extract `components_` from the fitted model |
 | Reconstruction error from `model.coef_` (not per-sample `(y_true, y_pred)`) | Use `metrics_names_funcs = ()` and compute the error directly in `compare_results_fn` via `result["fitted"].coef_` |
 | Lag/window features needed before split | Compute via pandas `.shift()` inside `load_data()` — semantically equivalent to ibis `.lag().over()` after sorting by the time index. Do NOT use ibis window functions at module level (breaks `deferred_sklearn_metric`) |
 | Custom metric not known to `deferred_sklearn_metric` (e.g. hand-rolled `root_mean_squared_error`) | Use the nearest known sklearn metric instead (e.g. `mean_squared_error`) and derive the custom value in callbacks: `np.sqrt(result["metrics"]["mse"])` |
 | `plot_results` needs already-executed xorq predictions | Use `comparator.xorq_results[name]["preds"]` (a pandas DataFrame) directly rather than re-running `deferred_matplotlib_plot` on the ibis expression — avoids a redundant second execution |
+| fit_transform step 9: expose `["transformed"]` not `["preds"]` | `(xorq_foo_transformed, ...) = (comparator.deferred_xorq_results[name]["transformed"] for name in methods)` |
+| One `names_pipelines` entry is a passthrough/identity (no fitting) | Drop it from `names_pipelines`; handle as `comparator.df[list(FEATURE_COLS)]` baseline in callbacks |
+| Multiple models require different `FEATURE_COLS` (e.g. NMF on raw pixels, PCA on centered pixels) | One comparator per feature set; share the same `load_data()` and `split_data`; use `_shared_kwargs = dict(...)` to avoid repetition |
+| Transformer uses random subsampling (e.g. `QuantileTransformer`) | Use `pd.testing.assert_frame_equal(rtol=..., atol=...)` in `compare_results_fn` rather than `np.testing.assert_allclose`; document tolerance and reason in a comment |
+| xorq transform output is nested key-value (e.g. `KBinsDiscretizer`) | Check for `"transformed"` column; extract via `.apply(lambda items: next(item["value"] for item in items if item["key"] == col))` |
+| Non-transformer model (e.g. `MiniBatchKMeans`) alongside transformer methods | Keep it eager outside the comparator; fit in `main()` using `comparator.df` and access `cluster_centers_` directly |
+| Unsupervised method has no `components_` but has `cluster_centers_` (KMeans) | Handle eagerly in `main()`; do not include in `names_pipelines` |
 
 ## Migration priority
 
@@ -70,17 +77,19 @@
 - `applications/plot_cyclical_feature_engineering.py` — skip (TimeSeriesSplit CV; `xorq_spline_ridge_cv`/`xorq_hgbr_cv` are score arrays, not `Expr`)
 - `applications/plot_topics_extraction_with_nmf_lda.py` — skip (unsupervised NMF/LDA, no predict)
 
-**Hard / out of scope** (CV-based, transform-only, unsupervised, or no model):
+**fit_transform / unsupervised** (use `make_*_fit_transform_result` trio):
+- ~~`preprocessing/plot_all_scaling.py`~~ — done (9 scalers, QuantileTransformer tolerance, identity baseline in callbacks)
+- ~~`preprocessing/plot_discretization_strategies.py`~~ — done (3 comparators, fine-grid transform, nested KV output from KBinsDiscretizer)
+- ~~`decomposition/plot_faces_decomposition.py`~~ — done (2 comparators by feature set, `make_other` for `components_`, KMeans eager in `main()`)
+
+**Hard / out of scope** (CV-based, no model, or sparse text):
 - `model_selection/plot_cv_indices.py` — no model
 - `compose/plot_feature_union.py` — GridSearchCV
-- `preprocessing/plot_all_scaling.py` — fit_transform only
-- `preprocessing/plot_discretization_strategies.py` — fit_transform only
 - `preprocessing/plot_target_encoder.py` — cross_val_score
 - `model_selection/plot_roc.py` — per-class AUC composition
 - `neural_networks/plot_mlp_alpha.py` — large param grid, complex deferred plot
 - `classification/plot_classifier_comparison.py` — 8 classifiers × 3 datasets
 - `ensemble/plot_gradient_boosting_categorical.py` — cross_val_score
-- `decomposition/plot_faces_decomposition.py` — unsupervised fit/transform only (PCA, NMF, FastICA, etc.)
 - `feature_selection/plot_select_from_model_diabetes.py` — SequentialFeatureSelector + cross_val_score
 - `text/plot_document_classification_20newsgroups.py` — TfidfVectorizer.fit_transform on raw text; sparse matrix pipeline
 - `calibration/plot_compare_calibration.py` — calibration_curve / predict_proba; no standard predict output to compare

@@ -6,9 +6,9 @@ For each dataset, apply KBinsDiscretizer with 'uniform', 'quantile', and 'kmeans
 strategies. Fit on data, transform a meshgrid to visualize bin boundaries via
 contour plots. All execution is eager on numpy arrays.
 
-xorq: Same datasets registered as ibis tables. Wrap KBinsDiscretizer pipeline
-via Pipeline.from_instance, fit deferred, transform deferred, build deferred
-plots via deferred_matplotlib_plot. Execution happens only on .execute().
+xorq: Same KBinsDiscretizer pipelines wrapped in Pipeline.from_instance. Each
+transformation is computed lazily as a deferred expression and materialized
+when executed. Meshgrid transformations use xorq_fitted.transform directly.
 
 Both produce identical discretization boundaries.
 
@@ -17,8 +17,6 @@ Dataset: Synthetic (make_blobs, uniform random)
 
 from __future__ import annotations
 
-import os
-
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -26,37 +24,42 @@ import xorq.api as xo
 from sklearn.datasets import make_blobs
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from sklearn.preprocessing import KBinsDiscretizer
-from xorq.expr.ml.pipeline_lib import Pipeline
 
-from xorq_gallery.utils import fig_to_image
+from xorq_gallery.sklearn.sklearn_lib import (
+    SklearnXorqComparator,
+    make_deferred_xorq_fit_transform_result,
+    make_sklearn_fit_transform_result,
+    make_xorq_fit_transform_result,
+    split_data_nop,
+)
+from xorq_gallery.utils import fig_to_image, save_fig
 
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-STRATEGIES = ("uniform", "quantile", "kmeans")
 N_SAMPLES = 200
 RANDOM_STATE = 42
 N_BINS = 4
 ENCODE = "ordinal"
 QUANTILE_METHOD = "averaged_inverted_cdf"
 FEATURE_COLS = ("x0", "x1")
+TARGET_COL = "dataset_id"
+PRED_COL = "pred"  # unused, required by comparator
 
 
 # ---------------------------------------------------------------------------
-# Data loading (shared)
+# Data loading
 # ---------------------------------------------------------------------------
 
 
-def _load_data():
+def _load_raw_datasets():
     """Generate three synthetic datasets matching sklearn example."""
     centers_0 = np.array([[0, 0], [0, 5], [2, 4], [8, 8]])
     centers_1 = np.array([[0, 0], [3, 1]])
-
     rng = np.random.RandomState(RANDOM_STATE)
-
-    X_list = [
+    return [
         rng.uniform(-3, 3, size=(N_SAMPLES, 2)),
         make_blobs(
             n_samples=[
@@ -77,33 +80,57 @@ def _load_data():
         )[0],
     ]
 
-    return X_list
+
+_raw_datasets = _load_raw_datasets()
+
+
+def _make_load_data(ds_idx):
+    def load_data():
+        X = _raw_datasets[ds_idx]
+        df = pd.DataFrame(X, columns=list(FEATURE_COLS))
+        df[TARGET_COL] = ds_idx
+        return df
+
+    return load_data
 
 
 # ---------------------------------------------------------------------------
-# Plotting helpers (used by deferred_matplotlib_plot)
+# Plotting helpers
 # ---------------------------------------------------------------------------
+
+
+def _unnest_transformed(df):
+    """Extract FEATURE_COLS from nested key-value 'transformed' column.
+
+    KBinsDiscretizer xorq output wraps results in a list of {'key', 'value'}
+    dicts under a 'transformed' column rather than flat feature columns.
+    """
+    result = {}
+    for col in FEATURE_COLS:
+        result[col] = df["transformed"].apply(
+            lambda items, c=col: next(
+                item["value"] for item in items if item["key"] == c
+            )
+        )
+    return pd.DataFrame(result)
+
+
+def _make_grid(comparator):
+    """Compute 300×300 meshgrid from comparator.df bounds."""
+    df = comparator.df
+    X = df[list(FEATURE_COLS)].values
+    xx, yy = np.meshgrid(
+        np.linspace(X[:, 0].min(), X[:, 0].max(), 300),
+        np.linspace(X[:, 1].min(), X[:, 1].max(), 300),
+    )
+    grid_df = pd.DataFrame(np.c_[xx.ravel(), yy.ravel()], columns=list(FEATURE_COLS))
+    return xx, yy, grid_df
 
 
 def _build_dataset_figure(X, transformed_grids, title_prefix):
-    """Build a single row figure: input data + 3 strategy plots.
-
-    Parameters
-    ----------
-    X : numpy array (N, 2)
-        Original data.
-    transformed_grids : dict[str, dict]
-        For each strategy: {"xx": xx, "yy": yy, "horizontal": h, "vertical": v}
-    title_prefix : str
-        E.g. "sklearn" or "xorq"
-
-    Returns
-    -------
-    matplotlib.figure.Figure
-    """
+    """Build a 4-panel row: input data + 3 strategy contour plots."""
     fig, axes = plt.subplots(1, 4, figsize=(14, 3))
 
-    # Subplot 0: Input data
     axes[0].scatter(X[:, 0], X[:, 1], edgecolors="k", s=15)
     axes[0].set_title("Input data", size=12)
     axes[0].set_xticks(())
@@ -111,8 +138,7 @@ def _build_dataset_figure(X, transformed_grids, title_prefix):
     axes[0].set_xlim(X[:, 0].min(), X[:, 0].max())
     axes[0].set_ylim(X[:, 1].min(), X[:, 1].max())
 
-    # Subplots 1-3: Strategy results
-    for i, strategy in enumerate(STRATEGIES, start=1):
+    for i, strategy in enumerate(methods, start=1):
         grid_data = transformed_grids[strategy]
         xx = grid_data["xx"]
         yy = grid_data["yy"]
@@ -133,14 +159,77 @@ def _build_dataset_figure(X, transformed_grids, title_prefix):
 
 
 # ---------------------------------------------------------------------------
-# Shared pipeline definitions
+# Comparator callbacks
 # ---------------------------------------------------------------------------
 
 
-def _build_pipelines():
-    """Build KBinsDiscretizer pipelines for each strategy."""
-    return {
-        strategy: SklearnPipeline(
+def compare_results(comparator):
+    print("\n=== Comparing Results ===")
+    for name in comparator.sklearn_results:
+        sk_X = comparator.sklearn_results[name]["transformed"]
+        xo_raw = comparator.xorq_results[name]["transformed"]
+        xo_X = _unnest_transformed(xo_raw).values
+        np.testing.assert_allclose(sk_X, xo_X, rtol=1e-5, atol=1e-5)
+        print(f"  {name}: sklearn vs xorq match (shape {sk_X.shape})")
+
+
+def plot_results(comparator):
+    df = comparator.df
+    X = df[list(FEATURE_COLS)].values
+    xx, yy, grid_df = _make_grid(comparator)
+
+    sk_grids = {
+        name: {
+            "xx": xx,
+            "yy": yy,
+            "horizontal": comparator.sklearn_results[name]["fitted"]
+            .transform(grid_df[list(FEATURE_COLS)])[:, 0]
+            .reshape(xx.shape),
+            "vertical": comparator.sklearn_results[name]["fitted"]
+            .transform(grid_df[list(FEATURE_COLS)])[:, 1]
+            .reshape(xx.shape),
+        }
+        for name, _ in comparator.names_pipelines
+    }
+
+    xo_grids = {}
+    for name, _ in comparator.names_pipelines:
+        xorq_fitted = comparator.deferred_xorq_results[name]["xorq_fitted"]
+        grid_encoded = _unnest_transformed(
+            xorq_fitted.transform(xo.memtable(grid_df)).execute()
+        )
+        xo_grids[name] = {
+            "xx": xx,
+            "yy": yy,
+            "horizontal": grid_encoded[FEATURE_COLS[0]].values.reshape(xx.shape),
+            "vertical": grid_encoded[FEATURE_COLS[1]].values.reshape(xx.shape),
+        }
+
+    sk_fig = _build_dataset_figure(X, sk_grids, "sklearn")
+    xo_fig = _build_dataset_figure(X, xo_grids, "xorq")
+
+    fig, axes = plt.subplots(1, 2, figsize=(28, 3))
+    axes[0].imshow(fig_to_image(sk_fig))
+    axes[0].axis("off")
+    axes[0].set_title("sklearn", fontsize=14, fontweight="bold", pad=10)
+    axes[1].imshow(fig_to_image(xo_fig))
+    axes[1].axis("off")
+    axes[1].set_title("xorq", fontsize=14, fontweight="bold", pad=10)
+    plt.close(sk_fig)
+    plt.close(xo_fig)
+    fig.tight_layout()
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Module-level setup
+# ---------------------------------------------------------------------------
+
+methods = (UNIFORM, QUANTILE, KMEANS) = ("uniform", "quantile", "kmeans")
+names_pipelines = tuple(
+    (
+        strategy,
+        SklearnPipeline(
             [
                 (
                     "discretizer",
@@ -152,206 +241,74 @@ def _build_pipelines():
                     ),
                 )
             ]
-        )
-        for strategy in STRATEGIES
-    }
+        ),
+    )
+    for strategy in methods
+)
+metrics_names_funcs = ()
 
+_comparator_kwargs = dict(
+    names_pipelines=names_pipelines,
+    features=FEATURE_COLS,
+    target=TARGET_COL,
+    pred=PRED_COL,
+    metrics_names_funcs=metrics_names_funcs,
+    split_data=split_data_nop,
+    make_sklearn_result=make_sklearn_fit_transform_result,
+    make_deferred_xorq_result=make_deferred_xorq_fit_transform_result,
+    make_xorq_result=make_xorq_fit_transform_result,
+    compare_results_fn=compare_results,
+    plot_results_fn=plot_results,
+)
 
-# =========================================================================
-# SKLEARN WAY -- eager execution
-# =========================================================================
+comparator_ds0 = SklearnXorqComparator(
+    load_data=_make_load_data(0), **_comparator_kwargs
+)
+comparator_ds1 = SklearnXorqComparator(
+    load_data=_make_load_data(1), **_comparator_kwargs
+)
+comparator_ds2 = SklearnXorqComparator(
+    load_data=_make_load_data(2), **_comparator_kwargs
+)
 
-
-def sklearn_way(X_list, pipelines):
-    """Eager sklearn: fit KBinsDiscretizer, transform meshgrid, plot.
-
-    Parameters
-    ----------
-    X_list : list of numpy arrays
-        Three synthetic datasets.
-    pipelines : dict[str, sklearn.pipeline.Pipeline]
-        One pipeline per strategy.
-
-    Returns
-    -------
-    dict[str, matplotlib.figure.Figure]
-        One figure per dataset.
-    """
-    figures = {}
-
-    for ds_idx, X in enumerate(X_list):
-        xx, yy = np.meshgrid(
-            np.linspace(X[:, 0].min(), X[:, 0].max(), 300),
-            np.linspace(X[:, 1].min(), X[:, 1].max(), 300),
-        )
-        grid = np.c_[xx.ravel(), yy.ravel()]
-
-        transformed_grids = {}
-        for strategy in STRATEGIES:
-            pipe = pipelines[strategy]
-            pipe.fit(X)
-            grid_encoded = pipe.transform(grid)
-            transformed_grids[strategy] = {
-                "xx": xx,
-                "yy": yy,
-                "horizontal": grid_encoded[:, 0].reshape(xx.shape),
-                "vertical": grid_encoded[:, 1].reshape(xx.shape),
-            }
-
-        figures[f"dataset_{ds_idx}"] = _build_dataset_figure(
-            X, transformed_grids, "sklearn"
-        )
-
-    return figures
-
-
-# =========================================================================
-# XORQ WAY -- deferred execution
-# =========================================================================
-
-
-def xorq_way(X_list, pipelines):
-    """Deferred xorq: Pipeline.from_instance, deferred fit/transform.
-
-    Parameters
-    ----------
-    X_list : list of numpy arrays
-        Three synthetic datasets.
-    pipelines : dict[str, sklearn.pipeline.Pipeline]
-        One pipeline per strategy.
-
-    Returns
-    -------
-    dict[str, dict]
-        For each dataset: {"X": array, "transformed_grids": dict of deferred exprs}
-    """
-    con = xo.connect()
-    results = {}
-
-    for ds_idx, X in enumerate(X_list):
-        df = pd.DataFrame(X, columns=list(FEATURE_COLS))
-        data = con.register(df, f"dataset_{ds_idx}")
-
-        xx, yy = np.meshgrid(
-            np.linspace(X[:, 0].min(), X[:, 0].max(), 300),
-            np.linspace(X[:, 1].min(), X[:, 1].max(), 300),
-        )
-        grid = np.c_[xx.ravel(), yy.ravel()]
-        grid_df = pd.DataFrame(grid, columns=list(FEATURE_COLS))
-        grid_data = con.register(grid_df, f"grid_{ds_idx}")
-
-        transformed_grids = {}
-        for strategy in STRATEGIES:
-            xorq_pipe = Pipeline.from_instance(pipelines[strategy])
-            fitted = xorq_pipe.fit(data, features=FEATURE_COLS, target=None)
-            grid_encoded = fitted.transform(grid_data)
-            transformed_grids[strategy] = {
-                "xx": xx,
-                "yy": yy,
-                "grid_encoded": grid_encoded,
-            }
-
-        results[f"dataset_{ds_idx}"] = {"X": X, "transformed_grids": transformed_grids}
-
-    return results
-
-
-# =========================================================================
-# Run and plot side by side
-# =========================================================================
+# expose the exprs to invoke `xorq build plot_discretization_strategies.py --expr $expr_name`
+(
+    xorq_ds0_uniform_transformed,
+    xorq_ds0_quantile_transformed,
+    xorq_ds0_kmeans_transformed,
+) = (comparator_ds0.deferred_xorq_results[name]["transformed"] for name in methods)
+(
+    xorq_ds1_uniform_transformed,
+    xorq_ds1_quantile_transformed,
+    xorq_ds1_kmeans_transformed,
+) = (comparator_ds1.deferred_xorq_results[name]["transformed"] for name in methods)
+(
+    xorq_ds2_uniform_transformed,
+    xorq_ds2_quantile_transformed,
+    xorq_ds2_kmeans_transformed,
+) = (comparator_ds2.deferred_xorq_results[name]["transformed"] for name in methods)
 
 
 def main():
-    os.makedirs("imgs", exist_ok=True)
+    for comparator in (comparator_ds0, comparator_ds1, comparator_ds2):
+        comparator.result_comparison
 
-    X_list = _load_data()
-    pipelines = _build_pipelines()
-
-    print("=== SKLEARN WAY ===")
-    sk_figures = sklearn_way(X_list, pipelines)
-
-    print("\n=== XORQ WAY ===")
-    deferred = xorq_way(X_list, pipelines)
-
-    # Execute deferred transformations and build xorq figures
-    print("Executing deferred transformations...")
-    xo_figures = {}
-    for ds_name, result in deferred.items():
-        X = result["X"]
-        transformed_grids = result["transformed_grids"]
-
-        # Execute all grid transformations for this dataset
-        materialized = {}
-        for strategy in STRATEGIES:
-            grid_info = transformed_grids[strategy]
-            xx = grid_info["xx"]
-            yy = grid_info["yy"]
-            grid_encoded = grid_info["grid_encoded"].execute()
-
-            # The transformed output is a list of {'key': 'x0', 'value': v} dicts
-            # Extract the values for x0 and x1
-            if "transformed" in grid_encoded.columns:
-
-                def extract_value(row, key_name):
-                    for item in row:
-                        if item["key"] == key_name:
-                            return item["value"]
-                    return None
-
-                horizontal = (
-                    grid_encoded["transformed"]
-                    .apply(lambda x: extract_value(x, FEATURE_COLS[0]))
-                    .values.reshape(xx.shape)
-                )
-                vertical = (
-                    grid_encoded["transformed"]
-                    .apply(lambda x: extract_value(x, FEATURE_COLS[1]))
-                    .values.reshape(xx.shape)
-                )
-            else:
-                # Fallback: direct column access
-                horizontal = grid_encoded[FEATURE_COLS[0]].values.reshape(xx.shape)
-                vertical = grid_encoded[FEATURE_COLS[1]].values.reshape(xx.shape)
-
-            materialized[strategy] = {
-                "xx": xx,
-                "yy": yy,
-                "horizontal": horizontal,
-                "vertical": vertical,
-            }
-
-        # Build figure
-        xo_figures[ds_name] = _build_dataset_figure(X, materialized, "xorq")
-
-    # Build composite: 3 rows (one per dataset), 2 columns (sklearn | xorq)
-    fig, axes = plt.subplots(3, 2, figsize=(20, 12))
-
-    for row_idx in range(3):
-        ds_name = f"dataset_{row_idx}"
-
-        # sklearn subplot (rendered to image)
-        sk_fig = sk_figures[ds_name]
-        axes[row_idx, 0].imshow(fig_to_image(sk_fig))
-        axes[row_idx, 0].axis("off")
-
-        # xorq subplot (rendered to image)
-        xo_fig = xo_figures[ds_name]
-        axes[row_idx, 1].imshow(fig_to_image(xo_fig))
-        axes[row_idx, 1].axis("off")
-
-    axes[0, 0].set_title("sklearn", fontsize=14, fontweight="bold", pad=10)
-    axes[0, 1].set_title("xorq (deferred)", fontsize=14, fontweight="bold", pad=10)
-
+    ds_figs = [
+        comparator.plot_results()
+        for comparator in (comparator_ds0, comparator_ds1, comparator_ds2)
+    ]
+    fig, axes = plt.subplots(3, 1, figsize=(28, 9))
+    for row, ds_fig in enumerate(ds_figs):
+        axes[row].imshow(fig_to_image(ds_fig))
+        axes[row].axis("off")
+        plt.close(ds_fig)
     fig.suptitle(
         "KBinsDiscretizer Strategies: sklearn vs xorq", fontsize=16, fontweight="bold"
     )
     fig.tight_layout()
-    out = "imgs/discretization_strategies.png"
-    fig.savefig(out, dpi=150)
-    plt.close(fig)
-    print(f"Plot saved to {out}")
+    save_fig("imgs/discretization_strategies.png", fig)
 
 
-if __name__ in ("__main__", "__pytest_main__"):
+if __name__ in ("__pytest_main__",):
     main()
     pytest_examples_passed = True
