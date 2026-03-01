@@ -130,7 +130,7 @@ def _build_pipelines():
 
     # Mixed encoding: high cardinality -> target, low cardinality -> ordinal
     df_sample = _load_data()
-    n_unique = df_sample[CATEGORICAL_FEATURES].nunique()
+    n_unique = df_sample[list(CATEGORICAL_FEATURES)].nunique()
     high_card = n_unique[n_unique > 255].index.tolist()
     low_card = n_unique[n_unique <= 255].index.tolist()
 
