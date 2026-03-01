@@ -474,6 +474,6 @@ def main():
     print(f"All CV strategies comparison saved to {out_all}")
 
 
-if __name__ in ("__main__", "__pytest_main__"):
+if __name__ in ("__pytest_main__",):
     main()
     pytest_examples_passed = True
