@@ -5,6 +5,7 @@ import runpy
 import click
 
 from xorq_gallery.sklearn import (
+    get_exprs_for_script,
     get_scripts_for_group,
     group_paths,
     scripts,
@@ -66,6 +67,29 @@ def list_scripts(group):
     """List available scripts."""
     pool = _scripts_for_group(group) if group else scripts
     click.echo("\n".join(s.stem for s in pool))
+
+
+@cli.command("list-exprs")
+@click.argument("script_name", shell_complete=_complete_script_name)
+@click.option(
+    "-g",
+    "--group",
+    default=None,
+    shell_complete=_complete_group,
+    help="Restrict search to a group.",
+)
+def list_exprs(script_name, group):
+    """Run a single script by name."""
+    pool = _scripts_for_group(group) if group else scripts
+    script = next((s for s in pool if s.stem == script_name), None)
+    match script:
+        case None:
+            raise click.BadParameter(
+                f"no such script {script_name!r}", param_hint="script_name"
+            )
+        case _:
+            dct = get_exprs_for_script(script)
+            click.echo("\n".join(expr for expr in dct))
 
 
 @cli.command("run")

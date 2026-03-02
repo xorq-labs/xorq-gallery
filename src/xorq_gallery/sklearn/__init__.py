@@ -1,4 +1,6 @@
+import importlib
 import pathlib
+from pathlib import Path
 
 
 def get_scripts_for_group(group):
@@ -23,3 +25,20 @@ scripts = tuple(
 group_to_scripts = tuple(
     (group.name, get_scripts_for_group(group.name)) for group in group_paths
 )
+
+
+def import_script(path, module_name=None):
+    path = Path(path)
+    return importlib.machinery.SourceFileLoader(
+        module_name or path.stem, str(path)
+    ).load_module()
+
+
+def get_exprs_for_script(script):
+    from xorq.vendor.ibis.expr.types.core import Expr
+
+    mod = import_script(script)
+    dct = {
+        name: value for name, value in mod.__dict__.items() if isinstance(value, Expr)
+    }
+    return dct
