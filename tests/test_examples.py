@@ -9,7 +9,7 @@ from pytest import param
 
 from xorq_gallery.sklearn import (
     get_scripts_for_group,
-    groups,
+    group_paths,
 )
 
 
@@ -21,9 +21,9 @@ imgs_dir = repo_root / "imgs"
 
 # Collect all example scripts from all categories (applications, calibration, etc.)
 scripts = tuple(
-    (group_name, script)
-    for group_name in (group.name for group in groups)
-    for script in get_scripts_for_group(group_name)
+    (group, script)
+    for group in (group.name for group in group_paths)
+    for script in get_scripts_for_group(group)
 )
 
 

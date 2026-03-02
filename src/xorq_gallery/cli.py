@@ -6,16 +6,16 @@ import click
 
 from xorq_gallery.sklearn import (
     get_scripts_for_group,
-    groups,
+    group_paths,
     scripts,
 )
 
 
-def _scripts_for_group(group_name):
+def _scripts_for_group(group):
     try:
-        return get_scripts_for_group(group_name)
+        return get_scripts_for_group(group)
     except ValueError:
-        raise click.BadParameter(f"no such group {group_name!r}", param_hint="group")
+        raise click.BadParameter(f"no such group {group!r}", param_hint="group")
 
 
 def run_script(script, run_name="__main__"):
@@ -28,14 +28,14 @@ def run_script(script, run_name="__main__"):
 def _complete_group(ctx, param, incomplete):
     return [
         click.shell_completion.CompletionItem(g.name)
-        for g in groups
+        for g in group_paths
         if g.name.startswith(incomplete)
     ]
 
 
 def _complete_script_name(ctx, param, incomplete):
-    group_name = ctx.params.get("group")
-    pool = _scripts_for_group(group_name) if group_name else scripts
+    group = ctx.params.get("group")
+    pool = _scripts_for_group(group) if group else scripts
     return [
         click.shell_completion.CompletionItem(s.stem)
         for s in pool
@@ -51,7 +51,7 @@ def cli():
 @cli.command("list-groups")
 def list_groups():
     """List available script groups."""
-    click.echo("\n".join(g.name for g in groups))
+    click.echo("\n".join(g.name for g in group_paths))
 
 
 @cli.command("list")
