@@ -31,18 +31,48 @@ _XFAIL_SCRIPTS = {
     "plot_quantile_regression": "SklearnXorqComparator does not accept sklearn_pipeline kwarg",
 }
 
+_SLOW1_SCRIPTS = frozenset(
+    {
+        "plot_time_series_lagged_features",
+        "plot_discretization_strategies",
+        "plot_all_scaling",
+        "plot_compare_calibration",
+        "plot_document_classification_20newsgroups",
+        "plot_classifier_comparison",
+        "plot_select_from_model_diabetes",
+        "plot_kmeans_digits",
+        "plot_kmeans_silhouette_analysis",
+    }
+)
+
+_SLOW2_SCRIPTS = frozenset(
+    {
+        "plot_target_encoder",
+        "plot_faces_decomposition",
+        "plot_tomography_l1_reconstruction",
+        "plot_stack_predictors",
+        "plot_cyclical_feature_engineering",
+        "plot_feature_union",
+        "plot_topics_extraction_with_nmf_lda",
+    }
+)
+
+
+def _marks_for(stem):
+    marks = []
+    if stem in _XFAIL_SCRIPTS:
+        marks.append(pytest.mark.xfail(reason=_XFAIL_SCRIPTS[stem]))
+    if stem in _SLOW1_SCRIPTS:
+        marks.append(pytest.mark.slow1)
+    if stem in _SLOW2_SCRIPTS:
+        marks.append(pytest.mark.slow2)
+    return marks
+
 
 @pytest.mark.parametrize(
     "category,script",
     [
-        param(
-            cat,
-            script,
-            id=f"{cat}/{script.stem}",
-            marks=pytest.mark.xfail(reason=_XFAIL_SCRIPTS[script.stem]),
-        )
-        if script.stem in _XFAIL_SCRIPTS
-        else param(cat, script, id=f"{cat}/{script.stem}")
+        param(cat, script, id=f"{cat}/{script.stem}", marks=_marks_for(script.stem))
         for cat, script in scripts
     ],
 )
