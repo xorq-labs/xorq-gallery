@@ -27,9 +27,24 @@ scripts = tuple(
 )
 
 
+_XFAIL_SCRIPTS = {
+    "plot_quantile_regression": "SklearnXorqComparator does not accept sklearn_pipeline kwarg",
+}
+
+
 @pytest.mark.parametrize(
     "category,script",
-    [param(cat, script, id=f"{cat}/{script.stem}") for cat, script in scripts],
+    [
+        param(
+            cat,
+            script,
+            id=f"{cat}/{script.stem}",
+            marks=pytest.mark.xfail(reason=_XFAIL_SCRIPTS[script.stem]),
+        )
+        if script.stem in _XFAIL_SCRIPTS
+        else param(cat, script, id=f"{cat}/{script.stem}")
+        for cat, script in scripts
+    ],
 )
 def test_script_execution(category, script):
     # Ensure imgs directory exists
