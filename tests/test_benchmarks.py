@@ -1,8 +1,21 @@
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 from click.testing import CliRunner
 
 from xorq_gallery.cli import cli
 from xorq_gallery.sklearn import scripts
+
+
+pytestmark = pytest.mark.benchmark
+
+_CLI = Path(sys.executable).with_name("xorq-gallery")
+
+
+def _run(args):
+    return subprocess.run([_CLI] + args, capture_output=True)
 
 
 @pytest.fixture(scope="module")
@@ -40,3 +53,26 @@ def test_list_exprs(runner, benchmark, script):
         runner.invoke, cli, ["list-exprs", script.stem, "-g", script.parent.name]
     )
     assert result.exit_code == 0
+
+
+def test_subprocess_list_groups(benchmark):
+    result = benchmark(_run, ["list-groups"])
+    assert result.returncode == 0
+
+
+def test_subprocess_list_all_scripts(benchmark):
+    result = benchmark(_run, ["list"])
+    assert result.returncode == 0
+
+
+@pytest.mark.parametrize(
+    "script_stem,group",
+    [
+        ("plot_lasso_and_elasticnet", "linear_model"),
+        ("plot_confusion_matrix", "model_selection"),
+        ("plot_tree_regression", "tree"),
+    ],
+)
+def test_subprocess_list_exprs(benchmark, script_stem, group):
+    result = benchmark(_run, ["list-exprs", script_stem, "-g", group])
+    assert result.returncode == 0
