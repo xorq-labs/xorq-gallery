@@ -1696,7 +1696,7 @@ wheels = [
 [[package]]
 name = "xorq"
 version = "0.3.11"
-source = { git = "https://github.com/xorq-labs/xorq.git?branch=main#7761fd734606628959de7fc87dacb805d17b01c1" }
+source = { git = "https://github.com/xorq-labs/xorq.git?branch=main#b89af78d8ad460ceb7c8ce7938c3b8edcb4c0cd0" }
 dependencies = [
     { name = "atpublic" },
     { name = "attrs" },
@@ -1706,6 +1706,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "dask" },
     { name = "envyaml" },
+    { name = "filelock" },
     { name = "geoarrow-types" },
     { name = "gitpython" },
     { name = "opentelemetry-exporter-otlp" },
