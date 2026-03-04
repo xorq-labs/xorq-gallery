@@ -24,6 +24,8 @@ import xorq.api as xo
 from sklearn.datasets import make_blobs
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from sklearn.preprocessing import KBinsDiscretizer
+from xorq.api import SessionConfig
+from xorq.config import options
 
 from xorq_gallery.sklearn.sklearn_lib import (
     SklearnXorqComparator,
@@ -33,6 +35,10 @@ from xorq_gallery.sklearn.sklearn_lib import (
     split_data_nop,
 )
 from xorq_gallery.utils import fig_to_image, save_fig
+
+
+# Force single-threaded DataFusion to preserve scan order for UDAF
+options.backend = xo.connect(session_config=SessionConfig().with_target_partitions(1))
 
 
 # ---------------------------------------------------------------------------
