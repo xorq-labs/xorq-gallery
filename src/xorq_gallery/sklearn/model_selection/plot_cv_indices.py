@@ -25,6 +25,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.patches import Patch
+from sklearn.base import clone as _clone
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import (
     KFold,
@@ -68,9 +69,7 @@ CMAP_DATA = plt.cm.Paired
 # are not supported by deferred_cross_val_score.
 SPLITTERS = {
     "KFold": (
-        lambda: KFold(
-            n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE
-        ),
+        lambda: KFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE),
         None,
     ),
     "StratifiedKFold": (
@@ -304,7 +303,6 @@ def compare_results(comparator):
     """Assert that sklearn and xorq fold assignments match for every splitter."""
     print("\n=== Comparing Results ===")
     for name in SPLITTERS:
-        sk_fold_df = comparator.sklearn_results[name]["other"]["fold_df"]
         xo_fold_df = comparator.xorq_results[name]["other"]["fold_df"]
 
         # sklearn ran on raw data order; xorq ran on deterministically-sorted
@@ -344,19 +342,26 @@ def plot_results(comparator):
         group_display = xo_fold_df["group"].values
 
         sk_folds = {
-            f"fold_{i}": sk_fold_df[f"fold_{i}"].values
-            for i in range(N_SPLITS)
+            f"fold_{i}": sk_fold_df[f"fold_{i}"].values for i in range(N_SPLITS)
         }
         xo_folds = {
             f"fold_{i}": xo_fold_df[f"fold_{i}"].values for i in range(N_SPLITS)
         }
 
         _plot_fold_bars(
-            axes[row, 0], sk_folds, N_SPLITS, y_display, group_display,
+            axes[row, 0],
+            sk_folds,
+            N_SPLITS,
+            y_display,
+            group_display,
             f"{name} (sklearn)",
         )
         _plot_fold_bars(
-            axes[row, 1], xo_folds, N_SPLITS, y_display, group_display,
+            axes[row, 1],
+            xo_folds,
+            N_SPLITS,
+            y_display,
+            group_display,
             f"{name} (xorq)",
         )
 
@@ -381,11 +386,7 @@ def plot_results(comparator):
 metrics_names_funcs = ()
 
 # Each splitter gets its own pipeline clone so we can map pipeline id -> name.
-from sklearn.base import clone as _clone
-
-names_pipelines = tuple(
-    (name, _clone(_sk_pipeline)) for name in SPLITTERS
-)
+names_pipelines = tuple((name, _clone(_sk_pipeline)) for name in SPLITTERS)
 for name, pipeline in names_pipelines:
     _pipeline_to_splitter[id(pipeline)] = name
 
@@ -406,18 +407,16 @@ comparator = SklearnXorqComparator(
 
 # Expose deferred fold exprs for xorq build
 xorq_kfold_folds = comparator.deferred_xorq_results["KFold"]["preds"]
-xorq_stratifiedkfold_folds = comparator.deferred_xorq_results[
-    "StratifiedKFold"
-]["preds"]
-xorq_shufflesplit_folds = comparator.deferred_xorq_results["ShuffleSplit"][
+xorq_stratifiedkfold_folds = comparator.deferred_xorq_results["StratifiedKFold"][
     "preds"
 ]
+xorq_shufflesplit_folds = comparator.deferred_xorq_results["ShuffleSplit"]["preds"]
 xorq_stratifiedshufflesplit_folds = comparator.deferred_xorq_results[
     "StratifiedShuffleSplit"
 ]["preds"]
-xorq_timeseriessplit_folds = comparator.deferred_xorq_results[
-    "TimeSeriesSplit"
-]["preds"]
+xorq_timeseriessplit_folds = comparator.deferred_xorq_results["TimeSeriesSplit"][
+    "preds"
+]
 
 
 # =========================================================================
