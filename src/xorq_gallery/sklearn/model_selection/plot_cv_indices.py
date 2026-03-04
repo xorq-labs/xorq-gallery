@@ -210,8 +210,12 @@ def _plot_all_cv_strategies(X, y, groups, n_splits):
     fig, axes = plt.subplots(4, 2, figsize=(14, 12))
     axes = axes.flatten()
 
+    _shuffle_cvs = (ShuffleSplit, GroupShuffleSplit, StratifiedShuffleSplit)
     for idx, cv_class in enumerate(cvs):
-        cv = cv_class(n_splits=n_splits)
+        if cv_class in _shuffle_cvs:
+            cv = cv_class(n_splits=n_splits, random_state=RANDOM_STATE)
+        else:
+            cv = cv_class(n_splits=n_splits)
         ax = axes[idx]
 
         # Determine if CV uses groups
