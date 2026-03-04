@@ -69,7 +69,7 @@ def get_top_words(model, feature_names, n_top=n_top_words):
     ]
 
 
-def plot_top_words(model, feature_names, n_top, title):
+def plot_top_words(model, feature_names, n_top, title=None):
     """Plot top words per topic for a single decomposition model."""
     n_topics = model.components_.shape[0]
     fig, axes = plt.subplots(n_topics, 1, figsize=(7, 2.5 * n_topics))
@@ -82,20 +82,19 @@ def plot_top_words(model, feature_names, n_top, title):
 
         ax = axes[topic_idx]
         ax.barh(top_features, weights, height=0.7)
-        ax.set_title(f"Topic {topic_idx + 1}", fontsize=9)
+        ax.set_title(f"Topic {topic_idx + 1}", fontsize=9, pad=8)
         ax.tick_params(axis="both", which="major", labelsize=7)
 
-    fig.suptitle(title, fontsize=13)
+    if title:
+        fig.suptitle(title, fontsize=13)
     fig.tight_layout()
     return fig
 
 
 @curry
-def _build_topics_figure(_df, model, feature_names, pipe_name):
+def _build_topics_figure(_df, model, feature_names):
     """Return a UDAF-compatible plotting function for topic extraction results."""
-    return plot_top_words(
-        model, np.array(feature_names), n_top_words, f"xorq - {pipe_name}"
-    )
+    return plot_top_words(model, np.array(feature_names), n_top_words)
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +202,6 @@ def xorq_way(texts, targets, pipelines):
                     _build_topics_figure(
                         model=decomp,
                         feature_names=tuple(feature_names),
-                        pipe_name=name,
                     ),
                 ),
             ),
@@ -233,12 +231,10 @@ def main():
         # Execute xorq deferred plot
         xo_png = plot_expr.execute()
 
-        # Build sklearn figure natively
+        # Build sklearn figure natively (no inner title; outer figure labels columns)
         sk_model = sk_results[name]["model"]
         sk_feature_names = sk_results[name]["feature_names"]
-        sk_fig = plot_top_words(
-            sk_model, sk_feature_names, n_top_words, f"sklearn - {name}"
-        )
+        sk_fig = plot_top_words(sk_model, sk_feature_names, n_top_words)
 
         # Composite: sklearn (left) | xorq deferred (right)
         xo_img = load_plot_bytes(xo_png)
@@ -252,7 +248,7 @@ def main():
         axes[1].axis("off")
 
         fig.suptitle(f"{name}: sklearn vs xorq", fontsize=13)
-        fig.tight_layout()
+        fig.tight_layout(rect=[0, 0, 1, 0.99])
 
         fname = name.lower().replace(" ", "_").replace("(", "").replace(")", "")
         save_fig(f"imgs/topics_{fname}.png", fig)
