@@ -19,7 +19,6 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import xorq.api as xo
 from matplotlib.colors import ListedColormap
 from sklearn import datasets
 from sklearn.metrics import accuracy_score
@@ -32,12 +31,12 @@ from xorq_gallery.sklearn.sklearn_lib import (
     SklearnXorqComparator,
 )
 from xorq_gallery.sklearn.sklearn_lib import (
+    make_deferred_xorq_result as _make_deferred_xorq_result,
+)
+from xorq_gallery.sklearn.sklearn_lib import (
     make_sklearn_result as _make_sklearn_result,
 )
-from xorq_gallery.utils import (
-    fig_to_image,
-    save_fig,
-)
+from xorq_gallery.utils import save_fig
 
 
 # ---------------------------------------------------------------------------
@@ -76,26 +75,6 @@ def split_data(df):
     return train_test_split(
         df, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=df[TARGET_COL]
     )
-
-
-# ---------------------------------------------------------------------------
-# xorq clf wrapper for meshgrid prediction
-# ---------------------------------------------------------------------------
-
-
-class _XorqClfWrapper:
-    """Wraps a fitted xorq pipeline to expose a predict(array) interface."""
-
-    def __init__(self, xorq_fitted):
-        self._xorq_fitted = xorq_fitted
-
-    def predict(self, X):
-        df = pd.DataFrame(X, columns=list(FEATURE_COLS))
-        return (
-            self._xorq_fitted.predict(xo.memtable(df), name=PRED_COL)
-            .execute()[PRED_COL]
-            .values
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -147,34 +126,26 @@ def plot_results(comparator):
     X = comparator.df[list(FEATURE_COLS)].values
     y = comparator.df[TARGET_COL].values
 
-    fig_sk, axes_sk = plt.subplots(1, 2, figsize=(12, 5))
-    fig_xo, axes_xo = plt.subplots(1, 2, figsize=(12, 5))
+    fig, axes = plt.subplots(2, len(methods), figsize=(12, 10))
 
     for col, name in enumerate(methods):
         sk_score = comparator.sklearn_results[name]["metrics"]["accuracy"]
         xo_score = comparator.xorq_results[name]["metrics"]["accuracy"]
 
-        # "other" stores the full fitted pipeline (needed for StandardScaler + NCA transform)
+        # "other" stores the full fitted pipeline (StandardScaler + [NCA +] KNN)
         sk_clf = comparator.sklearn_results[name]["other"]["full_pipeline"]
-        _plot_decision_boundary(axes_sk[col], X, y, sk_clf, name, sk_score)
+        xo_clf = comparator.xorq_results[name]["other"]["full_pipeline"]
 
-        xo_fitted = comparator.deferred_xorq_results[name]["xorq_fitted"]
-        _plot_decision_boundary(
-            axes_xo[col], X, y, _XorqClfWrapper(xo_fitted), name, xo_score
-        )
+        # Top row: sklearn
+        _plot_decision_boundary(axes[0, col], X, y, sk_clf, name, sk_score)
+        if col == 0:
+            axes[0, col].set_ylabel("sklearn", fontsize=12, fontweight="bold")
 
-    fig_sk.suptitle("sklearn: KNN vs NCA+KNN", fontsize=14)
-    fig_sk.tight_layout()
-    fig_xo.suptitle("xorq: KNN vs NCA+KNN", fontsize=14)
-    fig_xo.tight_layout()
+        # Bottom row: xorq (fitted model is same sklearn pipeline)
+        _plot_decision_boundary(axes[1, col], X, y, xo_clf, name, xo_score)
+        if col == 0:
+            axes[1, col].set_ylabel("xorq", fontsize=12, fontweight="bold")
 
-    fig, axes = plt.subplots(1, 2, figsize=(20, 8))
-    axes[0].imshow(fig_to_image(fig_sk))
-    axes[0].set_title("sklearn", fontsize=12)
-    axes[0].axis("off")
-    axes[1].imshow(fig_to_image(fig_xo))
-    axes[1].set_title("xorq", fontsize=12)
-    axes[1].axis("off")
     fig.suptitle(
         "Comparing Nearest Neighbors with/without NCA: sklearn vs xorq", fontsize=16
     )
@@ -191,7 +162,18 @@ def _make_sklearn_other(fitted):
     return {"full_pipeline": fitted}
 
 
+def _make_xorq_other(xorq_fitted):
+    """Reconstruct a full sklearn Pipeline from xorq's fitted steps.
+
+    Stored as a lambda so make_xorq_result can call v() to materialize.
+    """
+    steps = [(step.step.name, step.model) for step in xorq_fitted.fitted_steps]
+    full_pipeline = SklearnPipeline(steps)
+    return {"full_pipeline": lambda: full_pipeline}
+
+
 make_sklearn_result = _make_sklearn_result(make_other=_make_sklearn_other)
+make_deferred_xorq_result = _make_deferred_xorq_result(make_other=_make_xorq_other)
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +213,7 @@ comparator = SklearnXorqComparator(
     load_data=load_data,
     split_data=split_data,
     make_sklearn_result=make_sklearn_result,
+    make_deferred_xorq_result=make_deferred_xorq_result,
     compare_results_fn=compare_results,
     plot_results_fn=plot_results,
 )
