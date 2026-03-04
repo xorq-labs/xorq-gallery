@@ -103,10 +103,9 @@ def _grid_search_figure(df, title):
     score = df["best_score"].iloc[0]
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.bar(["Best CV Score"], [score])
-    ax.set_title(title)
     ax.set_ylabel("Cross-Validation Score")
-    ax.set_ylim(0, 1.0)
-    ax.text(0, score + 0.02, f"{score:.4f}", ha="center", fontsize=12)
+    ax.set_ylim(0, 1.15)
+    ax.text(0, score + 0.03, f"{score:.4f}", ha="center", va="bottom", fontsize=12)
     fig.tight_layout()
     return fig
 
@@ -237,37 +236,36 @@ def main():
 
     sk_fig, sk_ax = plt.subplots(figsize=(8, 5))
     sk_ax.bar(["Best CV Score"], [sk_results["best_score"]])
-    sk_ax.set_title("sklearn - Grid Search Best Score")
     sk_ax.set_ylabel("Cross-Validation Score")
-    sk_ax.set_ylim(0, 1.0)
+    sk_ax.set_ylim(0, 1.15)
     sk_ax.text(
         0,
-        sk_results["best_score"] + 0.02,
+        sk_results["best_score"] + 0.03,
         f"{sk_results['best_score']:.4f}",
         ha="center",
+        va="bottom",
         fontsize=12,
     )
     sk_fig.tight_layout()
 
     xo_img = load_plot_bytes(xo_png)
 
-    fig, axes = plt.subplots(1, 2, figsize=(16, 5))
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
     axes[0].imshow(fig_to_image(sk_fig))
-    axes[0].set_title("sklearn", fontsize=14, fontweight="bold")
+    axes[0].set_title("sklearn - Grid Search Best Score", fontsize=14, fontweight="bold")
     axes[0].axis("off")
     axes[1].imshow(xo_img)
-    axes[1].set_title("xorq", fontsize=14, fontweight="bold")
+    axes[1].set_title("xorq - Grid Search Best Score", fontsize=14, fontweight="bold")
     axes[1].axis("off")
 
     fig.suptitle(
         "FeatureUnion with GridSearchCV: sklearn vs xorq",
         fontsize=16,
         fontweight="bold",
-        y=0.98,
     )
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 1, 0.90])
     out = "imgs/feature_union.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
+    fig.savefig(out, dpi=150)
     plt.close(fig)
     print(f"Composite plot saved to {out}")
 
