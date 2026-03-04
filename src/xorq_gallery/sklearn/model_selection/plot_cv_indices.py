@@ -2,17 +2,17 @@
 =========================================
 
 sklearn: Generate synthetic dataset with 100 samples, 3 classes, and 10 groups.
-Visualize how 8 different cross-validation strategies (KFold, GroupKFold,
-ShuffleSplit, StratifiedKFold, StratifiedGroupKFold, GroupShuffleSplit,
+Visualize how 5 cross-validation strategies (KFold, StratifiedKFold, ShuffleSplit,
 StratifiedShuffleSplit, TimeSeriesSplit) split the data into train/test sets
-across 4 folds. Each CV object's behavior is displayed as a scatter plot showing
-which samples are assigned to train (blue) vs test (red) in each fold.
+across 4 folds.
 
-xorq: Same visualization logic wrapped in deferred execution. The data generation
-and CV splitting logic is identical, but the plotting is wrapped via
-deferred_matplotlib_plot to demonstrate deferred visualization workflows.
+xorq: Same CV strategies executed via deferred_cross_val_score, which computes
+fold assignments inside a UDWF (User-Defined Window Function). The fold_expr
+attribute returns fold assignments (0=unused, 1=train, 2=test) computed entirely
+within xorq's deferred execution engine.
 
-Both produce identical visualizations.
+sklearn's splitter is run on the same row-ordered data that xorq's UDWF saw,
+so both sides produce identical fold assignments.
 
 Dataset: Synthetic (100 samples, 3 classes, 10 groups)
 """
@@ -24,24 +24,25 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import xorq.api as xo
 from matplotlib.patches import Patch
+from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import (
-    GroupKFold,
-    GroupShuffleSplit,
     KFold,
     ShuffleSplit,
-    StratifiedGroupKFold,
     StratifiedKFold,
     StratifiedShuffleSplit,
     TimeSeriesSplit,
 )
+from sklearn.pipeline import Pipeline as SklearnPipeline
+from sklearn.preprocessing import StandardScaler
+from xorq.expr.ml.cross_validation import deferred_cross_val_score
+from xorq.expr.ml.pipeline_lib import Pipeline
 
-from xorq_gallery.utils import (
-    deferred_matplotlib_plot,
-    fig_to_image,
-    load_plot_bytes,
+from xorq_gallery.sklearn.sklearn_lib import (
+    SklearnXorqComparator,
+    split_data_nop,
 )
+from xorq_gallery.utils import save_fig
 
 
 # ---------------------------------------------------------------------------
@@ -52,53 +53,186 @@ RANDOM_STATE = 1338
 N_SPLITS = 4
 N_POINTS = 100
 
-# Matplotlib colormaps
+FEATURE_COLS = tuple(f"x_{i}" for i in range(10))
+TARGET_COL = "y"
+PRED_COL = "pred"  # unused, required by comparator
+
+# Colors for fold bars
+TRAIN_COLOR = "#3575D5"
+TEST_COLOR = "#E8432A"
+UNUSED_COLOR = "#E0E0E0"
 CMAP_DATA = plt.cm.Paired
-CMAP_CV = plt.cm.coolwarm
+
+# Splitter definitions: (name, factory, order_by)
+# Group-based splitters (GroupKFold, StratifiedGroupKFold, GroupShuffleSplit)
+# are not supported by deferred_cross_val_score.
+SPLITTERS = {
+    "KFold": (
+        lambda: KFold(
+            n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE
+        ),
+        None,
+    ),
+    "StratifiedKFold": (
+        lambda: StratifiedKFold(
+            n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE
+        ),
+        None,
+    ),
+    "ShuffleSplit": (
+        lambda: ShuffleSplit(
+            n_splits=N_SPLITS, test_size=0.25, random_state=RANDOM_STATE
+        ),
+        None,
+    ),
+    "StratifiedShuffleSplit": (
+        lambda: StratifiedShuffleSplit(
+            n_splits=N_SPLITS, test_size=0.25, random_state=RANDOM_STATE
+        ),
+        None,
+    ),
+    "TimeSeriesSplit": (
+        lambda: TimeSeriesSplit(n_splits=N_SPLITS),
+        "t",
+    ),
+}
+
+# The sklearn pipeline used by deferred_cross_val_score (needed for fitting,
+# but we only care about the fold assignments, not the scores).
+_sk_pipeline = SklearnPipeline(
+    [
+        ("scaler", StandardScaler()),
+        ("clf", LogisticRegression(random_state=RANDOM_STATE, max_iter=1000)),
+    ]
+)
+_xorq_pipeline = Pipeline.from_instance(_sk_pipeline)
 
 
 # ---------------------------------------------------------------------------
-# Data generation (shared)
+# Data generation
 # ---------------------------------------------------------------------------
 
 
-def _generate_data():
-    """Generate synthetic dataset with classes and groups.
-
-    Returns
-    -------
-    dict with keys:
-        - X : np.ndarray, shape (100, 10)
-        - y : np.ndarray, shape (100,) - class labels (0, 1, 2)
-        - groups : np.ndarray, shape (100,) - group labels (0-9)
-        - df : pd.DataFrame with columns X, y, groups, row_idx
-    """
+def load_data():
+    """Generate synthetic dataset with classes and groups."""
     rng = np.random.RandomState(RANDOM_STATE)
 
-    # Generate random features
     X = rng.randn(N_POINTS, 10)
 
-    # Generate uneven class distribution
+    # Uneven class distribution
     percentiles_classes = [0.1, 0.3, 0.6]
     y = np.hstack(
         [[ii] * int(N_POINTS * perc) for ii, perc in enumerate(percentiles_classes)]
     )
 
-    # Generate uneven group distribution
+    # Uneven group distribution
     group_prior = rng.dirichlet([2] * 10)
     groups = np.repeat(np.arange(10), rng.multinomial(N_POINTS, group_prior))
 
-    # Create DataFrame for xorq
-    df = pd.DataFrame(X, columns=[f"x_{i}" for i in range(10)])
-    df["y"] = y
-    df["groups"] = groups
-    df["row_idx"] = range(len(df))
+    df = pd.DataFrame(X, columns=list(FEATURE_COLS))
+    df[TARGET_COL] = y
+    df["group"] = groups
+    df["t"] = range(len(df))
+    return df
 
+
+# ---------------------------------------------------------------------------
+# sklearn fold assignment helper
+# ---------------------------------------------------------------------------
+
+
+def _build_sklearn_fold_df(cv, X_arr, y_arr):
+    """Build fold DataFrame from sklearn splitter.
+
+    Encoding: 0=unused, 1=train, 2=test.
+    """
+
+    def _make_col(train_idx, test_idx):
+        col = np.zeros(len(y_arr), dtype=np.int8)
+        col[train_idx] = 1
+        col[test_idx] = 2
+        return col
+
+    return pd.DataFrame(
+        {
+            f"fold_{fold_i}": _make_col(train_idx, test_idx)
+            for fold_i, (train_idx, test_idx) in enumerate(cv.split(X_arr, y_arr))
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# Comparator callbacks: make_sklearn_result / make_deferred_xorq_result
+# ---------------------------------------------------------------------------
+
+# Map pipeline id -> splitter name, so callbacks can look up which splitter
+# to use. Each splitter gets its own clone of _sk_pipeline (see names_pipelines).
+_pipeline_to_splitter = {}
+
+
+def make_sklearn_cv_result(
+    pipeline,
+    train_data,
+    test_data,
+    features,
+    target,
+    metrics_names_funcs,
+):
+    """Sklearn side: run the splitter eagerly on the training data."""
+    name = _pipeline_to_splitter[id(pipeline)]
+    make_cv, _ = SPLITTERS[name]
+
+    sklearn_fold_df = _build_sklearn_fold_df(
+        make_cv(),
+        train_data[list(features)].values,
+        train_data[target].values,
+    )
     return {
-        "X": X,
-        "y": y,
-        "groups": groups,
-        "df": df,
+        "fitted": None,
+        "preds": None,
+        "metrics": {},
+        "other": {"fold_df": sklearn_fold_df},
+    }
+
+
+def make_deferred_xorq_cv_result(
+    pipeline,
+    train_data,
+    test_data,
+    features,
+    target,
+    metrics_names_funcs,
+    pred,
+):
+    """Xorq side: build deferred fold assignments via deferred_cross_val_score."""
+    name = _pipeline_to_splitter[id(pipeline)]
+    make_cv, order_by = SPLITTERS[name]
+
+    result = deferred_cross_val_score(
+        Pipeline.from_instance(pipeline),
+        train_data,
+        features=features,
+        target=target,
+        cv=make_cv(),
+        random_seed=RANDOM_STATE,
+        order_by=order_by,
+    )
+    return {
+        "xorq_fitted": None,
+        "preds": result.fold_expr,
+        "metrics": {},
+        "other": {},
+    }
+
+
+def make_xorq_cv_result(deferred_xorq_result):
+    """Materialize the deferred fold_expr."""
+    fold_expr = deferred_xorq_result["preds"]
+    return {
+        "fitted": None,
+        "preds": None,
+        "metrics": {},
+        "other": {"fold_df": fold_expr.execute()},
     }
 
 
@@ -107,375 +241,195 @@ def _generate_data():
 # ---------------------------------------------------------------------------
 
 
-def _plot_cv_indices(cv, X, y, groups, n_splits, lw=10):
-    """Create a sample plot for indices of a cross-validation object.
+def _plot_fold_bars(ax, fold_values, n_splits, y_values, group_values, title):
+    """Plot fold assignments as horizontal bars.
 
-    Parameters
-    ----------
-    cv : sklearn CV object
-        Cross-validation iterator.
-    X : np.ndarray
-        Feature matrix.
-    y : np.ndarray
-        Target labels.
-    groups : np.ndarray
-        Group labels.
-    n_splits : int
-        Number of splits.
-    lw : int, optional
-        Line width for markers.
-
-    Returns
-    -------
-    fig : matplotlib.figure.Figure
+    fold_values : dict[str, np.ndarray]  — fold_i -> array of 0/1/2
     """
-    fig, ax = plt.subplots(figsize=(6, 3))
+    n_samples = len(y_values)
+    color_map = {0: UNUSED_COLOR, 1: TRAIN_COLOR, 2: TEST_COLOR}
 
-    # Determine if CV uses groups
-    use_groups = "Group" in type(cv).__name__
-    groups_arg = groups if use_groups else None
-
-    # Generate the training/testing visualizations for each CV split
-    for ii, (tr, tt) in enumerate(cv.split(X=X, y=y, groups=groups_arg)):
-        # Fill in indices with the training/test groups
-        indices = np.array([np.nan] * len(X))
-        indices[tt] = 1
-        indices[tr] = 0
-
-        # Visualize the results
-        ax.scatter(
-            range(len(indices)),
-            [ii + 0.5] * len(indices),
-            c=indices,
-            marker="_",
-            lw=lw,
-            cmap=CMAP_CV,
-            vmin=-0.2,
-            vmax=1.2,
+    for fold_i in range(n_splits):
+        indices = fold_values[f"fold_{fold_i}"]
+        colors = [color_map[v] for v in indices]
+        ax.barh(
+            [fold_i] * n_samples,
+            width=1,
+            left=range(n_samples),
+            height=0.8,
+            color=colors,
+            edgecolor="none",
         )
 
-    # Plot the data classes and groups at the end
-    ax.scatter(
-        range(len(X)), [ii + 1.5] * len(X), c=y, marker="_", lw=lw, cmap=CMAP_DATA
+    # Class labels bar
+    n_classes = max(len(set(y_values)), 1)
+    class_colors = [CMAP_DATA(c / max(n_classes - 1, 1)) for c in y_values]
+    ax.barh(
+        [n_splits] * n_samples,
+        width=1,
+        left=range(n_samples),
+        height=0.8,
+        color=class_colors,
+        edgecolor="none",
     )
 
-    ax.scatter(
-        range(len(X)), [ii + 2.5] * len(X), c=groups, marker="_", lw=lw, cmap=CMAP_DATA
+    # Group labels bar
+    n_groups = max(len(set(group_values)), 1)
+    group_colors = [CMAP_DATA(g / max(n_groups - 1, 1)) for g in group_values]
+    ax.barh(
+        [n_splits + 1] * n_samples,
+        width=1,
+        left=range(n_samples),
+        height=0.8,
+        color=group_colors,
+        edgecolor="none",
     )
 
-    # Formatting
-    yticklabels = list(range(n_splits)) + ["class", "group"]
     ax.set(
-        yticks=np.arange(n_splits + 2) + 0.5,
-        yticklabels=yticklabels,
+        yticks=range(n_splits + 2),
+        yticklabels=[f"Fold {i}" for i in range(n_splits)] + ["Class", "Group"],
         xlabel="Sample index",
-        ylabel="CV iteration",
-        ylim=[n_splits + 2.2, -0.2],
-        xlim=[0, N_POINTS],
+        xlim=(0, n_samples),
+        ylim=(n_splits + 1.8, -0.5),
     )
-    ax.set_title("{}".format(type(cv).__name__), fontsize=15)
-
-    # Add legend
-    ax.legend(
-        [Patch(color=CMAP_CV(0.8)), Patch(color=CMAP_CV(0.02))],
-        ["Testing set", "Training set"],
-        loc=(1.02, 0.8),
-    )
-
-    fig.tight_layout()
-    fig.subplots_adjust(right=0.7)
-
-    return fig
+    ax.set_title(title, fontsize=12, fontweight="bold")
 
 
-def _plot_all_cv_strategies(X, y, groups, n_splits):
-    """Plot all 8 CV strategies in a grid.
+# ---------------------------------------------------------------------------
+# Comparator callbacks: compare_results / plot_results
+# ---------------------------------------------------------------------------
 
-    Returns
-    -------
-    fig : matplotlib.figure.Figure
-    """
-    cvs = (
-        KFold,
-        GroupKFold,
-        ShuffleSplit,
-        StratifiedKFold,
-        StratifiedGroupKFold,
-        GroupShuffleSplit,
-        StratifiedShuffleSplit,
-        TimeSeriesSplit,
-    )
 
-    # Create 4x2 grid
-    fig, axes = plt.subplots(4, 2, figsize=(14, 12))
-    axes = axes.flatten()
+def compare_results(comparator):
+    """Assert that sklearn and xorq fold assignments match for every splitter."""
+    print("\n=== Comparing Results ===")
+    for name in SPLITTERS:
+        sk_fold_df = comparator.sklearn_results[name]["other"]["fold_df"]
+        xo_fold_df = comparator.xorq_results[name]["other"]["fold_df"]
 
-    _shuffle_cvs = (ShuffleSplit, GroupShuffleSplit, StratifiedShuffleSplit)
-    for idx, cv_class in enumerate(cvs):
-        if cv_class in _shuffle_cvs:
-            cv = cv_class(n_splits=n_splits, random_state=RANDOM_STATE)
-        else:
-            cv = cv_class(n_splits=n_splits)
-        ax = axes[idx]
+        # sklearn ran on raw data order; xorq ran on deterministically-sorted
+        # data. To compare, re-run sklearn on the xorq row order.
+        make_cv, _ = SPLITTERS[name]
+        xo_sklearn_fold_df = _build_sklearn_fold_df(
+            make_cv(),
+            xo_fold_df[list(FEATURE_COLS)].values,
+            xo_fold_df[TARGET_COL].values,
+        )
 
-        # Determine if CV uses groups
-        use_groups = "Group" in cv_class.__name__
-        groups_arg = groups if use_groups else None
-
-        # Generate the training/testing visualizations for each CV split
-        for ii, (tr, tt) in enumerate(cv.split(X=X, y=y, groups=groups_arg)):
-            # Fill in indices with the training/test groups
-            indices = np.array([np.nan] * len(X))
-            indices[tt] = 1
-            indices[tr] = 0
-
-            # Visualize the results
-            ax.scatter(
-                range(len(indices)),
-                [ii + 0.5] * len(indices),
-                c=indices,
-                marker="_",
-                lw=10,
-                cmap=CMAP_CV,
-                vmin=-0.2,
-                vmax=1.2,
+        for fold_i in range(N_SPLITS):
+            col = f"fold_{fold_i}"
+            np.testing.assert_array_equal(
+                xo_sklearn_fold_df[col].values,
+                xo_fold_df[col].values,
+                err_msg=f"{name} fold {fold_i} mismatch",
             )
+        print(f"  {name}: fold assignments match")
 
-        # Plot the data classes and groups at the end
-        ax.scatter(
-            range(len(X)), [ii + 1.5] * len(X), c=y, marker="_", lw=10, cmap=CMAP_DATA
-        )
+    print("  All fold assignments verified.")
 
-        ax.scatter(
-            range(len(X)),
-            [ii + 2.5] * len(X),
-            c=groups,
-            marker="_",
-            lw=10,
-            cmap=CMAP_DATA,
-        )
 
-        # Formatting
-        yticklabels = list(range(n_splits)) + ["class", "group"]
-        ax.set(
-            yticks=np.arange(n_splits + 2) + 0.5,
-            yticklabels=yticklabels,
-            xlabel="Sample index",
-            ylabel="CV iteration",
-            ylim=[n_splits + 2.2, -0.2],
-            xlim=[0, N_POINTS],
-        )
-        ax.set_title("{}".format(cv_class.__name__), fontsize=12)
-
-    # Add legend to last subplot
-    axes[-1].legend(
-        [Patch(color=CMAP_CV(0.8)), Patch(color=CMAP_CV(0.02))],
-        ["Testing set", "Training set"],
-        loc="center",
+def plot_results(comparator):
+    """Build side-by-side fold assignment visualization."""
+    n_splitters = len(SPLITTERS)
+    fig, axes = plt.subplots(
+        n_splitters, 2, figsize=(16, 2.8 * n_splitters), constrained_layout=True
     )
 
-    fig.tight_layout()
+    for row, name in enumerate(SPLITTERS):
+        sk_fold_df = comparator.sklearn_results[name]["other"]["fold_df"]
+        xo_fold_df = comparator.xorq_results[name]["other"]["fold_df"]
 
+        # Use xorq's materialized data for class/group display
+        y_display = xo_fold_df[TARGET_COL].values
+        group_display = xo_fold_df["group"].values
+
+        sk_folds = {
+            f"fold_{i}": sk_fold_df[f"fold_{i}"].values
+            for i in range(N_SPLITS)
+        }
+        xo_folds = {
+            f"fold_{i}": xo_fold_df[f"fold_{i}"].values for i in range(N_SPLITS)
+        }
+
+        _plot_fold_bars(
+            axes[row, 0], sk_folds, N_SPLITS, y_display, group_display,
+            f"{name} (sklearn)",
+        )
+        _plot_fold_bars(
+            axes[row, 1], xo_folds, N_SPLITS, y_display, group_display,
+            f"{name} (xorq)",
+        )
+
+    # Legend
+    legend_patches = [
+        Patch(color=TRAIN_COLOR, label="Train"),
+        Patch(color=TEST_COLOR, label="Test"),
+    ]
+    fig.legend(handles=legend_patches, loc="upper right", fontsize=11)
+    fig.suptitle(
+        "CV Fold Assignments: sklearn vs xorq (deferred)",
+        fontsize=16,
+        fontweight="bold",
+    )
     return fig
 
 
-# =========================================================================
-# SKLEARN WAY -- eager CV visualization
-# =========================================================================
-
-
-def sklearn_way(data_dict):
-    """Eager sklearn: Generate CV splits and visualize immediately.
-
-    Returns dict with individual CV plots.
-    """
-    X = data_dict["X"]
-    y = data_dict["y"]
-    groups = data_dict["groups"]
-
-    # Test with KFold as example
-    print("sklearn: Visualizing KFold cross-validation...")
-    cv = KFold(n_splits=N_SPLITS)
-
-    # Collect split indices for verification
-    splits = list(cv.split(X=X, y=y, groups=None))
-
-    print(f"Number of splits: {len(splits)}")
-    print(
-        f"First split train size: {len(splits[0][0])}, test size: {len(splits[0][1])}"
-    )
-
-    # Generate plot for KFold
-    fig_kfold = _plot_cv_indices(cv, X, y, groups, N_SPLITS)
-
-    # Generate composite plot with all CV strategies
-    fig_all = _plot_all_cv_strategies(X, y, groups, N_SPLITS)
-
-    return {
-        "splits": splits,
-        "fig_kfold": fig_kfold,
-        "fig_all": fig_all,
-    }
-
-
 # ---------------------------------------------------------------------------
-# Plotting helpers for deferred xorq plots (module-level)
+# Module-level setup
 # ---------------------------------------------------------------------------
 
+metrics_names_funcs = ()
 
-def _build_kfold_plot_from_df(df_materialized):
-    """Build KFold plot from materialized DataFrame."""
-    # Extract arrays from DataFrame
-    X_mat = df_materialized[[f"x_{i}" for i in range(10)]].values
-    y_mat = df_materialized["y"].values
-    groups_mat = df_materialized["groups"].values
+# Each splitter gets its own pipeline clone so we can map pipeline id -> name.
+from sklearn.base import clone as _clone
 
-    cv = KFold(n_splits=N_SPLITS)
-    return _plot_cv_indices(cv, X_mat, y_mat, groups_mat, N_SPLITS)
+names_pipelines = tuple(
+    (name, _clone(_sk_pipeline)) for name in SPLITTERS
+)
+for name, pipeline in names_pipelines:
+    _pipeline_to_splitter[id(pipeline)] = name
 
+comparator = SklearnXorqComparator(
+    names_pipelines=names_pipelines,
+    features=FEATURE_COLS,
+    target=TARGET_COL,
+    pred=PRED_COL,
+    metrics_names_funcs=metrics_names_funcs,
+    load_data=load_data,
+    split_data=split_data_nop,
+    make_sklearn_result=make_sklearn_cv_result,
+    make_deferred_xorq_result=make_deferred_xorq_cv_result,
+    make_xorq_result=make_xorq_cv_result,
+    compare_results_fn=compare_results,
+    plot_results_fn=plot_results,
+)
 
-def _build_all_cv_plot_from_df(df_materialized):
-    """Build composite plot with all CV strategies."""
-    # Extract arrays from DataFrame
-    X_mat = df_materialized[[f"x_{i}" for i in range(10)]].values
-    y_mat = df_materialized["y"].values
-    groups_mat = df_materialized["groups"].values
-
-    return _plot_all_cv_strategies(X_mat, y_mat, groups_mat, N_SPLITS)
-
-
-# =========================================================================
-# XORQ WAY -- deferred CV visualization
-# =========================================================================
-
-
-def xorq_way(data_dict):
-    """Deferred xorq: Same CV visualization but with deferred plotting.
-
-    Returns dict with data table expression and splits for verification.
-    """
-    con = xo.connect()
-
-    df = data_dict["df"]
-    X = data_dict["X"]
-    y = data_dict["y"]
-    # groups = data_dict["groups"]  # Not used in xorq path (no GroupKFold support)
-
-    # Register data
-    table = con.register(df, "cv_data")
-
-    print("xorq: Visualizing KFold cross-validation (deferred)...")
-
-    # For verification, compute splits eagerly (this matches sklearn behavior)
-    cv = KFold(n_splits=N_SPLITS)
-    splits = list(cv.split(X=X, y=y, groups=None))
-
-    print(f"Number of splits: {len(splits)}")
-    print(
-        f"First split train size: {len(splits[0][0])}, test size: {len(splits[0][1])}"
-    )
-
-    return {
-        "splits": splits,
-        "table": table,
-    }
+# Expose deferred fold exprs for xorq build
+xorq_kfold_folds = comparator.deferred_xorq_results["KFold"]["preds"]
+xorq_stratifiedkfold_folds = comparator.deferred_xorq_results[
+    "StratifiedKFold"
+]["preds"]
+xorq_shufflesplit_folds = comparator.deferred_xorq_results["ShuffleSplit"][
+    "preds"
+]
+xorq_stratifiedshufflesplit_folds = comparator.deferred_xorq_results[
+    "StratifiedShuffleSplit"
+]["preds"]
+xorq_timeseriessplit_folds = comparator.deferred_xorq_results[
+    "TimeSeriesSplit"
+]["preds"]
 
 
 # =========================================================================
-# Run and plot side by side
+# Main
 # =========================================================================
 
 
 def main():
     os.makedirs("imgs", exist_ok=True)
 
-    print("=== GENERATING DATA ===")
-    data_dict = _generate_data()
-
-    print("\n=== SKLEARN WAY ===")
-    sk_results = sklearn_way(data_dict)
-
-    print("\n=== XORQ WAY ===")
-    xo_results = xorq_way(data_dict)
-
-    # ---- Assert numerical equivalence BEFORE plotting ----
-    print("\n=== ASSERTIONS ===")
-
-    # Verify that split indices match
-    sk_splits = sk_results["splits"]
-    xo_splits = xo_results["splits"]
-
-    assert len(sk_splits) == len(xo_splits), "Number of splits must match"
-
-    sk_split_df = pd.DataFrame(
-        {
-            f"fold_{i}_{role}": pd.Series(indices)
-            for i, (train, test) in enumerate(sk_splits)
-            for role, indices in [("train", train), ("test", test)]
-        }
-    )
-    xo_split_df = pd.DataFrame(
-        {
-            f"fold_{i}_{role}": pd.Series(indices)
-            for i, (train, test) in enumerate(xo_splits)
-            for role, indices in [("train", train), ("test", test)]
-        }
-    )
-    pd.testing.assert_frame_equal(sk_split_df, xo_split_df)
-    print("Assertions passed: sklearn and xorq CV splits are identical.")
-
-    print("\n=== EXECUTING DEFERRED PLOTS ===")
-    xo_kfold_png = deferred_matplotlib_plot(
-        xo_results["table"], _build_kfold_plot_from_df
-    ).execute()
-    xo_all_png = deferred_matplotlib_plot(
-        xo_results["table"], _build_all_cv_plot_from_df
-    ).execute()
-
-    print("Deferred plots executed successfully.")
-
-    # Composite: sklearn (left) | xorq (right) for KFold
-    print("\n=== CREATING COMPOSITE PLOTS ===")
-
-    # KFold comparison
-    xo_kfold_img = load_plot_bytes(xo_kfold_png)
-
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-
-    axes[0].imshow(fig_to_image(sk_results["fig_kfold"]))
-    axes[0].set_title("sklearn", fontsize=14, fontweight="bold")
-    axes[0].axis("off")
-
-    axes[1].imshow(xo_kfold_img)
-    axes[1].set_title("xorq (deferred)", fontsize=14, fontweight="bold")
-    axes[1].axis("off")
-
-    fig.suptitle("KFold Cross-Validation: sklearn vs xorq", fontsize=16)
-    fig.tight_layout()
-    out_kfold = "imgs/plot_cv_indices_kfold.png"
-    fig.savefig(out_kfold, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"KFold comparison saved to {out_kfold}")
-
-    # All CV strategies comparison
-    xo_all_img = load_plot_bytes(xo_all_png)
-
-    fig, axes = plt.subplots(1, 2, figsize=(28, 12))
-
-    axes[0].imshow(fig_to_image(sk_results["fig_all"]))
-    axes[0].set_title("sklearn", fontsize=14, fontweight="bold")
-    axes[0].axis("off")
-
-    axes[1].imshow(xo_all_img)
-    axes[1].set_title("xorq (deferred)", fontsize=14, fontweight="bold")
-    axes[1].axis("off")
-
-    fig.suptitle("All CV Strategies: sklearn vs xorq", fontsize=16)
-    fig.tight_layout()
-    out_all = "imgs/plot_cv_indices_all.png"
-    fig.savefig(out_all, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"All CV strategies comparison saved to {out_all}")
+    comparator.result_comparison
+    save_fig("imgs/plot_cv_indices_all.png", comparator.plot_results())
 
 
 if __name__ in ("__pytest_main__",):
