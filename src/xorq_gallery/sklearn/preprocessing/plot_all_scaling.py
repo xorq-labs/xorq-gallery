@@ -21,6 +21,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import xorq.api as xo
 from matplotlib import cm
 from sklearn.datasets import fetch_california_housing
 from sklearn.pipeline import Pipeline as SklearnPipeline
@@ -34,6 +35,8 @@ from sklearn.preprocessing import (
     StandardScaler,
     minmax_scale,
 )
+from xorq.api import SessionConfig
+from xorq.config import options
 
 from xorq_gallery.sklearn.sklearn_lib import (
     SklearnXorqComparator,
@@ -43,6 +46,10 @@ from xorq_gallery.sklearn.sklearn_lib import (
     split_data_nop,
 )
 from xorq_gallery.utils import fig_to_image, save_fig
+
+
+# Force single-threaded DataFusion to preserve scan order
+options.backend = xo.connect(session_config=SessionConfig().with_target_partitions(1))
 
 
 # ---------------------------------------------------------------------------
@@ -60,8 +67,8 @@ CMAP = getattr(cm, "plasma_r", cm.hot_r)
 
 # QuantileTransformer uses random subsampling internally; row-ordering
 # differences between ibis and pandas cause small deviations — use tolerances.
-COMPARE_RTOL = 0.05
-COMPARE_ATOL = 0.05  # QuantileTransformer (normal) can deviate up to ~0.02 due to subsampling stochasticity
+COMPARE_RTOL = 1e-7
+COMPARE_ATOL = 1e-7  # tightened to test if single-partition fixes QuantileTransformer
 
 
 # ---------------------------------------------------------------------------
@@ -261,16 +268,17 @@ def plot_results(comparator):
     for row, name in enumerate(all_names):
         if name == "unscaled":
             sk_X = xo_X = X_baseline
+            xo_y = y
             title = "Unscaled data"
         else:
             sk_X = comparator.sklearn_results[name]["transformed"]
-            xo_X = comparator.xorq_results[name]["transformed"][
-                list(FEATURE_COLS)
-            ].values
+            xo_result = comparator.xorq_results[name]["transformed"]
+            xo_X = xo_result[list(FEATURE_COLS)].values
+            xo_y = xo_result[TARGET_COL].values
             title = name
 
         sk_fig = _make_plot(sk_X, y, f"sklearn: {title}", y_full_min, y_full_max)
-        xo_fig = _make_plot(xo_X, y, f"xorq: {title}", y_full_min, y_full_max)
+        xo_fig = _make_plot(xo_X, xo_y, f"xorq: {title}", y_full_min, y_full_max)
 
         axes[row, 0].imshow(fig_to_image(sk_fig))
         axes[row, 0].axis("off")
