@@ -55,6 +55,7 @@ def load_data():
     faces, target = fetch_olivetti_faces(
         return_X_y=True, shuffle=True, random_state=SEED
     )
+    faces = faces.astype(np.float64)
     n_samples, n_features = faces.shape
     print(f"Dataset: {n_samples} faces, {n_features} features")
 
@@ -261,7 +262,7 @@ _centered_names_pipelines = (
                         n_components=N_COMPONENTS,
                         alpha=0.1,
                         max_iter=100,
-                        batch_size=3,
+                        batch_size=5,
                         random_state=SEED,
                     ),
                 )
