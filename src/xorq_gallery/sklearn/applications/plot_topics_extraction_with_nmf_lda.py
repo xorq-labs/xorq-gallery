@@ -20,12 +20,11 @@ from functools import cache
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from sklearn.base import clone
 from sklearn.datasets import fetch_20newsgroups
 from sklearn.decomposition import NMF, LatentDirichletAllocation
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.pipeline import Pipeline as SklearnPipeline
-
-from sklearn.base import clone
 
 from xorq_gallery.sklearn.sklearn_lib import (
     SklearnXorqComparator,

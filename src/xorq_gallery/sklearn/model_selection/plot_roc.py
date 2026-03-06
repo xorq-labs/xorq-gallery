@@ -85,14 +85,19 @@ def _plot_roc_curves(
 
     for i in range(n_classes):
         ax.plot(
-            fpr_dict[i], tpr_dict[i],
-            color=colors(i), lw=2,
+            fpr_dict[i],
+            tpr_dict[i],
+            color=colors(i),
+            lw=2,
             label=f"ROC curve of class {class_names[i]} (area = {roc_auc_dict[i]:.2f})",
         )
 
     ax.plot(
-        fpr_dict["micro"], tpr_dict["micro"],
-        color="deeppink", linestyle=":", linewidth=4,
+        fpr_dict["micro"],
+        tpr_dict["micro"],
+        color="deeppink",
+        linestyle=":",
+        linewidth=4,
         label=f"micro-average ROC curve (area = {roc_auc_dict['micro']:.2f})",
     )
     ax.plot([0, 1], [0, 1], "k--", lw=2, label="Chance level (AUC = 0.5)")
@@ -130,7 +135,12 @@ def _make_sklearn_result_for_class(class_idx):
             "fitted": fitted.steps[-1][-1],
             "preds": y_score,
             "metrics": {"roc_auc": roc_auc_val},
-            "other": {"fpr": fpr, "tpr": tpr, "y_test_bin": y_test_bin, "y_score": y_score},
+            "other": {
+                "fpr": fpr,
+                "tpr": tpr,
+                "y_test_bin": y_test_bin,
+                "y_score": y_score,
+            },
         }
 
     return _make
@@ -142,9 +152,15 @@ def _make_deferred_xorq_result_for_class(class_idx):
     target_col_i = f"target_{class_idx}"
     pred_col_i = f"scores_{class_idx}"
 
-    def _make(pipeline, train_data, test_data, features, target, metrics_names_funcs, pred):
-        train_i = train_data.mutate(**{target_col_i: (train_data.target == class_idx).cast(int)})
-        test_i = test_data.mutate(**{target_col_i: (test_data.target == class_idx).cast(int)})
+    def _make(
+        pipeline, train_data, test_data, features, target, metrics_names_funcs, pred
+    ):
+        train_i = train_data.mutate(
+            **{target_col_i: (train_data.target == class_idx).cast(int)}
+        )
+        test_i = test_data.mutate(
+            **{target_col_i: (test_data.target == class_idx).cast(int)}
+        )
 
         xorq_fitted = Pipeline.from_instance(pipeline).fit(
             train_i, features=tuple(features), target=target_col_i
@@ -157,13 +173,20 @@ def _make_deferred_xorq_result_for_class(class_idx):
                 target=target_col_i, pred=pred_col_i, metric=roc_curve
             ),
         )
-        metrics = {f"roc_auc_{class_idx}": proba_expr.agg(**{f"roc_auc_{class_idx}": make_roc_auc})}
+        metrics = {
+            f"roc_auc_{class_idx}": proba_expr.agg(
+                **{f"roc_auc_{class_idx}": make_roc_auc}
+            )
+        }
 
         return {
             "xorq_fitted": xorq_fitted,
             "preds": proba_expr,
             "metrics": metrics,
-            "other": {"target_col": lambda: target_col_i, "pred_col": lambda: pred_col_i},
+            "other": {
+                "target_col": lambda: target_col_i,
+                "pred_col": lambda: pred_col_i,
+            },
         }
 
     return _make
@@ -191,7 +214,12 @@ def _make_xorq_result_for_class(class_idx):
             "fitted": xorq_fitted.fitted_steps[-1].model,
             "preds": y_score,
             "metrics": {"roc_auc": roc_auc_val},
-            "other": {"fpr": fpr, "tpr": tpr, "y_test_bin": y_test_bin, "y_score": y_score},
+            "other": {
+                "fpr": fpr,
+                "tpr": tpr,
+                "y_test_bin": y_test_bin,
+                "y_score": y_score,
+            },
         }
 
     return _make

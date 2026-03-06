@@ -412,20 +412,12 @@ def _plot_comparator(comparator, native_result, title_suffix):
     sk = comparator.sklearn_results
     xo_res = comparator.xorq_results
 
-    sk_list = [
-        (name, sk[name]["preds"], sk[name]["fit_times"])
-        for name in methods
-    ]
+    sk_list = [(name, sk[name]["preds"], sk[name]["fit_times"]) for name in methods]
     if native_result is not None:
-        sk_list.append(
-            ("Native", native_result["mape"], native_result["fit_times"])
-        )
+        sk_list.append(("Native", native_result["mape"], native_result["fit_times"]))
 
     # xorq has no fit_time; reuse sklearn fit_times for position only
-    xo_list = [
-        (name, xo_res[name]["preds"], sk[name]["fit_times"])
-        for name in methods
-    ]
+    xo_list = [(name, xo_res[name]["preds"], sk[name]["fit_times"]) for name in methods]
 
     fig, axes = plt.subplots(1, 2, figsize=(22, 7))
     _draw_scatter(axes[0], sk_list, f"sklearn - {title_suffix}")
@@ -506,8 +498,14 @@ comparator_underfit = SklearnXorqComparator(
 def main():
     comparator_full.result_comparison
     comparator_underfit.result_comparison
-    save_fig("imgs/plot_gradient_boosting_categorical_full.png", comparator_full.plot_results())
-    save_fig("imgs/plot_gradient_boosting_categorical_underfit.png", comparator_underfit.plot_results())
+    save_fig(
+        "imgs/plot_gradient_boosting_categorical_full.png",
+        comparator_full.plot_results(),
+    )
+    save_fig(
+        "imgs/plot_gradient_boosting_categorical_underfit.png",
+        comparator_underfit.plot_results(),
+    )
 
 
 if __name__ in ("__pytest_main__",):

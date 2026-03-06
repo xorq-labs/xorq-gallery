@@ -202,7 +202,10 @@ def _make_sklearn_cv_result(
     return {
         "fitted": None,
         "preds": rmse_test,
-        "metrics": {"rmse_test_mean": rmse_test.mean(), "rmse_test_std": rmse_test.std()},
+        "metrics": {
+            "rmse_test_mean": rmse_test.mean(),
+            "rmse_test_std": rmse_test.std(),
+        },
     }
 
 
@@ -235,7 +238,10 @@ def _make_xorq_cv_result(deferred_xorq_result):
     return {
         "fitted": None,
         "preds": rmse_test,
-        "metrics": {"rmse_test_mean": rmse_test.mean(), "rmse_test_std": rmse_test.std()},
+        "metrics": {
+            "rmse_test_mean": rmse_test.mean(),
+            "rmse_test_std": rmse_test.std(),
+        },
     }
 
 
@@ -283,7 +289,9 @@ def plot_results(comparator):
 
     fig.suptitle(
         "Target Encoder Comparison: sklearn vs xorq",
-        fontsize=16, fontweight="bold", y=0.98,
+        fontsize=16,
+        fontweight="bold",
+        y=0.98,
     )
     fig.tight_layout()
 

@@ -122,8 +122,13 @@ def _plot_feature_selection(results, title):
         )
         color = "lightblue" if direction == "forward" else "lightgreen"
         ax.text(
-            0.1, text_y, text,
-            ha="left", va="top", fontsize=12, family="monospace",
+            0.1,
+            text_y,
+            text,
+            ha="left",
+            va="top",
+            fontsize=12,
+            family="monospace",
             bbox=dict(boxstyle="round", facecolor=color, alpha=0.5),
         )
 
@@ -131,9 +136,13 @@ def _plot_feature_selection(results, title):
     bwd_features = set(results[BACKWARD]["other"]["selected_features"])
     match = "Yes" if fwd_features == bwd_features else "No"
     ax.text(
-        0.5, 0.05,
+        0.5,
+        0.05,
         f"Both methods selected same features: {match}",
-        ha="center", va="center", fontsize=12, fontweight="bold",
+        ha="center",
+        va="center",
+        fontsize=12,
+        fontweight="bold",
     )
 
     fig.tight_layout()
@@ -195,8 +204,12 @@ def _make_deferred_xorq_result(
         SklearnPipeline([("ridge", Ridge(alpha=1.0, random_state=RANDOM_STATE))])
     )
     cv_result = deferred_cross_val_score(
-        ridge_pipe, train_data, selected_features, target,
-        cv=CV_SPLITTER, order_by=ROW_IDX,
+        ridge_pipe,
+        train_data,
+        selected_features,
+        target,
+        cv=CV_SPLITTER,
+        order_by=ROW_IDX,
     )
 
     return {
@@ -259,8 +272,12 @@ def compare_results(comparator):
 
 
 def plot_results(comparator):
-    sk_fig = _plot_feature_selection(comparator.sklearn_results, "sklearn - Feature Selection")
-    xo_fig = _plot_feature_selection(comparator.xorq_results, "xorq - Feature Selection")
+    sk_fig = _plot_feature_selection(
+        comparator.sklearn_results, "sklearn - Feature Selection"
+    )
+    xo_fig = _plot_feature_selection(
+        comparator.xorq_results, "xorq - Feature Selection"
+    )
 
     fig, axes = plt.subplots(1, 2, figsize=(20, 6))
     axes[0].imshow(fig_to_image(sk_fig))

@@ -199,8 +199,11 @@ def _make_sklearn_cv_result(
     y = train_data[target]
 
     cv_result = cross_validate(
-        clone(pipeline), X, y,
-        cv=CV_SPLITTER, scoring="neg_mean_absolute_error",
+        clone(pipeline),
+        X,
+        y,
+        cv=CV_SPLITTER,
+        scoring="neg_mean_absolute_error",
     )
     mae_scores = -cv_result["test_score"]
     return {
@@ -216,8 +219,12 @@ def _make_deferred_xorq_cv_result(
     """Deferred xorq: deferred_cross_val_score with TimeSeriesSplit."""
     xorq_pipe = Pipeline.from_instance(pipeline)
     cv_result = deferred_cross_val_score(
-        xorq_pipe, train_data, features, target,
-        cv=CV_SPLITTER, order_by=ROW_IDX,
+        xorq_pipe,
+        train_data,
+        features,
+        target,
+        cv=CV_SPLITTER,
+        order_by=ROW_IDX,
         scoring="neg_mean_absolute_error",
     )
     return {
@@ -281,7 +288,9 @@ def plot_results(comparator):
 
     fig.suptitle(
         "Cyclical Feature Engineering: sklearn vs xorq",
-        fontsize=16, fontweight="bold", y=0.98,
+        fontsize=16,
+        fontweight="bold",
+        y=0.98,
     )
     fig.tight_layout()
 

@@ -153,9 +153,7 @@ names_pipelines = (
     ),
     (
         "Random forest",
-        SklearnPipeline(
-            [("rfc", RandomForestClassifier(random_state=RANDOM_STATE))]
-        ),
+        SklearnPipeline([("rfc", RandomForestClassifier(random_state=RANDOM_STATE))]),
     ),
 )
 
@@ -259,9 +257,12 @@ def _plot_calibration_panel(results, title):
             y_test, y_prob, n_bins=N_BINS, strategy="uniform"
         )
         ax_cal.plot(
-            prob_pred, prob_true,
-            marker=markers[i], label=name,
-            color=colors_map(i), linewidth=2,
+            prob_pred,
+            prob_true,
+            marker=markers[i],
+            label=name,
+            color=colors_map(i),
+            linewidth=2,
         )
 
     ax_cal.plot([0, 1], [0, 1], "k:", label="Perfectly calibrated")
@@ -297,7 +298,9 @@ def plot_results(comparator):
 
     fig.suptitle(
         "Comparison of Calibration of Classifiers: sklearn vs xorq",
-        fontsize=16, fontweight="bold", y=0.98,
+        fontsize=16,
+        fontweight="bold",
+        y=0.98,
     )
     fig.tight_layout()
 

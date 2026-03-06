@@ -251,9 +251,15 @@ def _draw_row(axes, comparator, results_key, label_prefix):
         acc = results[name]["metrics"]["accuracy"]
         clf = results[name]["other"]["full_pipeline"]
         _plot_decision_boundary(
-            axes[j], X, y, clf,
+            axes[j],
+            X,
+            y,
+            clf,
             f"{name}\nacc={acc:.2f}",
-            x_min, x_max, y_min, y_max,
+            x_min,
+            x_max,
+            y_min,
+            y_max,
         )
 
 
@@ -306,6 +312,7 @@ def plot_results(comparators):
 # ---------------------------------------------------------------------------
 # Module-level setup — one comparator per dataset
 # ---------------------------------------------------------------------------
+
 
 # plot_results is called from main() with all comparators, not per-comparator
 def _noop_compare(comparator):

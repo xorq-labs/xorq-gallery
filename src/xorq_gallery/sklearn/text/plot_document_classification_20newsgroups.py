@@ -103,12 +103,10 @@ def _load_data():
 
 def split_data(df):
     """Split by pre-assigned _split column, then drop the marker."""
-    train_df = df[df["_split"] == "train"].drop(columns=["_split"]).reset_index(
-        drop=True
+    train_df = (
+        df[df["_split"] == "train"].drop(columns=["_split"]).reset_index(drop=True)
     )
-    test_df = df[df["_split"] == "test"].drop(columns=["_split"]).reset_index(
-        drop=True
-    )
+    test_df = df[df["_split"] == "test"].drop(columns=["_split"]).reset_index(drop=True)
     return train_df, test_df
 
 

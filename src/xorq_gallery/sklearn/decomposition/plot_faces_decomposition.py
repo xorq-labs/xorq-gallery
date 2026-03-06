@@ -136,9 +136,7 @@ def _make_sklearn_other(fitted):
 
 def _make_xorq_other(xorq_fitted):
     """Return dict of callables that extract components after deferred fit."""
-    return {
-        "components": lambda: _get_components(xorq_fitted.fitted_steps[-1].model)
-    }
+    return {"components": lambda: _get_components(xorq_fitted.fitted_steps[-1].model)}
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +207,14 @@ _pixel_names_pipelines = (
     (
         NMF,
         SklearnPipeline(
-            [("nmf", decomposition.NMF(n_components=N_COMPONENTS, tol=5e-3, random_state=SEED))]
+            [
+                (
+                    "nmf",
+                    decomposition.NMF(
+                        n_components=N_COMPONENTS, tol=5e-3, random_state=SEED
+                    ),
+                )
+            ]
         ),
     ),
 )
@@ -230,7 +235,9 @@ _centered_names_pipelines = (
                 (
                     "pca",
                     decomposition.PCA(
-                        n_components=N_COMPONENTS, svd_solver="randomized", whiten=True,
+                        n_components=N_COMPONENTS,
+                        svd_solver="randomized",
+                        whiten=True,
                         random_state=SEED,
                     ),
                 )
@@ -295,7 +302,8 @@ _centered_names_pipelines = (
                 (
                     "fa",
                     decomposition.FactorAnalysis(
-                        n_components=N_COMPONENTS, max_iter=20,
+                        n_components=N_COMPONENTS,
+                        max_iter=20,
                         random_state=SEED,
                     ),
                 )

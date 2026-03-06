@@ -157,8 +157,12 @@ def _make_deferred_xorq_result(
         sk_pipe.set_params(**params)
         xorq_pipe = Pipeline.from_instance(sk_pipe)
         cv_result = deferred_cross_val_score(
-            xorq_pipe, train_data, features, target,
-            cv=CV_SPLITTER, random_seed=RANDOM_STATE,
+            xorq_pipe,
+            train_data,
+            features,
+            target,
+            cv=CV_SPLITTER,
+            random_seed=RANDOM_STATE,
         )
         results.append((params, cv_result))
 
@@ -227,7 +231,8 @@ def plot_results(comparator):
 
     fig.suptitle(
         "FeatureUnion with GridSearchCV: sklearn vs xorq",
-        fontsize=16, fontweight="bold",
+        fontsize=16,
+        fontweight="bold",
     )
     fig.tight_layout(rect=[0, 0, 1, 0.90])
 
