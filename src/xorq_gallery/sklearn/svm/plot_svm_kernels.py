@@ -129,6 +129,11 @@ def compare_results(comparator):
         xo_acc = xorq_result["metrics"]["accuracy"]
         print(f"  {name:8s} accuracy - sklearn: {sk_acc:.4f}, xorq: {xo_acc:.4f}")
 
+    print("\n=== Support Vector Counts ===")
+    for kernel in KERNELS:
+        clf = sklearn_results[kernel]["fitted"]
+        print(f"  {kernel:8s}: n_support={len(clf.support_vectors_)}")
+
 
 def plot_results(comparator):
     X = comparator.df[list(FEATURE_COLS)].values
@@ -188,12 +193,6 @@ comparator = SklearnXorqComparator(
 
 def main():
     comparator.result_comparison
-
-    print("\n=== Support Vector Counts ===")
-    for kernel in KERNELS:
-        clf = comparator.sklearn_results[kernel]["fitted"]
-        print(f"  {kernel:8s}: n_support={len(clf.support_vectors_)}")
-
     save_fig("imgs/plot_svm_kernels.png", comparator.plot_results())
 
 

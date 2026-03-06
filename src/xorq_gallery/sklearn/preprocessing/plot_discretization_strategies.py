@@ -297,14 +297,12 @@ comparator_ds2 = SklearnXorqComparator(
 ) = (comparator_ds2.deferred_xorq_results[name]["transformed"] for name in methods)
 
 
-def main():
-    for comparator in (comparator_ds0, comparator_ds1, comparator_ds2):
-        comparator.result_comparison
+_all_comparators = (comparator_ds0, comparator_ds1, comparator_ds2)
 
-    ds_figs = [
-        comparator.plot_results()
-        for comparator in (comparator_ds0, comparator_ds1, comparator_ds2)
-    ]
+
+def _build_composite_figure():
+    """Compose per-dataset row figures into a single composite figure."""
+    ds_figs = [comparator.plot_results() for comparator in _all_comparators]
     fig, axes = plt.subplots(3, 1, figsize=(28, 9))
     for row, ds_fig in enumerate(ds_figs):
         axes[row].imshow(fig_to_image(ds_fig))
@@ -314,7 +312,13 @@ def main():
         "KBinsDiscretizer Strategies: sklearn vs xorq", fontsize=16, fontweight="bold"
     )
     fig.tight_layout()
-    save_fig("imgs/discretization_strategies.png", fig)
+    return fig
+
+
+def main():
+    for comparator in _all_comparators:
+        comparator.result_comparison
+    save_fig("imgs/discretization_strategies.png", _build_composite_figure())
 
 
 if __name__ in ("__pytest_main__",):

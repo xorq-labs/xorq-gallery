@@ -105,6 +105,12 @@ def compare_results(comparator):
         xo_acc = xorq_result["metrics"]["accuracy"]
         print(f"  {name} accuracy - sklearn: {sk_acc:.4f}, xorq: {xo_acc:.4f}")
 
+    sk_ranking = sklearn_results[RFE_NAME]["fitted"].ranking_.reshape(IMAGE_SHAPE)
+    xo_fitted = comparator.deferred_xorq_results[RFE_NAME]["xorq_fitted"]
+    xo_ranking = xo_fitted.fitted_steps[1].model.ranking_.reshape(IMAGE_SHAPE)
+    np.testing.assert_array_equal(sk_ranking, xo_ranking)
+    print("Rankings match.")
+
 
 def plot_results(comparator):
     # sklearn ranking: result["fitted"] IS the RFE instance (last pipeline step)
@@ -217,16 +223,6 @@ comparator = SklearnXorqComparator(
 
 def main():
     comparator.result_comparison
-
-    sk_ranking = comparator.sklearn_results[RFE_NAME]["fitted"].ranking_.reshape(
-        IMAGE_SHAPE
-    )
-    xo_fitted = comparator.deferred_xorq_results[RFE_NAME]["xorq_fitted"]
-    xo_ranking = xo_fitted.fitted_steps[1].model.ranking_.reshape(IMAGE_SHAPE)
-
-    np.testing.assert_array_equal(sk_ranking, xo_ranking)
-    print("Rankings match.")
-
     save_fig("imgs/plot_rfe_digits.png", comparator.plot_results())
 
 

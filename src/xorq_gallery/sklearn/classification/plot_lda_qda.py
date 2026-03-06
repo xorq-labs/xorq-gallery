@@ -294,15 +294,13 @@ comparators = {
 )
 
 
-def main():
+def _build_composite_figure():
+    """Compose per-dataset row figures into a single composite figure."""
     row_labels = (
         "Isotropic covariance\n(LDA = QDA: same covariance per class)",
         "Shared covariance\n(LDA = QDA: same covariance per class)",
         "Different covariances\n(LDA != QDA: per-class covariance matters)",
     )
-    for ds_name in dataset_names:
-        comparators[ds_name].result_comparison
-
     row_figs = [comparators[ds_name].plot_results() for ds_name in dataset_names]
 
     fig, axes = plt.subplots(len(dataset_names), 1, figsize=(16, 20))
@@ -314,7 +312,13 @@ def main():
         "Linear and Quadratic Discriminant Analysis: sklearn vs xorq", fontsize=16
     )
     fig.tight_layout(rect=[0, 0, 1, 0.97])
-    save_fig("imgs/plot_lda_qda.png", fig)
+    return fig
+
+
+def main():
+    for ds_name in dataset_names:
+        comparators[ds_name].result_comparison
+    save_fig("imgs/plot_lda_qda.png", _build_composite_figure())
 
 
 if __name__ in ("__pytest_main__",):

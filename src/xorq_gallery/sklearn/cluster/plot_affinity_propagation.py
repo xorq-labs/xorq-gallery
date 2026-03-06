@@ -134,6 +134,12 @@ def compare_results(comparator):
                 f"  {name} {metric_name:15s} - sklearn: {sk_val:.3f}, xorq: {xo_val:.3f}"
             )
 
+    # Silhouette: needs raw data alongside labels_, so computed outside comparator
+    af_fitted = comparator.sklearn_results[AP_NAME]["fitted"]
+    X = comparator.df[list(FEATURE_COLS)].values
+    sil = metrics.silhouette_score(X, af_fitted.labels_, metric="sqeuclidean")
+    print(f"\nSilhouette: {sil:.3f}")
+
 
 def plot_results(comparator):
     af_fitted = comparator.sklearn_results[AP_NAME]["fitted"]
@@ -200,13 +206,6 @@ comparator = SklearnXorqComparator(
 
 def main():
     comparator.result_comparison
-
-    # Silhouette: needs raw data alongside labels_, so computed outside comparator
-    af_fitted = comparator.sklearn_results[AP_NAME]["fitted"]
-    X = comparator.df[list(FEATURE_COLS)].values
-    sil = metrics.silhouette_score(X, af_fitted.labels_, metric="sqeuclidean")
-    print(f"\nSilhouette: {sil:.3f}")
-
     save_fig("imgs/plot_affinity_propagation.png", comparator.plot_results())
 
 

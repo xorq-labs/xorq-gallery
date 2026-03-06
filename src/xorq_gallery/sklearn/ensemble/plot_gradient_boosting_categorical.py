@@ -504,21 +504,10 @@ comparator_underfit = SklearnXorqComparator(
 
 
 def main():
-    print("\n" + "=" * 70)
-    print("Full-depth models (default)")
-    print("=" * 70)
     comparator_full.result_comparison
-
-    print("\n" + "=" * 70)
-    print("Limited-depth models (max_depth=3, max_iter=15)")
-    print("=" * 70)
     comparator_underfit.result_comparison
-
-    fig_full = comparator_full.plot_results()
-    fig_underfit = comparator_underfit.plot_results()
-
-    save_fig("imgs/plot_gradient_boosting_categorical_full.png", fig_full)
-    save_fig("imgs/plot_gradient_boosting_categorical_underfit.png", fig_underfit)
+    save_fig("imgs/plot_gradient_boosting_categorical_full.png", comparator_full.plot_results())
+    save_fig("imgs/plot_gradient_boosting_categorical_underfit.png", comparator_underfit.plot_results())
 
 
 if __name__ in ("__pytest_main__",):

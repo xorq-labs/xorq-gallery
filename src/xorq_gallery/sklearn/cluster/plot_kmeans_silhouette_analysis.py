@@ -153,6 +153,19 @@ def compare_results(comparator):
             f"  n_clusters={name:2s} homogeneity - sklearn: {sk_h:.4f}, xorq: {xo_h:.4f}"
         )
 
+    # Silhouette: needs raw feature data, computed outside comparator
+    X = comparator.df[list(FEATURE_COLS)].values
+    print("\n=== Silhouette Scores ===")
+    for name in methods:
+        n_clusters = int(name)
+        sk_labels = sklearn_results[name]["preds"]
+        xo_labels = xorq_results[name]["preds"][PRED_COL].values
+        sk_sil = sk_metrics.silhouette_score(X, sk_labels)
+        xo_sil = sk_metrics.silhouette_score(X, xo_labels)
+        print(f"  n_clusters={n_clusters}: sklearn={sk_sil:.3f}, xorq={xo_sil:.3f}")
+        np.testing.assert_allclose(sk_sil, xo_sil, rtol=1e-5)
+    print("Silhouette scores match.")
+
 
 def plot_results(comparator):
     X = comparator.df[list(FEATURE_COLS)].values
@@ -234,20 +247,6 @@ comparator = SklearnXorqComparator(
 
 def main():
     comparator.result_comparison
-
-    # Silhouette: needs raw feature data, computed outside comparator
-    X = comparator.df[list(FEATURE_COLS)].values
-    print("\n=== Silhouette Scores ===")
-    for name in methods:
-        n_clusters = int(name)
-        sk_labels = comparator.sklearn_results[name]["preds"]
-        xo_labels = comparator.xorq_results[name]["preds"][PRED_COL].values
-        sk_sil = sk_metrics.silhouette_score(X, sk_labels)
-        xo_sil = sk_metrics.silhouette_score(X, xo_labels)
-        print(f"  n_clusters={n_clusters}: sklearn={sk_sil:.3f}, xorq={xo_sil:.3f}")
-        np.testing.assert_allclose(sk_sil, xo_sil, rtol=1e-5)
-    print("Silhouette scores match.")
-
     save_fig("imgs/plot_kmeans_silhouette_analysis.png", comparator.plot_results())
 
 

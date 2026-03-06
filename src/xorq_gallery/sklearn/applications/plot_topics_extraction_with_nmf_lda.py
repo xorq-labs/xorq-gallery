@@ -279,12 +279,16 @@ comparator = SklearnXorqComparator(
 )
 
 
-def main():
-    comparator.result_comparison
-    fig_panels = comparator.plot_results()
+def _save_topic_panels(fig_panels):
+    """Save each (name, fig) panel from plot_results to its own image file."""
     for name, fig in fig_panels:
         fname = name.lower().replace(" ", "_").replace("(", "").replace(")", "")
         save_fig(f"imgs/topics_{fname}.png", fig)
+
+
+def main():
+    comparator.result_comparison
+    _save_topic_panels(comparator.plot_results())
 
 
 if __name__ in ("__pytest_main__",):

@@ -279,10 +279,8 @@ comparators = {
 # =========================================================================
 
 
-def main():
-    for ds_name in dataset_names:
-        comparators[ds_name].result_comparison
-
+def _build_composite_figure():
+    """Compose per-dataset row figures into a single composite figure."""
     row_figs = [comparators[ds_name].plot_results() for ds_name in dataset_names]
 
     n_alphas = len(ALPHAS)
@@ -318,8 +316,13 @@ def main():
             fontweight="bold",
             rotation=90,
         )
+    return fig
 
-    save_fig("imgs/plot_mlp_alpha.png", fig)
+
+def main():
+    for ds_name in dataset_names:
+        comparators[ds_name].result_comparison
+    save_fig("imgs/plot_mlp_alpha.png", _build_composite_figure())
 
 
 if __name__ in ("__pytest_main__",):
