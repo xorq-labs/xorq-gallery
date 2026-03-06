@@ -12,31 +12,29 @@ deferred_cross_val_score with KFold.
 Both produce identical feature selections and per-fold CV scores.
 
 Dataset: load_diabetes (sklearn diabetes progression dataset)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/feature_selection/plot_select_from_model_diabetes.py
 """
 
 from __future__ import annotations
 
-import os
-from time import time
-
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import xorq.api as xo
+from sklearn.base import clone
 from sklearn.datasets import load_diabetes
 from sklearn.feature_selection import SequentialFeatureSelector
 from sklearn.linear_model import Ridge
 from sklearn.model_selection import KFold, cross_val_score
 from sklearn.pipeline import Pipeline as SklearnPipeline
-from toolz import curry
 from xorq.expr.ml.cross_validation import deferred_cross_val_score
 from xorq.expr.ml.pipeline_lib import Pipeline
 
-from xorq_gallery.utils import (
-    deferred_matplotlib_plot,
-    fig_to_image,
-    load_plot_bytes,
+from xorq_gallery.sklearn.sklearn_lib import (
+    SklearnXorqComparator,
+    split_data_nop,
 )
+from xorq_gallery.utils import fig_to_image, save_fig
 
 
 # ---------------------------------------------------------------------------
@@ -51,25 +49,56 @@ ROW_IDX = "row_idx"
 
 CV_SPLITTER = KFold(n_splits=CV_FOLDS, shuffle=False)
 
+methods = (FORWARD, BACKWARD) = ("forward", "backward")
+
 
 # ---------------------------------------------------------------------------
-# Data loading (shared)
+# Data loading
 # ---------------------------------------------------------------------------
 
 
 def _load_data():
     """Load the diabetes dataset and return as pandas DataFrame with feature names."""
     diabetes = load_diabetes()
-    X = diabetes.data
-    y = diabetes.target
-    feature_names = diabetes.feature_names
-
-    # Build DataFrame
-    df = pd.DataFrame(X, columns=feature_names)
-    df[TARGET_COL] = y
+    df = pd.DataFrame(diabetes.data, columns=diabetes.feature_names)
+    df[TARGET_COL] = diabetes.target
     df[ROW_IDX] = range(len(df))
+    _load_data.feature_names = list(diabetes.feature_names)
+    return df.sort_values(ROW_IDX).reset_index(drop=True)
 
-    return df
+
+# Force data load to set metadata
+_load_data()
+FEATURE_COLS = tuple(_load_data.feature_names)
+
+
+# ---------------------------------------------------------------------------
+# Pipelines — one per direction
+# ---------------------------------------------------------------------------
+
+
+def _build_sfs_pipeline(direction):
+    """Build sklearn Pipeline containing SequentialFeatureSelector."""
+    return SklearnPipeline(
+        [
+            (
+                "sfs",
+                SequentialFeatureSelector(
+                    Ridge(alpha=1.0, random_state=RANDOM_STATE),
+                    n_features_to_select=N_FEATURES_TO_SELECT,
+                    direction=direction,
+                    cv=CV_FOLDS,
+                    n_jobs=-1,
+                ),
+            )
+        ]
+    )
+
+
+names_pipelines = (
+    (FORWARD, _build_sfs_pipeline("forward")),
+    (BACKWARD, _build_sfs_pipeline("backward")),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -77,343 +106,167 @@ def _load_data():
 # ---------------------------------------------------------------------------
 
 
-@curry
-def _plot_feature_importance(
-    df_unused,
-    forward_features,
-    backward_features,
-    forward_score,
-    backward_score,
-    title_prefix,
-):
-    """Build feature selection comparison visualization.
-
-    Parameters
-    ----------
-    df_unused : DataFrame
-        Unused DataFrame parameter (for deferred plotting compatibility)
-    forward_features : list[str]
-        Features selected by forward selection
-    backward_features : list[str]
-        Features selected by backward selection
-    forward_score : float
-        Cross-validation score for forward selection
-    backward_score : float
-        Cross-validation score for backward selection
-    title_prefix : str
-        Prefix for the title (e.g., "sklearn" or "xorq")
-
-    Returns
-    -------
-    matplotlib.figure.Figure
-    """
+def _plot_feature_selection(results, title):
+    """Text-based feature selection results visualization."""
     fig, ax = plt.subplots(figsize=(10, 6))
-
-    # Create a text-based visualization
     ax.axis("off")
-
-    title = f"{title_prefix} - Feature Selection Results"
     ax.text(0.5, 0.9, title, ha="center", va="center", fontsize=16, fontweight="bold")
 
-    # Forward selection results
-    forward_text = (
-        f"Forward Selection:\n"
-        f"  Selected features: {', '.join(forward_features)}\n"
-        f"  CV Score: {forward_score:.4f}"
-    )
-    ax.text(
-        0.1,
-        0.65,
-        forward_text,
-        ha="left",
-        va="top",
-        fontsize=12,
-        family="monospace",
-        bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.5),
-    )
+    for i, (direction, text_y) in enumerate(zip(methods, (0.65, 0.35))):
+        features = results[direction]["other"]["selected_features"]
+        score = results[direction]["other"]["cv_score"]
+        text = (
+            f"{direction.title()} Selection:\n"
+            f"  Selected features: {', '.join(features)}\n"
+            f"  CV Score: {score:.4f}"
+        )
+        color = "lightblue" if direction == "forward" else "lightgreen"
+        ax.text(
+            0.1, text_y, text,
+            ha="left", va="top", fontsize=12, family="monospace",
+            bbox=dict(boxstyle="round", facecolor=color, alpha=0.5),
+        )
 
-    # Backward selection results
-    backward_text = (
-        f"Backward Selection:\n"
-        f"  Selected features: {', '.join(backward_features)}\n"
-        f"  CV Score: {backward_score:.4f}"
-    )
+    fwd_features = set(results[FORWARD]["other"]["selected_features"])
+    bwd_features = set(results[BACKWARD]["other"]["selected_features"])
+    match = "Yes" if fwd_features == bwd_features else "No"
     ax.text(
-        0.1,
-        0.35,
-        backward_text,
-        ha="left",
-        va="top",
-        fontsize=12,
-        family="monospace",
-        bbox=dict(boxstyle="round", facecolor="lightgreen", alpha=0.5),
-    )
-
-    # Comparison
-    match = "✓" if set(forward_features) == set(backward_features) else "✗"
-    comparison_text = f"Both methods selected same features: {match}"
-    ax.text(
-        0.5,
-        0.05,
-        comparison_text,
-        ha="center",
-        va="center",
-        fontsize=12,
-        fontweight="bold",
+        0.5, 0.05,
+        f"Both methods selected same features: {match}",
+        ha="center", va="center", fontsize=12, fontweight="bold",
     )
 
     fig.tight_layout()
     return fig
 
 
-# =========================================================================
-# SKLEARN WAY -- eager fit, extract selected features
-# =========================================================================
+# ---------------------------------------------------------------------------
+# Custom make_*_result — SFS fit + Ridge CV scoring
+# ---------------------------------------------------------------------------
 
 
-def sklearn_way(df):
-    """Eager sklearn: fit SequentialFeatureSelector with forward/backward, extract features.
+def _make_sklearn_result(
+    pipeline, train_data, test_data, features, target, metrics_names_funcs
+):
+    """Sklearn: fit SFS, extract selected features, cross-validate Ridge on them."""
+    feature_names = list(features)
+    X = train_data[feature_names].values
+    y = train_data[target].values
 
-    df must be sorted by ROW_IDX so KFold fold assignments match the xorq side.
+    fitted = clone(pipeline).fit(X, y)
+    sfs_model = fitted.steps[0][1]
+    mask = sfs_model.get_support()
+    selected_features = [feature_names[i] for i in range(len(feature_names)) if mask[i]]
 
-    Returns
-    -------
-    dict
-        Keys: "forward", "backward"
-        Values: dict with "features", "score", "scores"
-    """
-    feature_names = [col for col in df.columns if col not in (TARGET_COL, ROW_IDX)]
-    X = df[feature_names].values
-    y = df[TARGET_COL].values
-
-    results = {}
-
-    # Forward selection
-    print("  Running forward selection...")
-    t0 = time()
+    # Score Ridge on selected features
     ridge = Ridge(alpha=1.0, random_state=RANDOM_STATE)
-    sfs_forward = SequentialFeatureSelector(
-        ridge,
-        n_features_to_select=N_FEATURES_TO_SELECT,
-        direction="forward",
-        cv=CV_FOLDS,
-        n_jobs=-1,
-    )
-    sfs_forward.fit(X, y)
-    forward_time = time() - t0
+    scores = cross_val_score(ridge, X[:, mask], y, cv=CV_SPLITTER)
+    mean_score = np.mean(scores)
 
-    # Get selected feature indices and names
-    forward_mask = sfs_forward.get_support()
-    forward_features = [
-        feature_names[i] for i in range(len(feature_names)) if forward_mask[i]
-    ]
-
-    # Score with cross-validation
-    forward_scores = cross_val_score(ridge, X[:, forward_mask], y, cv=CV_SPLITTER)
-    forward_score = np.mean(forward_scores)
-
-    print(
-        f"    sklearn forward: selected {forward_features}, CV score = {forward_score:.4f}, time = {forward_time:.2f}s"
-    )
-    results["forward"] = {
-        "features": forward_features,
-        "score": forward_score,
-        "scores": forward_scores,
-        "mask": forward_mask,
-    }
-
-    # Backward selection
-    print("  Running backward selection...")
-    t0 = time()
-    ridge = Ridge(alpha=1.0, random_state=RANDOM_STATE)
-    sfs_backward = SequentialFeatureSelector(
-        ridge,
-        n_features_to_select=N_FEATURES_TO_SELECT,
-        direction="backward",
-        cv=CV_FOLDS,
-        n_jobs=-1,
-    )
-    sfs_backward.fit(X, y)
-    backward_time = time() - t0
-
-    # Get selected feature indices and names
-    backward_mask = sfs_backward.get_support()
-    backward_features = [
-        feature_names[i] for i in range(len(feature_names)) if backward_mask[i]
-    ]
-
-    # Score with cross-validation
-    backward_scores = cross_val_score(ridge, X[:, backward_mask], y, cv=CV_SPLITTER)
-    backward_score = np.mean(backward_scores)
-
-    print(
-        f"    sklearn backward: selected {backward_features}, CV score = {backward_score:.4f}, time = {backward_time:.2f}s"
-    )
-    results["backward"] = {
-        "features": backward_features,
-        "score": backward_score,
-        "scores": backward_scores,
-        "mask": backward_mask,
-    }
-
-    return results
-
-
-# =========================================================================
-# XORQ WAY -- deferred fit, deferred feature extraction
-# =========================================================================
-
-
-def xorq_way(df):
-    """Deferred xorq: wrap SequentialFeatureSelector in Pipeline.from_instance, fit deferred.
-
-    After extracting selected features, score the Ridge model on those features
-    using deferred_cross_val_score. Nothing is executed until ``.execute()``.
-    """
-    con = xo.connect()
-
-    # Register dataset
-    feature_names = [col for col in df.columns if col not in (TARGET_COL, ROW_IDX)]
-    table = con.register(df, "diabetes")
-
-    # Feature columns
-    features = tuple(feature_names)
-
-    results = {}
-
-    for direction in ("forward", "backward"):
-        print(f"  Running {direction} selection (deferred)...")
-        ridge = Ridge(alpha=1.0, random_state=RANDOM_STATE)
-        sfs = SequentialFeatureSelector(
-            ridge,
-            n_features_to_select=N_FEATURES_TO_SELECT,
-            direction=direction,
-            cv=CV_FOLDS,
-            n_jobs=-1,
-        )
-        sklearn_pipe = SklearnPipeline([("sfs", sfs)])
-        xorq_pipe = Pipeline.from_instance(sklearn_pipe)
-
-        # Fit deferred to get selected features
-        fitted = xorq_pipe.fit(table, features=features, target=TARGET_COL)
-
-        # Extract selected feature names from the fitted model
-        sfs_model = fitted.fitted_steps[0].model
-        mask = sfs_model.get_support()
-        selected_features = tuple(
-            feature_names[i] for i in range(len(feature_names)) if mask[i]
-        )
-        print(f"    xorq {direction}: selected {list(selected_features)}")
-
-        # Score Ridge on selected features via deferred_cross_val_score
-        ridge_pipe = Pipeline.from_instance(
-            SklearnPipeline([("ridge", Ridge(alpha=1.0, random_state=RANDOM_STATE))])
-        )
-        cv_result = deferred_cross_val_score(
-            ridge_pipe,
-            table,
-            selected_features,
-            TARGET_COL,
-            cv=CV_SPLITTER,
-            order_by=ROW_IDX,
-        )
-
-        results[direction] = {
-            "features": list(selected_features),
+    return {
+        "fitted": sfs_model,
+        "preds": scores,
+        "metrics": {"cv_score_mean": mean_score},
+        "other": {
+            "selected_features": selected_features,
+            "cv_score": mean_score,
+            "cv_scores": scores,
             "mask": mask,
-            "cv_result": cv_result,
-        }
-
-    results["table"] = table
-
-    return results
+        },
+    }
 
 
-# =========================================================================
-# Run and plot side by side
-# =========================================================================
+def _make_deferred_xorq_result(
+    pipeline, train_data, test_data, features, target, metrics_names_funcs, pred
+):
+    """Deferred xorq: fit SFS, extract selected features, deferred_cross_val_score."""
+    feature_names = list(features)
+    xorq_pipe = Pipeline.from_instance(pipeline)
+    fitted = xorq_pipe.fit(train_data, features=features, target=target)
+
+    sfs_model = fitted.fitted_steps[0].model
+    mask = sfs_model.get_support()
+    selected_features = tuple(
+        feature_names[i] for i in range(len(feature_names)) if mask[i]
+    )
+
+    # Score Ridge on selected features via deferred CV
+    ridge_pipe = Pipeline.from_instance(
+        SklearnPipeline([("ridge", Ridge(alpha=1.0, random_state=RANDOM_STATE))])
+    )
+    cv_result = deferred_cross_val_score(
+        ridge_pipe, train_data, selected_features, target,
+        cv=CV_SPLITTER, order_by=ROW_IDX,
+    )
+
+    return {
+        "xorq_fitted": fitted,
+        "preds": cv_result,
+        "metrics": {},
+        "other": {
+            "selected_features": lambda: list(selected_features),
+            "mask": lambda: mask,
+        },
+    }
 
 
-def main():
-    os.makedirs("imgs", exist_ok=True)
+def _make_xorq_result(deferred_xorq_result):
+    """Materialize deferred CV scores and feature info."""
+    scores = deferred_xorq_result["preds"].execute()
+    mean_score = scores.mean()
+    other_raw = deferred_xorq_result.get("other", {})
+    selected_features = other_raw["selected_features"]()
+    mask = other_raw["mask"]()
 
-    df = _load_data()
-    # Sort by ROW_IDX so sklearn KFold sees the same row order as xorq
-    df = df.sort_values(ROW_IDX).reset_index(drop=True)
+    return {
+        "fitted": deferred_xorq_result["xorq_fitted"].fitted_steps[0].model,
+        "preds": scores,
+        "metrics": {"cv_score_mean": mean_score},
+        "other": {
+            "selected_features": selected_features,
+            "cv_score": mean_score,
+            "cv_scores": scores,
+            "mask": mask,
+        },
+    }
 
-    print("=== SKLEARN WAY ===")
-    sk_results = sklearn_way(df)
 
-    print("\n=== XORQ WAY ===")
-    xo_deferred = xorq_way(df)
+# ---------------------------------------------------------------------------
+# Comparator callbacks
+# ---------------------------------------------------------------------------
 
-    # Execute deferred CV scores
-    xo_results = {}
-    for direction in ("forward", "backward"):
-        scores = xo_deferred[direction]["cv_result"].execute()
-        mean_score = scores.mean()
-        features = xo_deferred[direction]["features"]
-        print(f"    xorq {direction}: CV score = {mean_score:.4f}")
-        xo_results[direction] = {
-            "features": features,
-            "score": mean_score,
-            "scores": scores,
-            "mask": xo_deferred[direction]["mask"],
-        }
 
-    # Assert numerical equivalence BEFORE plotting
-    print("\n=== ASSERTIONS ===")
-    for direction in ("forward", "backward"):
-        sk_features = set(sk_results[direction]["features"])
-        xo_features = set(xo_results[direction]["features"])
-        assert sk_features == xo_features, (
-            f"{direction} selection features don't match!"
-        )
+def compare_results(comparator):
+    assert sorted(sklearn_results := comparator.sklearn_results) == sorted(
+        xorq_results := comparator.xorq_results
+    )
+    print("\n=== Comparing Results ===")
+    for direction in methods:
+        sk_features = set(sklearn_results[direction]["other"]["selected_features"])
+        xo_features = set(xorq_results[direction]["other"]["selected_features"])
+        assert sk_features == xo_features, f"{direction} features don't match!"
         print(f"  {direction}: features match {sorted(sk_features)}")
 
     sk_scores_df = pd.DataFrame(
-        {d: sk_results[d]["scores"] for d in ("forward", "backward")}
+        {d: comparator.sklearn_results[d]["other"]["cv_scores"] for d in methods}
     )
     xo_scores_df = pd.DataFrame(
-        {d: xo_results[d]["scores"] for d in ("forward", "backward")}
+        {d: comparator.xorq_results[d]["other"]["cv_scores"] for d in methods}
     )
     pd.testing.assert_frame_equal(sk_scores_df, xo_scores_df, rtol=1e-3)
     print("  Per-fold CV scores match for all directions.")
     print("Assertions passed.")
 
-    # Execute deferred plot
-    print("\n=== PLOTTING ===")
-    xo_png = deferred_matplotlib_plot(
-        xo_deferred["table"],
-        _plot_feature_importance(
-            forward_features=tuple(xo_results["forward"]["features"]),
-            backward_features=tuple(xo_results["backward"]["features"]),
-            forward_score=xo_results["forward"]["score"],
-            backward_score=xo_results["backward"]["score"],
-            title_prefix="xorq",
-        ),
-    ).execute()
 
-    # Build sklearn plot
-    sk_fig = _plot_feature_importance(
-        df,
-        forward_features=sk_results["forward"]["features"],
-        backward_features=sk_results["backward"]["features"],
-        forward_score=sk_results["forward"]["score"],
-        backward_score=sk_results["backward"]["score"],
-        title_prefix="sklearn",
-    )
-
-    # Composite: sklearn (left) | xorq (right)
-    xo_img = load_plot_bytes(xo_png)
-    sk_img = fig_to_image(sk_fig)
+def plot_results(comparator):
+    sk_fig = _plot_feature_selection(comparator.sklearn_results, "sklearn - Feature Selection")
+    xo_fig = _plot_feature_selection(comparator.xorq_results, "xorq - Feature Selection")
 
     fig, axes = plt.subplots(1, 2, figsize=(20, 6))
-    axes[0].imshow(sk_img)
+    axes[0].imshow(fig_to_image(sk_fig))
     axes[0].set_title("sklearn")
     axes[0].axis("off")
-
-    axes[1].imshow(xo_img)
+    axes[1].imshow(fig_to_image(xo_fig))
     axes[1].set_title("xorq")
     axes[1].axis("off")
 
@@ -421,10 +274,40 @@ def main():
         "Sequential Feature Selection on Diabetes: sklearn vs xorq", fontsize=14
     )
     fig.tight_layout()
-    out = "imgs/plot_select_from_model_diabetes.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"Composite plot saved to {out}")
+
+    plt.close(sk_fig)
+    plt.close(xo_fig)
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Module-level setup
+# ---------------------------------------------------------------------------
+
+comparator = SklearnXorqComparator(
+    names_pipelines=names_pipelines,
+    features=FEATURE_COLS,
+    target=TARGET_COL,
+    pred="pred",
+    metrics_names_funcs=(),
+    load_data=_load_data,
+    split_data=split_data_nop,
+    make_sklearn_result=_make_sklearn_result,
+    make_deferred_xorq_result=_make_deferred_xorq_result,
+    make_xorq_result=_make_xorq_result,
+    compare_results_fn=compare_results,
+    plot_results_fn=plot_results,
+)
+
+# Module-level deferred exprs
+(xorq_forward_cv, xorq_backward_cv) = (
+    comparator.deferred_xorq_results[name]["preds"] for name in methods
+)
+
+
+def main():
+    comparator.result_comparison
+    save_fig("imgs/plot_select_from_model_diabetes.png", comparator.plot_results())
 
 
 if __name__ in ("__pytest_main__",):

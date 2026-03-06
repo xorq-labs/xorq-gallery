@@ -12,6 +12,8 @@ via VotingRegressorWrapper, fit/predict deferred, predictions match sklearn.
 Both produce identical predictions.
 
 Dataset: Diabetes (sklearn)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/ensemble/plot_voting_regressor.py
 """
 
 from __future__ import annotations

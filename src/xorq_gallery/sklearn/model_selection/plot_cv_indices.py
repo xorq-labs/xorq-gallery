@@ -15,6 +15,8 @@ sklearn's splitter is run on the same row-ordered data that xorq's UDWF saw,
 so both sides produce identical fold assignments.
 
 Dataset: Synthetic (100 samples, 3 classes, 10 groups)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/model_selection/plot_cv_indices.py
 """
 
 from __future__ import annotations

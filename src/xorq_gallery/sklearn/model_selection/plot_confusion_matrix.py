@@ -10,6 +10,8 @@ accuracy via deferred_sklearn_metric, confusion matrices match sklearn.
 Both produce identical confusion matrices.
 
 Dataset: Iris (sklearn)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/model_selection/plot_confusion_matrix.py
 """
 
 from __future__ import annotations

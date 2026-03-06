@@ -11,6 +11,8 @@ decision boundary plots drawn from the xorq-fitted model.
 Both produce identical decision boundaries and support vectors.
 
 Dataset: Small synthetic 2D binary classification (16 samples)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/svm/plot_svm_kernels.py
 """
 
 from __future__ import annotations

@@ -12,6 +12,8 @@ execution via xorq. Components extracted via make_other callbacks.
 Both produce identical decomposition components.
 
 Dataset: Olivetti Faces (sklearn built-in, 400 faces, 64x64 pixels)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/decomposition/plot_faces_decomposition.py
 """
 
 from __future__ import annotations

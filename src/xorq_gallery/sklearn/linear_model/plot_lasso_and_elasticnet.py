@@ -13,6 +13,8 @@ deferred_sklearn_metric, coefficients extracted via deferred UDAFs.
 Both produce identical R^2 scores and coefficient patterns.
 
 Dataset: Synthetic sparse sinusoidal signals with Gaussian noise
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/linear_model/plot_lasso_and_elasticnet.py
 """
 
 from __future__ import annotations

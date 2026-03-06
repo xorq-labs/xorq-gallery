@@ -13,6 +13,8 @@ comparator (require raw feature data alongside cluster labels).
 Both produce identical silhouette scores and cluster assignments.
 
 Dataset: make_blobs (synthetic 2D clustered data with 500 samples, 4 centers)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/cluster/plot_kmeans_silhouette_analysis.py
 """
 
 from __future__ import annotations

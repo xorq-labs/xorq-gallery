@@ -14,6 +14,8 @@ refit classifiers inside deferred_matplotlib_plot.
 Both produce equivalent accuracy metrics.
 
 Dataset: Iris (sklearn) -- first two features only
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/classification/plot_classification_probability.py
 """
 
 from __future__ import annotations

@@ -13,6 +13,8 @@ deferred cluster plot via deferred_matplotlib_plot.
 Both produce identical clustering metrics.
 
 Dataset: make_blobs (sklearn synthetic, 300 samples, 3 centers)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/cluster/plot_affinity_propagation.py
 """
 
 from __future__ import annotations

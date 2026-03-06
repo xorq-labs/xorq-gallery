@@ -11,30 +11,25 @@ fit/predict on registered tables, deferred accuracy metric, deferred confusion m
 Both produce identical accuracy and confusion matrices.
 
 Dataset: 20 newsgroups (4 categories: alt.atheism, talk.religion.misc, comp.graphics, sci.space)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/text/plot_document_classification_20newsgroups.py
 """
 
 from __future__ import annotations
 
-import os
-
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import xorq.api as xo
 from sklearn.datasets import fetch_20newsgroups
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import RidgeClassifier
 from sklearn.metrics import ConfusionMatrixDisplay, accuracy_score
 from sklearn.pipeline import Pipeline as SklearnPipeline
-from toolz import curry
-from xorq.expr.ml.metrics import deferred_sklearn_metric
-from xorq.expr.ml.pipeline_lib import Pipeline
 
-from xorq_gallery.utils import (
-    deferred_matplotlib_plot,
-    fig_to_image,
-    load_plot_bytes,
+from xorq_gallery.sklearn.sklearn_lib import (
+    SklearnXorqComparator,
 )
+from xorq_gallery.utils import fig_to_image, save_fig
 
 
 # ---------------------------------------------------------------------------
@@ -49,29 +44,30 @@ CATEGORIES = (
 )
 
 RANDOM_STATE = 42
+TARGET_COL = "target"
+PRED_COL = "pred"
 
 
 # ---------------------------------------------------------------------------
-# Data loading (shared)
+# Data loading — pre-vectorize to dense features
 # ---------------------------------------------------------------------------
 
 
 def _load_data():
     """Load and vectorize the 20 newsgroups dataset.
 
-    Returns a dict with train/test splits already vectorized, along with
-    target names for plotting.
+    Returns a single DataFrame with dense TF-IDF features + target column.
+    The vectorizer is fit on training data and applied to both train and test
+    to produce a single pre-vectorized table.  This lets both sklearn and xorq
+    paths operate on the same dense features.
     """
-    # Fetch train data
     data_train = fetch_20newsgroups(
         subset="train",
         categories=CATEGORIES,
         shuffle=True,
         random_state=RANDOM_STATE,
-        remove=("headers", "footers", "quotes"),  # Strip metadata
+        remove=("headers", "footers", "quotes"),
     )
-
-    # Fetch test data
     data_test = fetch_20newsgroups(
         subset="test",
         categories=CATEGORIES,
@@ -80,47 +76,68 @@ def _load_data():
         remove=("headers", "footers", "quotes"),
     )
 
-    # Vectorize
     vectorizer = TfidfVectorizer(
         sublinear_tf=True, max_df=0.5, min_df=5, stop_words="english"
     )
-    X_train = vectorizer.fit_transform(data_train.data)
-    X_test = vectorizer.transform(data_test.data)
+    X_train = vectorizer.fit_transform(data_train.data).toarray()
+    X_test = vectorizer.transform(data_test.data).toarray()
 
-    y_train = data_train.target
-    y_test = data_test.target
-    target_names = data_train.target_names
+    n_features = X_train.shape[1]
+    feature_cols = tuple(f"f{i}" for i in range(n_features))
 
-    return {
-        "X_train": X_train,
-        "X_test": X_test,
-        "y_train": y_train,
-        "y_test": y_test,
-        "target_names": target_names,
-    }
+    train_df = pd.DataFrame(X_train, columns=feature_cols)
+    train_df[TARGET_COL] = data_train.target
+    train_df["_split"] = "train"
+
+    test_df = pd.DataFrame(X_test, columns=feature_cols)
+    test_df[TARGET_COL] = data_test.target
+    test_df["_split"] = "test"
+
+    # Store feature_cols and target_names as module-level state for plotting
+    _load_data.feature_cols = feature_cols
+    _load_data.target_names = data_train.target_names
+
+    # Combine — split_data will separate them
+    return pd.concat([train_df, test_df], ignore_index=True)
 
 
-def _build_pipeline():
-    """Return sklearn Pipeline with RidgeClassifier.
-
-    Note: We don't wrap TfidfVectorizer in the pipeline here because:
-    1. The sklearn example vectorizes separately
-    2. For xorq, we need dense features as input (vectorization happens before)
-    """
-    return SklearnPipeline(
-        [
-            (
-                "clf",
-                RidgeClassifier(
-                    tol=1e-2, solver="sparse_cg", random_state=RANDOM_STATE
-                ),
-            )
-        ]
+def split_data(df):
+    """Split by pre-assigned _split column, then drop the marker."""
+    train_df = df[df["_split"] == "train"].drop(columns=["_split"]).reset_index(
+        drop=True
     )
+    test_df = df[df["_split"] == "test"].drop(columns=["_split"]).reset_index(
+        drop=True
+    )
+    return train_df, test_df
 
 
 # ---------------------------------------------------------------------------
-# Plotting helpers
+# Pipeline
+# ---------------------------------------------------------------------------
+
+names_pipelines = (
+    (
+        "RidgeClassifier",
+        SklearnPipeline(
+            [
+                (
+                    "clf",
+                    RidgeClassifier(
+                        tol=1e-2, solver="sparse_cg", random_state=RANDOM_STATE
+                    ),
+                )
+            ]
+        ),
+    ),
+)
+
+methods = ("RidgeClassifier",)
+metrics_names_funcs = (("accuracy", accuracy_score),)
+
+
+# ---------------------------------------------------------------------------
+# Comparator callbacks
 # ---------------------------------------------------------------------------
 
 
@@ -135,163 +152,38 @@ def _plot_confusion_matrix(y_test, pred, target_names, title):
     return fig
 
 
-# =========================================================================
-# SKLEARN WAY -- eager fit/predict, confusion matrix
-# =========================================================================
-
-
-def sklearn_way(data):
-    """Eager sklearn: fit RidgeClassifier on sparse features, predict, compute
-    accuracy and confusion matrix.
-
-    Returns dict with accuracy, predictions, and y_test for plotting.
-    """
-    X_train = data["X_train"]
-    X_test = data["X_test"]
-    y_train = data["y_train"]
-    y_test = data["y_test"]
-    target_names = data["target_names"]
-
-    # Build and fit classifier
-    clf = _build_pipeline()
-    clf.fit(X_train, y_train)
-
-    # Predict
-    pred = clf.predict(X_test)
-
-    # Compute accuracy
-    acc = accuracy_score(y_test, pred)
-    print(f"sklearn accuracy: {acc:.3f}")
-
-    return {
-        "acc": acc,
-        "pred": pred,
-        "y_test": y_test,
-        "target_names": target_names,
-    }
-
-
-# =========================================================================
-# XORQ WAY -- deferred fit/predict, deferred metrics and plot
-# =========================================================================
-
-
-def xorq_way(data):
-    """Deferred xorq: wrap RidgeClassifier in Pipeline.from_instance, fit/predict
-    deferred on registered dense feature tables, compute deferred accuracy.
-    Returns ONLY deferred expressions.
-
-    Returns dict with deferred metrics and predictions expressions.
-    """
-    con = xo.connect()
-
-    # Convert sparse matrices to dense arrays for registration
-    # xorq currently works with dense features
-    X_train = data["X_train"].toarray()
-    X_test = data["X_test"].toarray()
-    y_train = data["y_train"]
-    y_test = data["y_test"]
-
-    # Create feature column names
-    n_features = X_train.shape[1]
-    feature_cols = tuple(f"f{i}" for i in range(n_features))
-
-    # Build dataframes
-    train_df = pd.DataFrame(X_train, columns=feature_cols)
-    train_df["target"] = y_train
-
-    test_df = pd.DataFrame(X_test, columns=feature_cols)
-    test_df["target"] = y_test
-
-    # Register tables
-    train_table = con.register(train_df, "train_newsgroups")
-    test_table = con.register(test_df, "test_newsgroups")
-
-    # Wrap sklearn classifier
-    sklearn_clf = _build_pipeline()
-    xorq_pipe = Pipeline.from_instance(sklearn_clf)
-
-    # Deferred fit/predict
-    fitted = xorq_pipe.fit(train_table, features=feature_cols, target="target")
-    preds = fitted.predict(test_table, name="pred")
-
-    # Deferred metrics
-    make_metric = deferred_sklearn_metric(target="target", pred="pred")
-    metrics = preds.agg(acc=make_metric(metric=accuracy_score))
-
-    return {
-        "metrics": metrics,
-        "preds": preds,
-    }
-
-
-# =========================================================================
-# Deferred plotting helper
-# =========================================================================
-
-
-@curry
-def _build_confusion_matrix_plot_deferred(df, target_names):
-    """Build confusion matrix from materialized predictions."""
-    y_true = df["target"].values
-    y_pred = df["pred"].values
-    return _plot_confusion_matrix(
-        y_true, y_pred, target_names, "Confusion Matrix (xorq)"
+def compare_results(comparator):
+    assert sorted(sklearn_results := comparator.sklearn_results) == sorted(
+        xorq_results := comparator.xorq_results
     )
+    for name in sklearn_results:
+        sk_acc = sklearn_results[name]["metrics"]["accuracy"]
+        xo_acc = xorq_results[name]["metrics"]["accuracy"]
+        print(f"  {name}: sklearn acc={sk_acc:.3f}, xorq acc={xo_acc:.3f}")
+        np.testing.assert_allclose(sk_acc, xo_acc, rtol=1e-2)
+    print("Assertions passed.")
 
 
-# =========================================================================
-# Run and plot side by side
-# =========================================================================
+def plot_results(comparator):
+    target_names = _load_data.target_names
+    _, test_df = split_data(comparator.df)
 
+    sk_preds = comparator.sklearn_results["RidgeClassifier"]["preds"]
+    xo_preds = comparator.xorq_results["RidgeClassifier"]["preds"][PRED_COL].values
+    y_test = test_df[TARGET_COL].values
 
-def main():
-    os.makedirs("imgs", exist_ok=True)
-
-    print("Loading data...")
-    data = _load_data()
-
-    print("\n=== SKLEARN WAY ===")
-    sk_results = sklearn_way(data)
-
-    print("\n=== XORQ WAY ===")
-    xo_results = xorq_way(data)
-
-    # Execute deferred metrics
-    print("\n=== ASSERTIONS ===")
-    xo_metrics_df = xo_results["metrics"].execute()
-    xo_acc = xo_metrics_df["acc"].iloc[0]
-    print(f"xorq accuracy:   {xo_acc:.3f}")
-
-    # Assert numerical equivalence
-    np.testing.assert_allclose(sk_results["acc"], xo_acc, rtol=1e-2)
-    print("Assertions passed: sklearn and xorq metrics match.")
-
-    print("\n=== GENERATING PLOTS ===")
-    target_names = data["target_names"]
-
-    xo_png = deferred_matplotlib_plot(
-        xo_results["preds"],
-        _build_confusion_matrix_plot_deferred(target_names=target_names),
-    ).execute()
-
-    # Build sklearn confusion matrix
     sk_fig = _plot_confusion_matrix(
-        sk_results["y_test"],
-        sk_results["pred"],
-        sk_results["target_names"],
-        "Confusion Matrix (sklearn)",
+        y_test, sk_preds, target_names, "Confusion Matrix (sklearn)"
     )
-
-    # Composite: sklearn (left) | xorq (right)
-    xo_img = load_plot_bytes(xo_png)
+    xo_fig = _plot_confusion_matrix(
+        y_test, xo_preds, target_names, "Confusion Matrix (xorq)"
+    )
 
     fig, axes = plt.subplots(1, 2, figsize=(16, 6))
     axes[0].imshow(fig_to_image(sk_fig))
     axes[0].set_title("sklearn")
     axes[0].axis("off")
-
-    axes[1].imshow(xo_img)
+    axes[1].imshow(fig_to_image(xo_fig))
     axes[1].set_title("xorq")
     axes[1].axis("off")
 
@@ -299,10 +191,41 @@ def main():
         "Document Classification (20 newsgroups): sklearn vs xorq", fontsize=14
     )
     fig.tight_layout()
-    out = "imgs/document_classification_20newsgroups.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"Composite plot saved to {out}")
+
+    plt.close(sk_fig)
+    plt.close(xo_fig)
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Module-level setup
+# ---------------------------------------------------------------------------
+
+# Force data load so feature_cols is available for comparator construction
+_df = _load_data()
+FEATURE_COLS = _load_data.feature_cols
+
+comparator = SklearnXorqComparator(
+    names_pipelines=names_pipelines,
+    features=FEATURE_COLS,
+    target=TARGET_COL,
+    pred=PRED_COL,
+    metrics_names_funcs=metrics_names_funcs,
+    load_data=lambda: _df,
+    split_data=split_data,
+    compare_results_fn=compare_results,
+    plot_results_fn=plot_results,
+)
+
+# Module-level deferred exprs
+(xorq_ridge_preds,) = (
+    comparator.deferred_xorq_results[name]["preds"] for name in methods
+)
+
+
+def main():
+    comparator.result_comparison
+    save_fig("imgs/document_classification_20newsgroups.png", comparator.plot_results())
 
 
 if __name__ in ("__pytest_main__",):

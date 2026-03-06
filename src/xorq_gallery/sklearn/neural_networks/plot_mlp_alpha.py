@@ -11,6 +11,8 @@ evaluate with deferred_sklearn_metric, generate deferred decision boundary plots
 Both produce identical accuracy scores.
 
 Dataset: make_moons, make_circles, make_classification (sklearn synthetic)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/neural_networks/plot_mlp_alpha.py
 """
 
 from __future__ import annotations

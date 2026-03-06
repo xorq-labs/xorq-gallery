@@ -16,6 +16,8 @@ Silhouette scores are computed outside the comparator (needs raw data, not
 just labels/preds).
 
 Dataset: load_digits (sklearn handwritten digits 0-9)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/cluster/plot_kmeans_digits.py
 """
 
 from __future__ import annotations

@@ -11,6 +11,8 @@ feature rankings via xorq_fitted.fitted_steps[1].model.ranking_.
 Both produce identical ranking values.
 
 Dataset: load_digits (sklearn handwritten digits 0-9)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/feature_selection/plot_rfe_digits.py
 """
 
 from __future__ import annotations

@@ -11,6 +11,8 @@ regression plots drawn from the xorq-fitted model.
 Both produce identical predictions and support vectors.
 
 Dataset: Synthetic 1D sine wave with noise (40 samples)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/svm/plot_svm_regression.py
 """
 
 from __future__ import annotations

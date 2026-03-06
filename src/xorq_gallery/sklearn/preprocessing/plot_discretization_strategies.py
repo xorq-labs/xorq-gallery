@@ -13,6 +13,8 @@ when executed. Meshgrid transformations use xorq_fitted.transform directly.
 Both produce identical discretization boundaries.
 
 Dataset: Synthetic (make_blobs, uniform random)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/preprocessing/plot_discretization_strategies.py
 """
 
 from __future__ import annotations

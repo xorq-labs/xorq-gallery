@@ -11,6 +11,8 @@ deferred, generate deferred decision boundary plots with covariance ellipsoids.
 Both produce identical decision boundaries and covariance estimates.
 
 Dataset: Synthetic 2D Gaussian blobs with varying covariance matrices
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/classification/plot_lda_qda.py
 """
 
 from __future__ import annotations

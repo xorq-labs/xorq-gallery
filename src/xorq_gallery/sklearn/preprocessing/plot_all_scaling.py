@@ -13,6 +13,8 @@ materialized only when executed.
 Both produce identical scaled data for visualization.
 
 Dataset: California Housing (sklearn.datasets)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/preprocessing/plot_all_scaling.py
 """
 
 from __future__ import annotations

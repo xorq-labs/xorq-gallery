@@ -9,6 +9,8 @@ xorq: Register the projection matrix as an ibis table, fit Ridge and
 Lasso via Pipeline.from_instance. Same results, deferred execution.
 
 Dataset: Synthetic binary image (128x128)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/applications/plot_tomography_l1_reconstruction.py
 """
 
 from functools import cache

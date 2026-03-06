@@ -13,14 +13,18 @@ order_by=ROW_IDX. Per-fold MAE scores match sklearn exactly.
 Both produce identical cross-validation scores.
 
 Dataset: Bike Sharing Demand (OpenML)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/applications/plot_cyclical_feature_engineering.py
 """
+
+from __future__ import annotations
 
 from functools import cache
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import xorq.api as xo
+from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
 from sklearn.datasets import fetch_openml
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -31,6 +35,10 @@ from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, SplineTransformer
 from xorq.expr.ml.cross_validation import deferred_cross_val_score
 from xorq.expr.ml.pipeline_lib import Pipeline
 
+from xorq_gallery.sklearn.sklearn_lib import (
+    SklearnXorqComparator,
+    split_data_nop,
+)
 from xorq_gallery.utils import fig_to_image, save_fig
 
 
@@ -83,33 +91,44 @@ _spline_preprocessor = ColumnTransformer(
     ]
 )
 
-name_to_pipeline = {
-    SPLINE_RIDGE: SklearnPipeline(
-        [
-            ("preprocess", _spline_preprocessor),
-            ("ridge", RidgeCV(alphas=tuple(np.logspace(-6, 6, 25).tolist()))),
-        ]
+names_pipelines = (
+    (
+        SPLINE_RIDGE,
+        SklearnPipeline(
+            [
+                ("preprocess", _spline_preprocessor),
+                ("ridge", RidgeCV(alphas=tuple(np.logspace(-6, 6, 25).tolist()))),
+            ]
+        ),
     ),
-    HGBR: SklearnPipeline(
-        [
-            (
-                "preprocess",
-                ColumnTransformer(
-                    [
-                        (
-                            "cat",
-                            OneHotEncoder(handle_unknown="ignore", sparse_output=False),
-                            [weather_col],
-                        ),
-                        ("num", MinMaxScaler(), numerical_weather),
-                        ("time", "passthrough", time_features),
-                    ]
+    (
+        HGBR,
+        SklearnPipeline(
+            [
+                (
+                    "preprocess",
+                    ColumnTransformer(
+                        [
+                            (
+                                "cat",
+                                OneHotEncoder(
+                                    handle_unknown="ignore", sparse_output=False
+                                ),
+                                [weather_col],
+                            ),
+                            ("num", MinMaxScaler(), numerical_weather),
+                            ("time", "passthrough", time_features),
+                        ]
+                    ),
                 ),
-            ),
-            ("hgbr", HistGradientBoostingRegressor(max_iter=200, random_state=42)),
-        ]
+                (
+                    "hgbr",
+                    HistGradientBoostingRegressor(max_iter=200, random_state=42),
+                ),
+            ]
+        ),
     ),
-}
+)
 
 
 # ---------------------------------------------------------------------------
@@ -167,91 +186,88 @@ def _plot_cv_results(results, title):
     return fig
 
 
-# =========================================================================
-# SKLEARN WAY -- eager cross_validate with TimeSeriesSplit
-# =========================================================================
+# ---------------------------------------------------------------------------
+# Custom make_*_result for cross-validation
+# ---------------------------------------------------------------------------
 
 
-def compute_with_sklearn(name_to_pipeline, df):
-    """Eager sklearn: cross-validate each pipeline with TimeSeriesSplit.
+def _make_sklearn_cv_result(
+    pipeline, train_data, test_data, features, target, metrics_names_funcs
+):
+    """Sklearn: cross-validate with TimeSeriesSplit, return per-fold MAE."""
+    X = train_data[list(features)]
+    y = train_data[target]
 
-    Returns
-    -------
-    dict
-        Keys: method names, values: per-fold MAE arrays
-    """
-    X = df[list(all_feature_cols)]
-    y = df[y_col]
-
-    results = {
-        name: -cross_validate(
-            pipe,
-            X,
-            y,
-            cv=CV_SPLITTER,
-            scoring="neg_mean_absolute_error",
-        )["test_score"]
-        for name, pipe in name_to_pipeline.items()
+    cv_result = cross_validate(
+        clone(pipeline), X, y,
+        cv=CV_SPLITTER, scoring="neg_mean_absolute_error",
+    )
+    mae_scores = -cv_result["test_score"]
+    return {
+        "fitted": None,
+        "preds": mae_scores,
+        "metrics": {"mae_mean": mae_scores.mean(), "mae_std": mae_scores.std()},
     }
-    for name, mae_scores in results.items():
-        print(
-            f"  sklearn {name:15s}: MAE={mae_scores.mean():.4f} (+/-{mae_scores.std():.4f})"
-        )
-    return results
 
 
-# =========================================================================
-# XORQ WAY -- deferred cross-validation with TimeSeriesSplit
-# =========================================================================
-
-
-def compute_with_xorq(name_to_xorq_cv):
-    """Execute deferred CV scores for each pipeline.
-
-    Returns
-    -------
-    dict
-        Keys: method names, values: per-fold MAE arrays
-    """
-    xo_scores = {name: -cv.execute() for name, cv in name_to_xorq_cv.items()}
-    for name, mae in xo_scores.items():
-        print(f"  xorq   {name:15s}: MAE={mae.mean():.4f} (+/-{mae.std():.4f})")
-    return xo_scores
-
-
-con = xo.connect()
-data = con.register(_load_data(), "bike_sharing")
-
-name_to_xorq_cv = {
-    name: deferred_cross_val_score(
-        Pipeline.from_instance(pipeline),
-        data,
-        all_feature_cols,
-        y_col,
-        cv=CV_SPLITTER,
-        order_by=ROW_IDX,
+def _make_deferred_xorq_cv_result(
+    pipeline, train_data, test_data, features, target, metrics_names_funcs, pred
+):
+    """Deferred xorq: deferred_cross_val_score with TimeSeriesSplit."""
+    xorq_pipe = Pipeline.from_instance(pipeline)
+    cv_result = deferred_cross_val_score(
+        xorq_pipe, train_data, features, target,
+        cv=CV_SPLITTER, order_by=ROW_IDX,
         scoring="neg_mean_absolute_error",
     )
-    for name, pipeline in name_to_pipeline.items()
-}
-(xorq_spline_ridge_cv, xorq_hgbr_cv) = (name_to_xorq_cv[name] for name in methods)
+    return {
+        "xorq_fitted": None,
+        "preds": cv_result,
+        "metrics": {},
+        "other": {},
+    }
 
 
-# =========================================================================
-# Run and plot side by side
-# =========================================================================
+def _make_xorq_cv_result(deferred_xorq_result):
+    """Materialize deferred CV scores."""
+    scores = deferred_xorq_result["preds"].execute()
+    mae_scores = -scores
+    return {
+        "fitted": None,
+        "preds": mae_scores,
+        "metrics": {"mae_mean": mae_scores.mean(), "mae_std": mae_scores.std()},
+    }
 
 
-def compare_results(sk_scores, xo_scores):
-    print("\n=== ASSERTIONS ===")
-    sk_df = pd.DataFrame(sk_scores)
-    xo_df = pd.DataFrame(xo_scores)
-    pd.testing.assert_frame_equal(sk_df, xo_df, rtol=1e-6)
-    print("Per-fold MAE scores match for all models.")
-    print("Assertions passed.")
+# ---------------------------------------------------------------------------
+# Comparator callbacks
+# ---------------------------------------------------------------------------
 
 
-def save_comparison_plot(sk_scores, xo_scores):
+def compare_results(comparator):
+    assert sorted(sklearn_results := comparator.sklearn_results) == sorted(
+        xorq_results := comparator.xorq_results
+    )
+    print("\n=== Comparing Results ===")
+    for name in sklearn_results:
+        sk_mae = sklearn_results[name]["preds"]
+        xo_mae = xorq_results[name]["preds"]
+        print(
+            f"  {name:15s} MAE - sklearn: {sk_mae.mean():.4f} (+/-{sk_mae.std():.4f})"
+            f", xorq: {xo_mae.mean():.4f} (+/-{xo_mae.std():.4f})"
+        )
+        pd.testing.assert_frame_equal(
+            pd.DataFrame({"mae": sk_mae}),
+            pd.DataFrame({"mae": xo_mae}),
+            rtol=1e-6,
+        )
+    print("Assertions passed: per-fold MAE scores match.")
+
+
+def plot_results(comparator):
+    sk_scores = {name: comparator.sklearn_results[name]["preds"] for name in methods}
+    xo_scores = {name: comparator.xorq_results[name]["preds"] for name in methods}
+
     sk_fig = _plot_cv_results(sk_scores, "sklearn - Cyclical Feature Engineering (MAE)")
     xo_fig = _plot_cv_results(xo_scores, "xorq - Cyclical Feature Engineering (MAE)")
 
@@ -265,25 +281,43 @@ def save_comparison_plot(sk_scores, xo_scores):
 
     fig.suptitle(
         "Cyclical Feature Engineering: sklearn vs xorq",
-        fontsize=16,
-        fontweight="bold",
-        y=0.98,
+        fontsize=16, fontweight="bold", y=0.98,
     )
     fig.tight_layout()
-    save_fig("imgs/cyclical_feature_engineering.png", fig, bbox_inches="tight")
+
+    plt.close(sk_fig)
+    plt.close(xo_fig)
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Module-level setup
+# ---------------------------------------------------------------------------
+
+comparator = SklearnXorqComparator(
+    names_pipelines=names_pipelines,
+    features=all_feature_cols,
+    target=y_col,
+    pred="pred",
+    metrics_names_funcs=(),
+    load_data=_load_data,
+    split_data=split_data_nop,
+    make_sklearn_result=_make_sklearn_cv_result,
+    make_deferred_xorq_result=_make_deferred_xorq_cv_result,
+    make_xorq_result=_make_xorq_cv_result,
+    compare_results_fn=compare_results,
+    plot_results_fn=plot_results,
+)
+
+# Module-level deferred exprs
+(xorq_spline_ridge_cv, xorq_hgbr_cv) = (
+    comparator.deferred_xorq_results[name]["preds"] for name in methods
+)
 
 
 def main():
-    df = _load_data()
-
-    print("=== SKLEARN WAY ===")
-    sk_scores = compute_with_sklearn(name_to_pipeline, df)
-
-    print("\n=== XORQ WAY ===")
-    xo_scores = compute_with_xorq(name_to_xorq_cv)
-
-    compare_results(sk_scores, xo_scores)
-    save_comparison_plot(sk_scores, xo_scores)
+    comparator.result_comparison
+    save_fig("imgs/cyclical_feature_engineering.png", comparator.plot_results())
 
 
 if __name__ in ("__pytest_main__",):

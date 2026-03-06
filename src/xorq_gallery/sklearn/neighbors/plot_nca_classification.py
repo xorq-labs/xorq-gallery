@@ -12,6 +12,8 @@ pipeline for meshgrid prediction via _XorqClfWrapper.
 Both produce identical accuracy scores.
 
 Dataset: iris (sklearn)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/neighbors/plot_nca_classification.py
 """
 
 from __future__ import annotations

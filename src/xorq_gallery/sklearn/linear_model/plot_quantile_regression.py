@@ -13,6 +13,8 @@ via deferred boolean operations.
 Both produce identical quantile predictions and metrics.
 
 Dataset: Synthetic linear data with heteroscedastic Normal or asymmetric Pareto noise
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/linear_model/plot_quantile_regression.py
 """
 
 from __future__ import annotations
