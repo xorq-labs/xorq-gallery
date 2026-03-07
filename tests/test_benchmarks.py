@@ -35,17 +35,7 @@ def test_list_all_scripts(runner, benchmark):
 
 @pytest.mark.parametrize(
     "script",
-    [
-        pytest.param(
-            s,
-            marks=pytest.mark.xfail(
-                reason="SklearnXorqComparator does not accept sklearn_pipeline kwarg"
-            ),
-        )
-        if s.stem == "plot_quantile_regression"
-        else s
-        for s in scripts
-    ],
+    list(scripts),
     ids=[s.stem for s in scripts],
 )
 def test_list_exprs(runner, benchmark, script):

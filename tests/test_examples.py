@@ -27,9 +27,7 @@ scripts = tuple(
 )
 
 
-_XFAIL_SCRIPTS = {
-    "plot_quantile_regression": "SklearnXorqComparator does not accept sklearn_pipeline kwarg",
-}
+_XFAIL_SCRIPTS = {}
 
 _SLOW1_SCRIPTS = frozenset(
     {
