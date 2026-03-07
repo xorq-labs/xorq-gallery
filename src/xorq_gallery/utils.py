@@ -6,10 +6,15 @@ Adding an order_by + shuffle=False mode is an easy lift.  This helper
 bridges the gap while we get the gallery together.
 """
 
+from importlib.resources import files
 from io import BytesIO
 from pathlib import Path
 
 from toolz import compose
+
+
+def get_data_file(name):
+    return files("xorq_gallery") / "data" / name
 
 
 def deferred_sequential_split(expr, *, features, target, order_by):
