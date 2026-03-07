@@ -6,7 +6,7 @@ import pytest
 from click.testing import CliRunner
 
 from xorq_gallery.cli import cli
-from xorq_gallery.sklearn import scripts
+from xorq_gallery.sklearn import get_exprs_for_script, scripts
 
 
 pytestmark = pytest.mark.benchmark
@@ -43,6 +43,26 @@ def test_list_exprs(runner, benchmark, script):
         runner.invoke, cli, ["list-exprs", script.stem, "-g", script.parent.name]
     )
     assert result.exit_code == 0
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        pytest.param(
+            s,
+            marks=pytest.mark.xfail(
+                reason="SklearnXorqComparator does not accept sklearn_pipeline kwarg"
+            ),
+        )
+        if s.stem == "plot_quantile_regression"
+        else s
+        for s in scripts
+    ],
+    ids=[s.stem for s in scripts],
+)
+def test_get_exprs_for_script(benchmark, script):
+    result = benchmark(get_exprs_for_script, script)
+    assert result is not None
 
 
 def test_subprocess_list_groups(benchmark):

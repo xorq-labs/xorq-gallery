@@ -5,11 +5,11 @@ import runpy
 import click
 
 from xorq_gallery.sklearn import (
-    get_exprs_for_script,
     get_scripts_for_group,
     group_paths,
     scripts,
 )
+from xorq_gallery.sklearn.utils import load_exprs_json_cache
 
 
 def _scripts_for_group(group):
@@ -88,8 +88,9 @@ def list_exprs(script_name, group):
                 f"no such script {script_name!r}", param_hint="script_name"
             )
         case _:
-            dct = get_exprs_for_script(script)
-            click.echo("\n".join(expr for expr in dct))
+            cache = load_exprs_json_cache()
+            exprs = cache.get(script.name, [])
+            click.echo("\n".join(exprs))
 
 
 @cli.command("run")
