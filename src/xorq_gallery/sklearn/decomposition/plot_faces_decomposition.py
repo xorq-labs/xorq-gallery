@@ -18,6 +18,8 @@ Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/decompos
 
 from __future__ import annotations
 
+import sys
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -67,7 +69,7 @@ CENTERED_COLS = tuple(f"centered_{i}" for i in range(_n_features))
 
 def load_data_pixel():
     """Return narrow DataFrame with only pixel cols + subject_id."""
-    print(f"Dataset: {_n_samples} faces, {_n_features} features")
+    print(f"Dataset: {_n_samples} faces, {_n_features} features", file=sys.stderr)
     df = pd.DataFrame(_sample_faces, columns=PIXEL_COLS)
     df[TARGET_COL] = _sample_target
     return df
@@ -75,7 +77,7 @@ def load_data_pixel():
 
 def load_data_centered():
     """Return narrow DataFrame with only centered cols + subject_id."""
-    print(f"Dataset: {_n_samples} faces, {_n_features} features")
+    print(f"Dataset: {_n_samples} faces, {_n_features} features", file=sys.stderr)
     df = pd.DataFrame(_faces_centered, columns=CENTERED_COLS)
     df[TARGET_COL] = _sample_target
     return df
