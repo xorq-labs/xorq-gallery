@@ -10,6 +10,8 @@ accuracy via deferred_sklearn_metric, confusion matrices match sklearn.
 Both produce identical confusion matrices.
 
 Dataset: Iris (sklearn)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/model_selection/plot_confusion_matrix.py
 """
 
 from __future__ import annotations
@@ -99,6 +101,16 @@ def compare_results(comparator):
         xo_acc = xorq_result["metrics"]["accuracy"]
         print(f"  {name} accuracy - sklearn: {sk_acc:.4f}, xorq: {xo_acc:.4f}")
 
+    # Assert confusion matrices match
+    _, test_df = comparator.get_split_data()
+    y_test = test_df[TARGET_COL].values
+    sk_cm = confusion_matrix(y_test, sklearn_results[SVC_NAME]["preds"])
+    xo_cm = confusion_matrix(
+        y_test, comparator.xorq_results[SVC_NAME]["preds"][PRED_COL].values
+    )
+    np.testing.assert_array_equal(sk_cm, xo_cm)
+    print("Confusion matrices match.")
+
 
 def plot_results(comparator):
     _, test_df = comparator.get_split_data()
@@ -166,17 +178,6 @@ comparator = SklearnXorqComparator(
 
 def main():
     comparator.result_comparison
-
-    # Assert confusion matrices match
-    _, test_df = comparator.get_split_data()
-    y_test = test_df[TARGET_COL].values
-    sk_cm = confusion_matrix(y_test, comparator.sklearn_results[SVC_NAME]["preds"])
-    xo_cm = confusion_matrix(
-        y_test, comparator.xorq_results[SVC_NAME]["preds"][PRED_COL].values
-    )
-    np.testing.assert_array_equal(sk_cm, xo_cm)
-    print("Confusion matrices match.")
-
     save_fig("imgs/plot_confusion_matrix.png", comparator.plot_results())
 
 

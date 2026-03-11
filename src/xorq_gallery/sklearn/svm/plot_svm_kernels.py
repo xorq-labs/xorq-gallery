@@ -6,11 +6,13 @@ on a small 2D binary classification dataset. Fit each kernel, generate decision
 boundaries via DecisionBoundaryDisplay, plot support vectors.
 
 xorq: Same SVC kernels wrapped in Pipeline.from_instance, fit/predict deferred,
-generate deferred decision boundary plots via deferred_matplotlib_plot.
+decision boundary plots drawn from the xorq-fitted model.
 
 Both produce identical decision boundaries and support vectors.
 
 Dataset: Small synthetic 2D binary classification (16 samples)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/svm/plot_svm_kernels.py
 """
 
 from __future__ import annotations
@@ -18,22 +20,16 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import xorq.api as xo
 from sklearn import svm
 from sklearn.inspection import DecisionBoundaryDisplay
 from sklearn.metrics import accuracy_score
 from sklearn.pipeline import Pipeline as SklearnPipeline
-from toolz import curry
 
 from xorq_gallery.sklearn.sklearn_lib import (
     SklearnXorqComparator,
     split_data_nop,
 )
-from xorq_gallery.utils import (
-    deferred_matplotlib_plot,
-    load_plot_bytes,
-    save_fig,
-)
+from xorq_gallery.utils import save_fig
 
 
 # ---------------------------------------------------------------------------
@@ -117,19 +113,6 @@ def _plot_decision_boundary(ax, clf, X, y, kernel, x_min, x_max, y_min, y_max):
     ax.set_title(f"Decision boundary: {kernel} kernel")
 
 
-@curry
-def _build_svc_refit_plot(df, kernel):
-    """Refit SVC from materialised DataFrame and build decision boundary plot."""
-    X = df[list(FEATURE_COLS)].values
-    y = df[TARGET_COL].values
-    clf = svm.SVC(kernel=kernel, gamma=GAMMA)
-    clf.fit(X, y)
-    fig, ax = plt.subplots(figsize=(6, 5))
-    _plot_decision_boundary(ax, clf, X, y, kernel, X_MIN, X_MAX, Y_MIN, Y_MAX)
-    fig.tight_layout()
-    return fig
-
-
 # ---------------------------------------------------------------------------
 # Comparator callbacks
 # ---------------------------------------------------------------------------
@@ -146,6 +129,11 @@ def compare_results(comparator):
         xo_acc = xorq_result["metrics"]["accuracy"]
         print(f"  {name:8s} accuracy - sklearn: {sk_acc:.4f}, xorq: {xo_acc:.4f}")
 
+    print("\n=== Support Vector Counts ===")
+    for kernel in KERNELS:
+        clf = sklearn_results[kernel]["fitted"]
+        print(f"  {kernel:8s}: n_support={len(clf.support_vectors_)}")
+
 
 def plot_results(comparator):
     X = comparator.df[list(FEATURE_COLS)].values
@@ -154,21 +142,19 @@ def plot_results(comparator):
     fig, axes = plt.subplots(2, len(KERNELS), figsize=(20, 10))
 
     for i, kernel in enumerate(KERNELS):
-        # Top row: sklearn — result["fitted"] IS the SVC instance (last step)
-        clf = comparator.sklearn_results[kernel]["fitted"]
+        # Top row: sklearn
+        sk_clf = comparator.sklearn_results[kernel]["fitted"]
         _plot_decision_boundary(
-            axes[0, i], clf, X, y, kernel, X_MIN, X_MAX, Y_MIN, Y_MAX
+            axes[0, i], sk_clf, X, y, kernel, X_MIN, X_MAX, Y_MIN, Y_MAX
         )
         if i == 0:
             axes[0, i].set_ylabel("sklearn", fontsize=12, fontweight="bold")
 
-        # Bottom row: xorq — refit inside deferred_matplotlib_plot
-        xo_png = deferred_matplotlib_plot(
-            xo.memtable(comparator.df),
-            _build_svc_refit_plot(kernel=kernel),
-        ).execute()
-        axes[1, i].imshow(load_plot_bytes(xo_png))
-        axes[1, i].axis("off")
+        # Bottom row: xorq (fitted model is the same sklearn estimator)
+        xo_clf = comparator.xorq_results[kernel]["fitted"]
+        _plot_decision_boundary(
+            axes[1, i], xo_clf, X, y, kernel, X_MIN, X_MAX, Y_MIN, Y_MAX
+        )
         if i == 0:
             axes[1, i].set_ylabel("xorq", fontsize=12, fontweight="bold")
 
@@ -207,12 +193,6 @@ comparator = SklearnXorqComparator(
 
 def main():
     comparator.result_comparison
-
-    print("\n=== Support Vector Counts ===")
-    for kernel in KERNELS:
-        clf = comparator.sklearn_results[kernel]["fitted"]
-        print(f"  {kernel:8s}: n_support={len(clf.support_vectors_)}")
-
     save_fig("imgs/plot_svm_kernels.png", comparator.plot_results())
 
 

@@ -23,6 +23,7 @@ xorq-gallery = "xorq_gallery.cli:cli"
 
 [dependency-groups]
 dev = [
+    "codespell>=2.4.1",
     "ipython>=9.10.0",
     "pre-commit>=4.5.1",
     "pytest>=9.0.2",

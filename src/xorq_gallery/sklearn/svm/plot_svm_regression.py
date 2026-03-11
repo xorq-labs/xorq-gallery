@@ -6,11 +6,13 @@ on synthetic 1D noisy sine data. Fit each kernel, predict, plot fitted curves
 and support vectors.
 
 xorq: Same SVR kernels wrapped in Pipeline.from_instance, fit/predict deferred,
-generate deferred regression plots via deferred_matplotlib_plot.
+regression plots drawn from the xorq-fitted model.
 
 Both produce identical predictions and support vectors.
 
 Dataset: Synthetic 1D sine wave with noise (40 samples)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/svm/plot_svm_regression.py
 """
 
 from __future__ import annotations
@@ -18,21 +20,15 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import xorq.api as xo
 from sklearn.metrics import r2_score
 from sklearn.pipeline import Pipeline as SklearnPipeline
 from sklearn.svm import SVR
-from toolz import curry
 
 from xorq_gallery.sklearn.sklearn_lib import (
     SklearnXorqComparator,
     split_data_nop,
 )
-from xorq_gallery.utils import (
-    deferred_matplotlib_plot,
-    load_plot_bytes,
-    save_fig,
-)
+from xorq_gallery.utils import save_fig
 
 
 # ---------------------------------------------------------------------------
@@ -109,20 +105,6 @@ def _plot_svr_result(ax, X, y, svr, kernel, color):
     ax.set_title(f"{KERNEL_LABELS[kernel]} kernel")
 
 
-@curry
-def _build_svr_refit_plot(df, kernel, color):
-    """Refit SVR from materialised DataFrame and build regression plot."""
-    X = df[[FEATURE_COLS[0]]].values
-    y = df[TARGET_COL].values
-    params = KERNEL_PARAMS[kernel]
-    svr = SVR(kernel=kernel, **params)
-    svr.fit(X, y)
-    fig, ax = plt.subplots(figsize=(6, 5))
-    _plot_svr_result(ax, X, y, svr, kernel, color)
-    fig.tight_layout()
-    return fig
-
-
 # ---------------------------------------------------------------------------
 # Comparator callbacks
 # ---------------------------------------------------------------------------
@@ -139,6 +121,11 @@ def compare_results(comparator):
         xo_r2 = xorq_result["metrics"]["r2"]
         print(f"  {name:8s} r2 - sklearn: {sk_r2:.4f}, xorq: {xo_r2:.4f}")
 
+    print("\n=== Support Vector Counts ===")
+    for kernel in KERNELS:
+        svr = sklearn_results[kernel]["fitted"]
+        print(f"  {kernel:8s}: n_support={len(svr.support_)}")
+
 
 def plot_results(comparator):
     X = comparator.df[[FEATURE_COLS[0]]].values
@@ -147,39 +134,17 @@ def plot_results(comparator):
     fig, axes = plt.subplots(2, len(KERNELS), figsize=(15, 10))
 
     for idx, kernel in enumerate(KERNELS):
-        # Top row: sklearn — result["fitted"] IS the SVR instance (last step)
-        svr = comparator.sklearn_results[kernel]["fitted"]
-        _plot_svr_result(axes[0, idx], X, y, svr, kernel, MODEL_COLORS[kernel])
+        # Top row: sklearn
+        sk_svr = comparator.sklearn_results[kernel]["fitted"]
+        _plot_svr_result(axes[0, idx], X, y, sk_svr, kernel, MODEL_COLORS[kernel])
         if idx == 0:
-            axes[0, idx].text(
-                -0.3,
-                0.5,
-                "sklearn",
-                transform=axes[0, idx].transAxes,
-                fontsize=12,
-                fontweight="bold",
-                va="center",
-                rotation=90,
-            )
+            axes[0, idx].set_ylabel("sklearn", fontsize=12, fontweight="bold")
 
-        # Bottom row: xorq — refit inside deferred_matplotlib_plot
-        xo_png = deferred_matplotlib_plot(
-            xo.memtable(comparator.df),
-            _build_svr_refit_plot(kernel=kernel, color=MODEL_COLORS[kernel]),
-        ).execute()
-        axes[1, idx].imshow(load_plot_bytes(xo_png))
-        axes[1, idx].axis("off")
+        # Bottom row: xorq (fitted model is the same sklearn estimator)
+        xo_svr = comparator.xorq_results[kernel]["fitted"]
+        _plot_svr_result(axes[1, idx], X, y, xo_svr, kernel, MODEL_COLORS[kernel])
         if idx == 0:
-            axes[1, idx].text(
-                -0.3,
-                0.5,
-                "xorq",
-                transform=axes[1, idx].transAxes,
-                fontsize=12,
-                fontweight="bold",
-                va="center",
-                rotation=90,
-            )
+            axes[1, idx].set_ylabel("xorq", fontsize=12, fontweight="bold")
 
     fig.suptitle("Support Vector Regression: sklearn vs xorq", fontsize=16, y=0.995)
     fig.tight_layout()
@@ -216,12 +181,6 @@ comparator = SklearnXorqComparator(
 
 def main():
     comparator.result_comparison
-
-    print("\n=== Support Vector Counts ===")
-    for kernel in KERNELS:
-        svr = comparator.sklearn_results[kernel]["fitted"]
-        print(f"  {kernel:8s}: n_support={len(svr.support_)}")
-
     save_fig("imgs/plot_svm_regression.png", comparator.plot_results())
 
 

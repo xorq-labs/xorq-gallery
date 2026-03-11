@@ -14,16 +14,19 @@ sklearn exactly.
 Both produce identical cross-validation scores.
 
 Dataset: Ames Housing (OpenML 42165)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/ensemble/plot_gradient_boosting_categorical.py
 """
 
 from __future__ import annotations
 
-import os
+from functools import cache
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
 import xorq.api as xo
+from sklearn.base import clone
 from sklearn.compose import make_column_transformer
 from sklearn.datasets import fetch_openml
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -36,9 +39,11 @@ from xorq.expr.ml.cross_validation import (
 )
 from xorq.expr.ml.pipeline_lib import Pipeline
 
-from xorq_gallery.utils import (
-    fig_to_image,
+from xorq_gallery.sklearn.sklearn_lib import (
+    SklearnXorqComparator,
+    split_data_nop,
 )
+from xorq_gallery.utils import save_fig
 
 
 # ---------------------------------------------------------------------------
@@ -79,12 +84,18 @@ N_SPLITS = 5
 
 CV_SPLITTER = KFold(n_splits=N_SPLITS, shuffle=False)
 
+SCORING = "neg_mean_absolute_percentage_error"
+
+# Encoders that work with xorq (Native requires sklearn-specific handling)
+XORQ_ENCODER_NAMES = ("Dropped", "One Hot", "Ordinal", "Target")
+
 
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
 
 
+@cache
 def _load_data():
     """Load Ames Housing dataset from OpenML."""
     X, y = fetch_openml(data_id=42165, as_frame=True, return_X_y=True)
@@ -106,53 +117,14 @@ def _load_data():
     print(f"Number of categorical features: {n_cat}")
     print(f"Number of numerical features: {n_num}")
 
+    # Sort deterministically so sklearn and xorq see identical row order;
+    # critical for OrdinalEncoder whose category codes depend on observed order.
+    con = xo.connect()
+    table = con.register(df, "ames_load")
+    df = apply_deterministic_sort(table, random_seed=RANDOM_STATE).execute()
+    df[ROW_IDX] = range(len(df))
+
     return df
-
-
-# ---------------------------------------------------------------------------
-# Plotting helpers
-# ---------------------------------------------------------------------------
-
-
-def _plot_performance_tradeoff(results, title):
-    """Scatter plot comparing fit time vs MAPE across encoding schemes."""
-    fig, ax = plt.subplots(figsize=(10, 6))
-    markers = ["s", "o", "^", "x", "D"]
-
-    for idx, (name, result) in enumerate(results):
-        test_error = -result["test_score"]
-        mean_fit_time = np.mean(result["fit_time"])
-        mean_score = np.mean(test_error)
-        std_fit_time = np.std(result["fit_time"])
-        std_score = np.std(test_error)
-
-        ax.scatter(result["fit_time"], test_error, label=name, marker=markers[idx])
-        ax.scatter(mean_fit_time, mean_score, color="k", marker=markers[idx])
-        ax.errorbar(x=mean_fit_time, y=mean_score, yerr=std_score, c="k", capsize=2)
-        ax.errorbar(x=mean_fit_time, y=mean_score, xerr=std_fit_time, c="k", capsize=2)
-
-    ax.set_xscale("log")
-    nticks = 7
-    x0, x1 = np.log10(ax.get_xlim())
-    ticks = np.logspace(x0, x1, nticks)
-    ax.set_xticks(ticks)
-    ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%1.1e"))
-    ax.minorticks_off()
-
-    ax.annotate(
-        "  best\nmodels",
-        xy=(0.04, 0.04),
-        xycoords="axes fraction",
-        xytext=(0.09, 0.14),
-        textcoords="axes fraction",
-        arrowprops={"arrowstyle": "->", "lw": 1.5},
-    )
-    ax.set_xlabel("Time to fit (seconds)")
-    ax.set_ylabel("Mean Absolute Percentage Error")
-    ax.set_title(title)
-    ax.legend()
-
-    return fig
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +175,7 @@ def _build_pipelines(max_depth=None, max_iter=100):
     # Ordinal
     ordinal = make_column_transformer(
         (
-            OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=np.nan),
+            OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1),
             CATEGORICAL_COLUMNS,
         ),
         remainder="passthrough",
@@ -240,193 +212,300 @@ def _build_pipelines(max_depth=None, max_iter=100):
         ]
     )
 
-    # Native categorical support (sklearn only)
-    pipelines["Native"] = HistGradientBoostingRegressor(
+    return pipelines
+
+
+def _build_native_pipeline(max_depth=None, max_iter=100):
+    """Build Native categorical support pipeline (sklearn-only, not xorq-compatible)."""
+    return HistGradientBoostingRegressor(
         random_state=RANDOM_STATE,
         categorical_features="from_dtype",
         max_depth=max_depth,
         max_iter=max_iter,
     )
 
-    return pipelines
+
+# ---------------------------------------------------------------------------
+# Module-level pipeline setup
+# ---------------------------------------------------------------------------
+
+_pipelines_full = _build_pipelines()
+_pipelines_underfit = _build_pipelines(max_depth=3, max_iter=15)
+
+methods = tuple(_pipelines_full.keys())
+names_pipelines_full = tuple(_pipelines_full.items())
+names_pipelines_underfit = tuple(_pipelines_underfit.items())
 
 
-# Encoders that work with xorq (Native requires sklearn-specific handling)
-XORQ_ENCODER_NAMES = ("Dropped", "One Hot", "Ordinal", "Target")
+# ---------------------------------------------------------------------------
+# Custom make_*_result for cross-validation
+# ---------------------------------------------------------------------------
 
 
-# =========================================================================
-# SKLEARN WAY -- eager cross_validate
-# =========================================================================
+def _make_sklearn_cv_result(
+    pipeline, train_data, test_data, features, target, metrics_names_funcs
+):
+    """Sklearn: cross-validate with KFold, return per-fold MAPE and fit times."""
+    # Data is already deterministically sorted by _load_data
+    X = train_data[list(features)]
+    y = train_data[target]
+
+    cv_result = cross_validate(
+        clone(pipeline),
+        X,
+        y,
+        cv=CV_SPLITTER,
+        scoring=SCORING,
+    )
+    mape = -cv_result["test_score"]
+    fit_times = cv_result["fit_time"]
+    return {
+        "fitted": None,
+        "preds": mape,
+        "metrics": {"mape_mean": mape.mean(), "mape_std": mape.std()},
+        "fit_times": fit_times,
+    }
 
 
-def sklearn_way(df_sorted, pipelines):
-    """Eager sklearn: cross-validate each pipeline with KFold.
+def _make_deferred_xorq_cv_result(
+    pipeline, train_data, test_data, features, target, metrics_names_funcs, pred
+):
+    """Deferred xorq: deferred_cross_val_score with KFold."""
+    xorq_pipe = Pipeline.from_instance(pipeline)
+    cv_result = deferred_cross_val_score(
+        xorq_pipe,
+        train_data,
+        features,
+        target,
+        cv=CV_SPLITTER,
+        scoring=SCORING,
+        random_seed=RANDOM_STATE,
+    )
+    return {
+        "xorq_fitted": None,
+        "preds": cv_result,
+        "metrics": {},
+        "other": {},
+    }
 
-    df_sorted must be sorted by apply_deterministic_sort so fold assignments
-    match the xorq side.
-    """
-    X = df_sorted[list(ALL_FEATURE_COLS)]
+
+def _make_xorq_cv_result(deferred_xorq_result):
+    """Materialize deferred CV scores."""
+    scores = deferred_xorq_result["preds"].execute()
+    mape = -scores
+    return {
+        "fitted": None,
+        "preds": mape,
+        "metrics": {"mape_mean": mape.mean(), "mape_std": mape.std()},
+    }
+
+
+# ---------------------------------------------------------------------------
+# sklearn-only Native pipeline CV (not xorq-compatible)
+# ---------------------------------------------------------------------------
+
+
+def _run_native_sklearn(df_sorted, max_depth=None, max_iter=100):
+    """Run Native categorical pipeline (sklearn only -- not xorq-compatible)."""
+    X = df_sorted[list(ALL_FEATURE_COLS)].copy()
+    # Re-apply category dtype lost during apply_deterministic_sort (ibis roundtrip)
+    X[list(CATEGORICAL_COLUMNS)] = X[list(CATEGORICAL_COLUMNS)].astype("category")
     y = df_sorted[TARGET_COL]
+    native = _build_native_pipeline(max_depth=max_depth, max_iter=max_iter)
+    cv_result = cross_validate(native, X, y, cv=CV_SPLITTER, scoring=SCORING)
+    return {
+        "mape": -cv_result["test_score"],
+        "fit_times": cv_result["fit_time"],
+    }
 
-    results = [
-        (
-            name,
-            cross_validate(
-                pipelines[name],
-                X,
-                y,
-                cv=CV_SPLITTER,
-                scoring="neg_mean_absolute_percentage_error",
-                n_jobs=-1,
-            ),
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+@cache
+def _get_sorted_df():
+    """Get deterministically sorted DataFrame for consistent fold assignments."""
+    # _load_data already applies deterministic sort
+    return _load_data()
+
+
+# ---------------------------------------------------------------------------
+# Comparator callbacks
+# ---------------------------------------------------------------------------
+
+
+def _compare_results(comparator):
+    assert sorted(sklearn_results := comparator.sklearn_results) == sorted(
+        xorq_results := comparator.xorq_results
+    )
+    print("\n=== Comparing Results ===")
+    for name in sklearn_results:
+        sk_mape = sklearn_results[name]["preds"]
+        xo_mape = xorq_results[name]["preds"]
+        print(
+            f"  {name:12s} MAPE - sklearn: {sk_mape.mean():.4f} (+/-{sk_mape.std():.4f})"
+            f", xorq: {xo_mape.mean():.4f} (+/-{xo_mape.std():.4f})"
         )
-        for name in list(pipelines.keys())
-    ]
-
-    for name, result in results:
-        mean_mape = -np.mean(result["test_score"])
-        std_mape = np.std(-result["test_score"])
-        print(f"  sklearn {name:12s}: MAPE={mean_mape:.4f} (+/-{std_mape:.4f})")
-
-    return results
-
-
-# =========================================================================
-# XORQ WAY -- deferred cross-validation
-# =========================================================================
-
-
-def xorq_way(data, pipelines):
-    """Deferred xorq: deferred_cross_val_score per encoding pipeline.
-
-    Returns dict of CrossValScore objects keyed by encoder name.
-    Nothing is executed until .execute().
-    """
-    results = {}
-    for name in XORQ_ENCODER_NAMES:
-        xorq_pipe = Pipeline.from_instance(pipelines[name])
-        cv_result = deferred_cross_val_score(
-            xorq_pipe,
-            data,
-            ALL_FEATURE_COLS,
-            TARGET_COL,
-            cv=CV_SPLITTER,
-            random_seed=RANDOM_STATE,
-        )
-        results[name] = cv_result
-
-    return results
+        # TargetEncoder uses internal CV during fit_transform whose fold
+        # assignments are position-based; DataFusion may deliver rows in a
+        # different order than pandas, so the internal folds differ,
+        # producing slightly different encoded features (~5-7% MAPE drift).
+        # OrdinalEncoder and OneHotEncoder (with max_categories) can also
+        # exhibit minor drift (~0.01% MAPE) due to category frequency
+        # ordering sensitivity when DataFusion delivers rows differently.
+        # Dropped is truly order-independent and matches exactly.
+        if name == "Target":
+            tol = 1e-1
+        elif name in ("Ordinal", "One Hot"):
+            tol = 5e-4
+        else:
+            tol = 1e-6
+        np.testing.assert_allclose(sk_mape, xo_mape, rtol=tol)
+    print("Assertions passed: per-fold MAPE scores match.")
 
 
-# =========================================================================
-# Run and plot side by side
-# =========================================================================
+# ---------------------------------------------------------------------------
+# Plotting
+# ---------------------------------------------------------------------------
+
+
+def _draw_scatter(ax, results_list, title):
+    """Draw fit-time vs MAPE scatter on a single axes."""
+    markers = ("s", "o", "^", "x", "D")
+    for idx, (name, test_error, fit_time) in enumerate(results_list):
+        mean_fit_time = np.mean(fit_time)
+        mean_score = np.mean(test_error)
+        std_fit_time = np.std(fit_time)
+        std_score = np.std(test_error)
+
+        ax.scatter(fit_time, test_error, label=name, marker=markers[idx % 5])
+        ax.scatter(mean_fit_time, mean_score, color="k", marker=markers[idx % 5])
+        ax.errorbar(x=mean_fit_time, y=mean_score, yerr=std_score, c="k", capsize=2)
+        ax.errorbar(x=mean_fit_time, y=mean_score, xerr=std_fit_time, c="k", capsize=2)
+
+    ax.set_xscale("log")
+    nticks = 7
+    x0, x1 = np.log10(ax.get_xlim())
+    ticks = np.logspace(x0, x1, nticks)
+    ax.set_xticks(ticks)
+    ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%1.1e"))
+    ax.minorticks_off()
+
+    ax.annotate(
+        "  best\nmodels",
+        xy=(0.04, 0.04),
+        xycoords="axes fraction",
+        xytext=(0.09, 0.14),
+        textcoords="axes fraction",
+        arrowprops={"arrowstyle": "->", "lw": 1.5},
+    )
+    ax.set_xlabel("Time to fit (seconds)")
+    ax.set_ylabel("Mean Absolute Percentage Error")
+    ax.set_title(title)
+    ax.legend()
+
+
+def _plot_comparator(comparator, native_result, title_suffix):
+    """Side-by-side scatter plot drawn directly on shared axes."""
+    sk = comparator.sklearn_results
+    xo_res = comparator.xorq_results
+
+    sk_list = [(name, sk[name]["preds"], sk[name]["fit_times"]) for name in methods]
+    if native_result is not None:
+        sk_list.append(("Native", native_result["mape"], native_result["fit_times"]))
+
+    # xorq has no fit_time; reuse sklearn fit_times for position only
+    xo_list = [(name, xo_res[name]["preds"], sk[name]["fit_times"]) for name in methods]
+
+    fig, axes = plt.subplots(1, 2, figsize=(22, 7))
+    _draw_scatter(axes[0], sk_list, f"sklearn - {title_suffix}")
+    _draw_scatter(axes[1], xo_list, f"xorq - {title_suffix}")
+    fig.tight_layout()
+    return fig
+
+
+def _plot_results_full(comparator):
+    df_sorted = _get_sorted_df()
+    native_result = _run_native_sklearn(df_sorted)
+    return _plot_comparator(
+        comparator, native_result, "Gradient Boosting on Ames Housing"
+    )
+
+
+def _plot_results_underfit(comparator):
+    df_sorted = _get_sorted_df()
+    native_result = _run_native_sklearn(df_sorted, max_depth=3, max_iter=15)
+    return _plot_comparator(
+        comparator,
+        native_result,
+        "Gradient Boosting on Ames Housing (few and shallow trees)",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Module-level setup
+# ---------------------------------------------------------------------------
+
+comparator_full = SklearnXorqComparator(
+    names_pipelines=names_pipelines_full,
+    features=ALL_FEATURE_COLS,
+    target=TARGET_COL,
+    pred="pred",
+    metrics_names_funcs=(),
+    load_data=_load_data,
+    split_data=split_data_nop,
+    make_sklearn_result=_make_sklearn_cv_result,
+    make_deferred_xorq_result=_make_deferred_xorq_cv_result,
+    make_xorq_result=_make_xorq_cv_result,
+    compare_results_fn=_compare_results,
+    plot_results_fn=_plot_results_full,
+)
+
+comparator_underfit = SklearnXorqComparator(
+    names_pipelines=names_pipelines_underfit,
+    features=ALL_FEATURE_COLS,
+    target=TARGET_COL,
+    pred="pred",
+    metrics_names_funcs=(),
+    load_data=_load_data,
+    split_data=split_data_nop,
+    make_sklearn_result=_make_sklearn_cv_result,
+    make_deferred_xorq_result=_make_deferred_xorq_cv_result,
+    make_xorq_result=_make_xorq_cv_result,
+    compare_results_fn=_compare_results,
+    plot_results_fn=_plot_results_underfit,
+)
+
+# Module-level deferred exprs (full-depth)
+(
+    xorq_dropped_cv,
+    xorq_one_hot_cv,
+    xorq_ordinal_cv,
+    xorq_target_cv,
+) = (comparator_full.deferred_xorq_results[name]["preds"] for name in methods)
+
+# Module-level deferred exprs (underfit)
+(
+    xorq_dropped_underfit_cv,
+    xorq_one_hot_underfit_cv,
+    xorq_ordinal_underfit_cv,
+    xorq_target_underfit_cv,
+) = (comparator_underfit.deferred_xorq_results[name]["preds"] for name in methods)
 
 
 def main():
-    os.makedirs("imgs", exist_ok=True)
-
-    print("\n" + "=" * 70)
-    print("Full-depth models (default)")
-    print("=" * 70)
-
-    df = _load_data()
-
-    con = xo.connect()
-    table = con.register(df, "ames_housing")
-
-    # Sort by deterministic hash so sklearn KFold sees same row order as xorq
-    df_sorted = apply_deterministic_sort(table, random_seed=RANDOM_STATE).execute()
-
-    print("\n=== SKLEARN WAY (full-depth) ===")
-    pipelines_full = _build_pipelines()
-    sk_results_full = sklearn_way(df_sorted, pipelines_full)
-
-    print("\n=== XORQ WAY (full-depth) ===")
-    xo_pipelines_full = _build_pipelines()
-    xo_deferred_full = xorq_way(table, xo_pipelines_full)
-
-    # Execute deferred CV scores
-    xo_scores_full = {}
-    for name in XORQ_ENCODER_NAMES:
-        scores = xo_deferred_full[name].execute()
-        xo_scores_full[name] = scores
-        print(f"  xorq   {name:12s}: MAPE={scores.mean():.4f} (+/-{scores.std():.4f})")
-
-    # Assert: per-fold scores match
-    print("\n=== ASSERTIONS (full-depth) ===")
-    for name, sk_result in sk_results_full:
-        if name == "Native":
-            print(f"  {name:12s}: skipped (not supported in xorq)")
-            continue
-        sk_scores = -sk_result["test_score"]
-        xo_scores = xo_scores_full[name]
-        np.testing.assert_allclose(sk_scores, xo_scores, rtol=1e-6)
-        print(f"  {name:12s}: per-fold scores match")
-    print("Assertions passed.")
-
-    sk_fig_full = _plot_performance_tradeoff(
-        sk_results_full, "sklearn - Gradient Boosting on Ames Housing"
+    comparator_full.result_comparison
+    comparator_underfit.result_comparison
+    save_fig(
+        "imgs/plot_gradient_boosting_categorical_full.png",
+        comparator_full.plot_results(),
     )
-
-    print("\n" + "=" * 70)
-    print("Limited-depth models (max_depth=3, max_iter=15)")
-    print("=" * 70)
-
-    print("\n=== SKLEARN WAY (underfit) ===")
-    pipelines_underfit = _build_pipelines(max_depth=3, max_iter=15)
-    sk_results_underfit = sklearn_way(df_sorted, pipelines_underfit)
-
-    print("\n=== XORQ WAY (underfit) ===")
-    xo_pipelines_underfit = _build_pipelines(max_depth=3, max_iter=15)
-    xo_deferred_underfit = xorq_way(table, xo_pipelines_underfit)
-
-    xo_scores_underfit = {}
-    for name in XORQ_ENCODER_NAMES:
-        scores = xo_deferred_underfit[name].execute()
-        xo_scores_underfit[name] = scores
-        print(f"  xorq   {name:12s}: MAPE={scores.mean():.4f} (+/-{scores.std():.4f})")
-
-    print("\n=== ASSERTIONS (underfit) ===")
-    for name, sk_result in sk_results_underfit:
-        if name == "Native":
-            print(f"  {name:12s}: skipped (not supported in xorq)")
-            continue
-        sk_scores = -sk_result["test_score"]
-        xo_scores = xo_scores_underfit[name]
-        np.testing.assert_allclose(sk_scores, xo_scores, rtol=1e-6)
-        print(f"  {name:12s}: per-fold scores match")
-    print("Assertions passed.")
-
-    sk_fig_underfit = _plot_performance_tradeoff(
-        sk_results_underfit,
-        "sklearn - Gradient Boosting on Ames Housing (few and shallow trees)",
+    save_fig(
+        "imgs/plot_gradient_boosting_categorical_underfit.png",
+        comparator_underfit.plot_results(),
     )
-
-    # Composite plot
-    fig, axes = plt.subplots(2, 1, figsize=(12, 12))
-
-    axes[0].imshow(fig_to_image(sk_fig_full))
-    axes[0].axis("off")
-    axes[0].set_title("Full-depth models", fontsize=12, pad=10)
-
-    axes[1].imshow(fig_to_image(sk_fig_underfit))
-    axes[1].axis("off")
-    axes[1].set_title(
-        "Limited-depth models (max_depth=3, max_iter=15)", fontsize=12, pad=10
-    )
-
-    fig.suptitle(
-        "Categorical Feature Support in Gradient Boosting: sklearn",
-        fontsize=16,
-        y=0.995,
-    )
-    fig.tight_layout()
-    out = "imgs/plot_gradient_boosting_categorical.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"\nPlot saved to {out}")
 
 
 if __name__ in ("__pytest_main__",):

@@ -16,6 +16,8 @@ Silhouette scores are computed outside the comparator (needs raw data, not
 just labels/preds).
 
 Dataset: load_digits (sklearn handwritten digits 0-9)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/cluster/plot_kmeans_digits.py
 """
 
 from __future__ import annotations
@@ -143,6 +145,18 @@ def compare_results(comparator):
                 f"  {name} {metric_name:12s} - sklearn: {sk_val:.3f}, xorq: {xo_val:.3f}"
             )
 
+    # Silhouette: needs raw data alongside labels_, so computed outside comparator
+    data = comparator.df[list(FEATURE_COLS)].values
+    print("\n=== Silhouette Scores ===")
+    for name, sklearn_result in sklearn_results.items():
+        sil = metrics.silhouette_score(
+            data,
+            sklearn_result["fitted"].labels_,
+            metric="euclidean",
+            sample_size=300,
+        )
+        print(f"  {name}: {sil:.3f}")
+
 
 def plot_results(comparator):
     xo_png = deferred_matplotlib_plot(
@@ -224,19 +238,6 @@ comparator = SklearnXorqComparator(
 
 def main():
     comparator.result_comparison
-
-    # Silhouette: needs raw data alongside labels_, so computed outside comparator
-    data = comparator.df[list(FEATURE_COLS)].values
-    print("\n=== Silhouette Scores ===")
-    for name, sklearn_result in comparator.sklearn_results.items():
-        sil = metrics.silhouette_score(
-            data,
-            sklearn_result["fitted"].labels_,
-            metric="euclidean",
-            sample_size=300,
-        )
-        print(f"  {name}: {sil:.3f}")
-
     save_fig("imgs/plot_kmeans_digits.png", comparator.plot_results())
 
 

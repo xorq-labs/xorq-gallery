@@ -12,6 +12,8 @@ fit/predict, accuracy via deferred_sklearn_metric.
 Both produce identical results.
 
 Dataset: Titanic (OpenML)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/compose/plot_column_transformer_mixed_types.py
 """
 
 from __future__ import annotations

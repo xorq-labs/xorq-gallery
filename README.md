@@ -1,6 +1,8 @@
 # xorq-gallery
 
-Side-by-side examples comparing **sklearn** (eager) and **xorq** (deferred) approaches to common ML tasks. Each example shows the sklearn way and the xorq way, producing identical results.
+A collection of scikit-learn examples ported to [xorq](https://github.com/xorq-labs/xorq) deferred ML pipelines.
+
+Scikit-learn's [example gallery](https://scikit-learn.org/stable/auto_examples/index.html) is one of the best ways to learn practical ML. This project takes 34 of those examples, same models, same datasets, often the same code, and runs each pipeline two ways: eagerly with sklearn and deferred with xorq. Every example asserts numerical equivalence between the two and produces a side-by-side comparison plot.
 
 ## Quickstart
 
@@ -16,11 +18,97 @@ Or run locally:
 xorq-gallery run plot_cyclical_feature_engineering
 ```
 
-Run all examples in a group
+Run all examples in a group:
 
 ```bash
 xorq-gallery run-all --group svm
 ```
+
+## Examples
+
+Each example lives under `src/xorq_gallery/sklearn/<category>/` and mirrors the structure of sklearn's own gallery. 34 examples across 16 categories:
+
+### [applications](src/xorq_gallery/sklearn/applications/) (4)
+
+- `plot_cyclical_feature_engineering` |Periodic spline features + HGBR on Bike Sharing Demand
+- `plot_time_series_lagged_features` |Lagged features via pandas shift vs ibis `.lag()`
+- `plot_tomography_l1_reconstruction` |Ridge vs Lasso compressive sensing on a synthetic image
+- `plot_topics_extraction_with_nmf_lda` |NMF and LDA topic extraction on 20 Newsgroups
+
+### [calibration](src/xorq_gallery/sklearn/calibration/) (1)
+
+- `plot_compare_calibration` |Calibration curves for classifiers on a synthetic dataset
+
+### [classification](src/xorq_gallery/sklearn/classification/) (3)
+
+- `plot_classification_probability` |Probability estimates across classifiers on Iris
+- `plot_classifier_comparison` |Side-by-side decision boundaries for 9 classifiers
+- `plot_lda_qda` |LDA vs QDA decision boundaries with covariance ellipsoids
+
+### [cluster](src/xorq_gallery/sklearn/cluster/) (3)
+
+- `plot_affinity_propagation` |Affinity propagation clustering on synthetic data
+- `plot_kmeans_digits` |K-means on handwritten digits (multiple initializations)
+- `plot_kmeans_silhouette_analysis` |Silhouette analysis for choosing cluster count
+
+### [compose](src/xorq_gallery/sklearn/compose/) (2)
+
+- `plot_column_transformer_mixed_types` |ColumnTransformer on mixed numeric/categorical features
+- `plot_feature_union` |FeatureUnion combining PCA and SelectKBest
+
+### [decomposition](src/xorq_gallery/sklearn/decomposition/) (1)
+
+- `plot_faces_decomposition` |PCA, NMF, ICA, and more on Olivetti faces
+
+### [ensemble](src/xorq_gallery/sklearn/ensemble/) (3)
+
+- `plot_gradient_boosting_categorical` |HGBR with native categorical feature support
+- `plot_stack_predictors` |Stacking regressor combining spline + gradient boosting
+- `plot_voting_regressor` |Voting regressor averaging GBR, RF, and linear models
+
+### [feature_selection](src/xorq_gallery/sklearn/feature_selection/) (2)
+
+- `plot_rfe_digits` |Recursive feature elimination on digit pixel features
+- `plot_select_from_model_diabetes` |Feature importance thresholding with Lasso
+
+### [linear_model](src/xorq_gallery/sklearn/linear_model/) (3)
+
+- `plot_lasso_and_elasticnet` |Lasso vs ElasticNet on sparse signals
+- `plot_logistic_multinomial` |Multinomial logistic regression on Iris
+- `plot_quantile_regression` |Quantile regression vs OLS
+
+### [model_selection](src/xorq_gallery/sklearn/model_selection/) (3)
+
+- `plot_confusion_matrix` |Confusion matrix visualization for SVC on digits
+- `plot_cv_indices` |Cross-validation fold visualization
+- `plot_roc` |ROC curves and AUC for multiclass classification
+
+### [neighbors](src/xorq_gallery/sklearn/neighbors/) (1)
+
+- `plot_nca_classification` |KNN with and without Neighborhood Components Analysis
+
+### [neural_networks](src/xorq_gallery/sklearn/neural_networks/) (1)
+
+- `plot_mlp_alpha` |MLP regularization (alpha sweep) across 3 datasets
+
+### [preprocessing](src/xorq_gallery/sklearn/preprocessing/) (3)
+
+- `plot_all_scaling` |Comparing StandardScaler, MinMaxScaler, and friends
+- `plot_discretization_strategies` |KBinsDiscretizer with uniform/quantile/kmeans strategies
+- `plot_target_encoder` |TargetEncoder vs OrdinalEncoder on categorical features
+
+### [svm](src/xorq_gallery/sklearn/svm/) (2)
+
+- `plot_svm_kernels` |SVM decision boundaries with different kernels
+- `plot_svm_regression` |SVR with different kernels on synthetic data
+
+### [text](src/xorq_gallery/sklearn/text/) (1)
+
+- `plot_document_classification_20newsgroups` |Text classification with TF-IDF + SGD/Ridge
+
+### [tree](src/xorq_gallery/sklearn/tree/) (1)
+
+- `plot_tree_regression` |Decision tree regression with max_depth tuning
 
 ## Development
 
@@ -34,21 +122,12 @@ Run all examples:
 xorq-gallery run-all
 ```
 
-Run a single example:
+Run tests:
 
 ```bash
-xorq-gallery run plot_cyclical_feature_engineering
+nix develop -c pytest tests/test_examples.py -v
 ```
-
-## Examples
-
-| Example | Dataset | What it demonstrates |
-|---------|---------|---------------------|
-| `plot_cyclical_feature_engineering` | Bike Sharing Demand | Periodic spline features + HGBR, temporal split |
-| `plot_time_series_lagged_features` | Bike Sharing Demand | Lagged features via pandas shift vs ibis `.lag()` |
-| `plot_tomography_l1_reconstruction` | Synthetic 128x128 image | Ridge (L2) vs Lasso (L1) compressive sensing |
-| `plot_topics_extraction_with_nmf_lda` | 20 Newsgroups | NMF and LDA topic extraction |
 
 ## Output
 
-Examples write plots to `imgs/`. This directory is created automatically but is not tracked by git.
+Examples write comparison plots to `imgs/`. This directory is created automatically but is not tracked by git.

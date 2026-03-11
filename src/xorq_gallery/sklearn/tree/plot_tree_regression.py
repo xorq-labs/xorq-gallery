@@ -12,6 +12,8 @@ deferred_matplotlib_plot.
 Both produce identical predictions.
 
 Dataset: Synthetic 1D sine wave with noise (80 samples)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/tree/plot_tree_regression.py
 """
 
 from __future__ import annotations

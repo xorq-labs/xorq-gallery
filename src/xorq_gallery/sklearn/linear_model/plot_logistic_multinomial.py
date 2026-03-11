@@ -12,6 +12,8 @@ decision boundary and hyperplane plots via deferred_matplotlib_plot.
 Both produce identical accuracy scores and decision boundaries.
 
 Dataset: Synthetic 3-class overlapping blobs with linear transformation
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/linear_model/plot_logistic_multinomial.py
 """
 
 from __future__ import annotations

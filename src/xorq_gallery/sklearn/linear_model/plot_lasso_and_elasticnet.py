@@ -13,6 +13,8 @@ deferred_sklearn_metric, coefficients extracted via deferred UDAFs.
 Both produce identical R^2 scores and coefficient patterns.
 
 Dataset: Synthetic sparse sinusoidal signals with Gaussian noise
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/linear_model/plot_lasso_and_elasticnet.py
 """
 
 from __future__ import annotations
@@ -276,12 +278,6 @@ def plot_results(comparator):
     return fig
 
 
-def save_comparison_plot(comparator, path):
-    fig = comparator.plot_results()
-    save_fig(path, fig, bbox_inches=None)
-    return path
-
-
 methods = (LASSO, ARD, ELASTICNET) = ("Lasso", "ARD", "ElasticNet")
 names_pipelines = (
     (LASSO, SklearnPipeline([("lasso", Lasso(alpha=LASSO_ALPHA))])),
@@ -321,11 +317,8 @@ comparator = SklearnXorqComparator(
 
 
 def main():
-    print(
-        "\nBoth approaches produce L1-regularized sparse models with similar sparsity patterns."
-    )
     comparator.result_comparison
-    save_comparison_plot(comparator, "imgs/lasso_and_elasticnet.png")
+    save_fig("imgs/lasso_and_elasticnet.png", comparator.plot_results())
 
 
 if __name__ in ("__pytest_main__",):

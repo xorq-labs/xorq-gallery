@@ -7,12 +7,13 @@ MiniBatchKMeans, FactorAnalysis, and dictionary learning variants). Each extract
 components that reconstruct the face images.
 
 xorq: Same decomposition pipelines wrapped in Pipeline.from_instance, deferred
-execution via xorq. Components extracted via make_other callbacks. MiniBatchKMeans
-is handled eagerly (it is a clusterer, not a transformer).
+execution via xorq. Components extracted via make_other callbacks.
 
 Both produce identical decomposition components.
 
 Dataset: Olivetti Faces (sklearn built-in, 400 faces, 64x64 pixels)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/decomposition/plot_faces_decomposition.py
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from numpy.random import RandomState
 from sklearn import cluster, decomposition
 from sklearn.datasets import fetch_olivetti_faces
 from sklearn.pipeline import Pipeline as SklearnPipeline
@@ -39,7 +39,7 @@ from xorq_gallery.utils import fig_to_image, save_fig
 # Constants
 # ---------------------------------------------------------------------------
 
-RNG = RandomState(0)
+SEED = 0
 N_ROW, N_COL = 2, 3
 N_COMPONENTS = N_ROW * N_COL  # 6
 IMAGE_SHAPE = (64, 64)
@@ -55,8 +55,9 @@ PRED_COL = "pred"  # unused, required by comparator
 def load_data():
     """Load Olivetti faces, return DataFrame with pixel + centered cols + subject_id."""
     faces, target = fetch_olivetti_faces(
-        return_X_y=True, shuffle=True, random_state=RNG
+        return_X_y=True, shuffle=True, random_state=SEED
     )
+    faces = faces.astype(np.float64)
     n_samples, n_features = faces.shape
     print(f"Dataset: {n_samples} faces, {n_features} features")
 
@@ -76,7 +77,7 @@ def load_data():
 # pixel_cols / centered_cols are derived from load_data() but we need them
 # at module level for FEATURE_COLS of each comparator.  Compute once here.
 _sample_faces, _sample_target = fetch_olivetti_faces(
-    return_X_y=True, shuffle=True, random_state=RNG
+    return_X_y=True, shuffle=True, random_state=SEED
 )
 _n_features = _sample_faces.shape[1]
 PIXEL_COLS = tuple(f"pixel_{i}" for i in range(_n_features))
@@ -120,19 +121,22 @@ def plot_gallery(title, images, n_col=N_COL, n_row=N_ROW, cmap=plt.cm.gray):
 # ---------------------------------------------------------------------------
 
 
+def _get_components(estimator):
+    """Extract face components from a fitted estimator (components_ or cluster_centers_)."""
+    if hasattr(estimator, "components_"):
+        return estimator.components_[:N_COMPONENTS].copy()
+    return estimator.cluster_centers_[:N_COMPONENTS].copy()
+
+
 def _make_sklearn_other(fitted):
-    """Extract components_ from the last step of the fitted sklearn Pipeline."""
+    """Extract components from the last step of the fitted sklearn Pipeline."""
     estimator = fitted.steps[-1][-1]
-    return {"components": estimator.components_[:N_COMPONENTS].copy()}
+    return {"components": _get_components(estimator)}
 
 
 def _make_xorq_other(xorq_fitted):
-    """Return dict of callables that extract components_ after deferred fit."""
-    return {
-        "components": lambda: xorq_fitted.fitted_steps[-1]
-        .model.components_[:N_COMPONENTS]
-        .copy()
-    }
+    """Return dict of callables that extract components after deferred fit."""
+    return {"components": lambda: _get_components(xorq_fitted.fitted_steps[-1].model)}
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +207,14 @@ _pixel_names_pipelines = (
     (
         NMF,
         SklearnPipeline(
-            [("nmf", decomposition.NMF(n_components=N_COMPONENTS, tol=5e-3))]
+            [
+                (
+                    "nmf",
+                    decomposition.NMF(
+                        n_components=N_COMPONENTS, tol=5e-3, random_state=SEED
+                    ),
+                )
+            ]
         ),
     ),
 )
@@ -224,7 +235,10 @@ _centered_names_pipelines = (
                 (
                     "pca",
                     decomposition.PCA(
-                        n_components=N_COMPONENTS, svd_solver="randomized", whiten=True
+                        n_components=N_COMPONENTS,
+                        svd_solver="randomized",
+                        whiten=True,
+                        random_state=SEED,
                     ),
                 )
             ]
@@ -241,6 +255,7 @@ _centered_names_pipelines = (
                         max_iter=400,
                         whiten="arbitrary-variance",
                         tol=15e-5,
+                        random_state=SEED,
                     ),
                 )
             ]
@@ -256,8 +271,8 @@ _centered_names_pipelines = (
                         n_components=N_COMPONENTS,
                         alpha=0.1,
                         max_iter=100,
-                        batch_size=3,
-                        random_state=RNG,
+                        batch_size=5,
+                        random_state=SEED,
                     ),
                 )
             ]
@@ -274,7 +289,7 @@ _centered_names_pipelines = (
                         alpha=0.1,
                         max_iter=50,
                         batch_size=3,
-                        random_state=RNG,
+                        random_state=SEED,
                     ),
                 )
             ]
@@ -287,7 +302,9 @@ _centered_names_pipelines = (
                 (
                     "fa",
                     decomposition.FactorAnalysis(
-                        n_components=N_COMPONENTS, max_iter=20
+                        n_components=N_COMPONENTS,
+                        max_iter=20,
+                        random_state=SEED,
                     ),
                 )
             ]
@@ -304,7 +321,7 @@ _centered_names_pipelines = (
                         alpha=0.1,
                         max_iter=50,
                         batch_size=3,
-                        random_state=RNG,
+                        random_state=SEED,
                         positive_dict=True,
                     ),
                 )
@@ -360,10 +377,15 @@ comparator_centered = SklearnXorqComparator(
 
 
 def main():
-    # KMeans: clusterer (no transform()), handled eagerly outside the comparator
-    print("Fitting MiniBatchKMeans eagerly (clustering method)...")
+    # KMeans: handled eagerly because xorq Pipeline.fit() raises
+    # "Can't infer target for a prediction step" when target=None and the last
+    # step has predict(). MiniBatchKMeans has predict() (ClusterMixin) but is
+    # unsupervised. The ClusterMixin exemption exists in FittedStep.__attrs_post_init__
+    # (pipeline_lib.py:386) but is missing from Pipeline.fit() (pipeline_lib.py:836).
+    # TODO: fix in xorq — add ClusterMixin check to Pipeline.fit(), then move
+    # KMeans into the comparator like the other methods.
     kmeans = cluster.MiniBatchKMeans(
-        n_clusters=N_COMPONENTS, tol=1e-3, batch_size=20, max_iter=50, random_state=RNG
+        n_clusters=N_COMPONENTS, tol=1e-3, batch_size=20, max_iter=50, random_state=SEED
     )
     df = comparator_centered.df
     kmeans.fit(df[list(CENTERED_COLS)])
@@ -373,7 +395,7 @@ def main():
     comparator_pixel.result_comparison
     comparator_centered.result_comparison
 
-    # Build composite: 7 methods (pixel NMF + 6 centered) as rows, 2 cols (sklearn | xorq)
+    # Build composite figure
     pixel_fig = comparator_pixel.plot_results()
     centered_fig = comparator_centered.plot_results()
 
@@ -388,7 +410,7 @@ def main():
     axes[1].text(
         0.5,
         0.5,
-        "KMeans: not a transformer;\nhandled eagerly outside comparator",
+        "KMeans: xorq Pipeline requires target\nfor predict steps; handled eagerly",
         ha="center",
         va="center",
         transform=axes[1].transAxes,

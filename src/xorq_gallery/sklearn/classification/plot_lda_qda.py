@@ -11,6 +11,8 @@ deferred, generate deferred decision boundary plots with covariance ellipsoids.
 Both produce identical decision boundaries and covariance estimates.
 
 Dataset: Synthetic 2D Gaussian blobs with varying covariance matrices
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/classification/plot_lda_qda.py
 """
 
 from __future__ import annotations
@@ -222,7 +224,6 @@ def plot_results(comparator):
         estimator = comparator.sklearn_results[name]["fitted"]
         _plot_result(estimator, X, y, axes_sk[col])
         axes_sk[col].set_title(name)
-    fig_sk.suptitle("sklearn", fontsize=12)
     fig_sk.tight_layout()
 
     fig_xo, axes_xo = plt.subplots(1, 2, figsize=(10, 5))
@@ -230,7 +231,6 @@ def plot_results(comparator):
         xo_png = deferred_matplotlib_plot(xo.memtable(comparator.df), plot_fn).execute()
         axes_xo[col].imshow(load_plot_bytes(xo_png))
         axes_xo[col].axis("off")
-    fig_xo.suptitle("xorq", fontsize=12)
     fig_xo.tight_layout()
 
     fig, axes = plt.subplots(1, 2, figsize=(16, 6))
@@ -294,23 +294,31 @@ comparators = {
 )
 
 
-def main():
-    row_labels = ("Isotropic covariance", "Shared covariance", "Different covariances")
-    for ds_name in dataset_names:
-        comparators[ds_name].result_comparison
-
+def _build_composite_figure():
+    """Compose per-dataset row figures into a single composite figure."""
+    row_labels = (
+        "Isotropic covariance\n(LDA = QDA: same covariance per class)",
+        "Shared covariance\n(LDA = QDA: same covariance per class)",
+        "Different covariances\n(LDA != QDA: per-class covariance matters)",
+    )
     row_figs = [comparators[ds_name].plot_results() for ds_name in dataset_names]
 
-    fig, axes = plt.subplots(len(dataset_names), 1, figsize=(16, 18))
+    fig, axes = plt.subplots(len(dataset_names), 1, figsize=(16, 20))
     for row, (row_fig, label) in enumerate(zip(row_figs, row_labels)):
         axes[row].imshow(fig_to_image(row_fig))
-        axes[row].set_ylabel(label, fontsize=11, labelpad=20)
+        axes[row].set_title(label, fontsize=12, fontstyle="italic", pad=8)
         axes[row].axis("off")
     fig.suptitle(
         "Linear and Quadratic Discriminant Analysis: sklearn vs xorq", fontsize=16
     )
-    fig.tight_layout()
-    save_fig("imgs/plot_lda_qda.png", fig)
+    fig.tight_layout(rect=[0, 0, 1, 0.97])
+    return fig
+
+
+def main():
+    for ds_name in dataset_names:
+        comparators[ds_name].result_comparison
+    save_fig("imgs/plot_lda_qda.png", _build_composite_figure())
 
 
 if __name__ in ("__pytest_main__",):

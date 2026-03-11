@@ -13,6 +13,8 @@ Both splits preserve temporal order and produce identical train/test
 rows independently.
 
 Dataset: Bike Sharing Demand (OpenML)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/applications/plot_time_series_lagged_features.py
 """
 
 from functools import cache, partial

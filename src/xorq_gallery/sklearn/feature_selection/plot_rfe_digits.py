@@ -11,6 +11,8 @@ feature rankings via xorq_fitted.fitted_steps[1].model.ranking_.
 Both produce identical ranking values.
 
 Dataset: load_digits (sklearn handwritten digits 0-9)
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/feature_selection/plot_rfe_digits.py
 """
 
 from __future__ import annotations
@@ -102,6 +104,12 @@ def compare_results(comparator):
         sk_acc = sklearn_result["metrics"]["accuracy"]
         xo_acc = xorq_result["metrics"]["accuracy"]
         print(f"  {name} accuracy - sklearn: {sk_acc:.4f}, xorq: {xo_acc:.4f}")
+
+    sk_ranking = sklearn_results[RFE_NAME]["fitted"].ranking_.reshape(IMAGE_SHAPE)
+    xo_fitted = comparator.deferred_xorq_results[RFE_NAME]["xorq_fitted"]
+    xo_ranking = xo_fitted.fitted_steps[1].model.ranking_.reshape(IMAGE_SHAPE)
+    np.testing.assert_array_equal(sk_ranking, xo_ranking)
+    print("Rankings match.")
 
 
 def plot_results(comparator):
@@ -215,16 +223,6 @@ comparator = SklearnXorqComparator(
 
 def main():
     comparator.result_comparison
-
-    sk_ranking = comparator.sklearn_results[RFE_NAME]["fitted"].ranking_.reshape(
-        IMAGE_SHAPE
-    )
-    xo_fitted = comparator.deferred_xorq_results[RFE_NAME]["xorq_fitted"]
-    xo_ranking = xo_fitted.fitted_steps[1].model.ranking_.reshape(IMAGE_SHAPE)
-
-    np.testing.assert_array_equal(sk_ranking, xo_ranking)
-    print("Rankings match.")
-
     save_fig("imgs/plot_rfe_digits.png", comparator.plot_results())
 
 

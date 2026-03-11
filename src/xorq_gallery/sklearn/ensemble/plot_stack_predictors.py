@@ -11,6 +11,8 @@ via StackingRegressorWrapper, fit/predict deferred, predictions match sklearn.
 Both produce identical predictions.
 
 Dataset: Synthetic sinusoid with trend and drop
+
+Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/ensemble/plot_stack_predictors.py
 """
 
 from __future__ import annotations
