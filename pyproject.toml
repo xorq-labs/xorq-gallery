@@ -33,7 +33,6 @@ test = [
     "coverage>=7.13.2",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
-    "pytest-codspeed>=3.0.0",
 ]
 
 [tool.uv.sources]

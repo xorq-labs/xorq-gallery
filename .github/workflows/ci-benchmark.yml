@@ -37,7 +37,7 @@ jobs:
           --import-mode=importlib
           --benchmark-json=benchmark-results.json
           -m benchmark
-          python/xorq/catalog/tests/test_benchmarks.py
+          tests/test_benchmarks.py
         working-directory: ${{ github.workspace }}
 
       - name: Store / compare benchmark results
