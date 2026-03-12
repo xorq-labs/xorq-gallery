@@ -29,6 +29,8 @@ jobs:
         python-version: ["3.12"]
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: recursive
       - uses: extractions/setup-just@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
