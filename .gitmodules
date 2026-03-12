@@ -1,0 +1,3 @@
+[submodule ".xorq/git-catalogs/xorq-gallery-sklearn"]
+	path = .xorq/git-catalogs/xorq-gallery-sklearn
+	url = ./.xorq/git-catalogs/xorq-gallery-sklearn
