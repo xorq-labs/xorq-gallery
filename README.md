@@ -110,6 +110,56 @@ Each example lives under `src/xorq_gallery/sklearn/<category>/` and mirrors the 
 
 - `plot_tree_regression` |Decision tree regression with max_depth tuning
 
+## Build Catalog
+
+Every deferred xorq expression produces a reproducible build artifact via `xo.build_expr`. These are stored in `builds/` and tracked in a git catalog submodule at `.xorq/git-catalogs/xorq-gallery-sklearn`.
+
+Three caches form a chain of truth:
+
+| Cache | File | Maps |
+|-------|------|------|
+| **exprs** | `src/xorq_gallery/data/exprs.json` | script name → expr names |
+| **build paths** | `src/xorq_gallery/data/build_paths.json` | (script, expr) → build hash |
+| **catalog** | `.xorq/git-catalogs/xorq-gallery-sklearn` | build hash → artifact, with aliases |
+
+Catalog aliases follow the convention `{script_stem}-{expr_name}`, e.g. `plot_lasso_and_elasticnet-xorq_lasso_preds`.
+
+### Updating
+
+```python
+from xorq_gallery.sklearn.utils import (
+    update_exprs_json_cache,
+    update_build_paths_json_cache,
+    update_catalog,
+)
+
+update_exprs_json_cache()         # refresh exprs.json from live scripts
+update_build_paths_json_cache()   # rebuild all exprs, refresh build_paths.json
+update_catalog()                  # sync catalog entries/aliases to match
+```
+
+Use `update_catalog(dry_run=True)` to preview changes without applying them. It returns a `CatalogDiff` with `aliases_to_remove`, `entries_to_remove`, `entries_to_add`, `aliases_to_add`, and an `is_empty` property.
+
+### Validation
+
+Five tests verify the chain end-to-end:
+
+| Step | Test | Checks | Speed |
+|------|------|--------|-------|
+| 1 | `test_load_exprs_json_cache_matches_get_exprs_dict` | exprs.json matches live scripts | fast |
+| 2 | `test_load_build_paths_json_cache_keys_match_exprs_cache` | build_paths.json covers every expr in exprs.json | fast |
+| 3 | `test_build_paths_json_cache_hashes_are_current` | build hashes match what `xo.build_expr` produces now | slow (~7min) |
+| 4 | `test_build_paths_json_cache_dirs_exist` | every build hash has a directory in `builds/` | fast |
+| 5 | `test_catalog_matches_build_paths` | catalog entries and aliases match build_paths.json | fast |
+
+```bash
+# Run fast validation (steps 1, 2, 4, 5)
+uv run pytest tests/test_utils.py -v -m "not slow2"
+
+# Run full validation including rebuild check (all steps)
+uv run pytest tests/test_utils.py -v
+```
+
 ## Development
 
 ```bash

@@ -1,4 +1,12 @@
+from pathlib import Path
+
+import pytest
+
 from xorq_gallery.sklearn.utils import (
+    _current_catalog_state,
+    _desired_catalog_state,
+    _get_catalog,
+    get_build_paths_dict,
     get_exprs_dict,
     load_build_paths_json_cache,
     load_exprs_json_cache,
@@ -6,6 +14,7 @@ from xorq_gallery.sklearn.utils import (
 
 
 def test_load_exprs_json_cache_matches_get_exprs_dict():
+    """Step 1: exprs.json matches live scripts."""
     cached = load_exprs_json_cache()
     calculated = get_exprs_dict()
     left, right = (
@@ -15,6 +24,7 @@ def test_load_exprs_json_cache_matches_get_exprs_dict():
 
 
 def test_load_build_paths_json_cache_keys_match_exprs_cache():
+    """Step 2: build_paths.json covers every expr in exprs.json."""
     exprs_cache = load_exprs_json_cache()
     build_cache = load_build_paths_json_cache()
     for script_name, expr_names in exprs_cache.items():
@@ -23,3 +33,51 @@ def test_load_build_paths_json_cache_keys_match_exprs_cache():
             assert expr_name in build_cache[script_name], (
                 f"missing expr: {script_name}:{expr_name}"
             )
+
+
+@pytest.mark.slow2
+def test_build_paths_json_cache_hashes_are_current():
+    """Step 3: build_paths.json hashes match what xo.build_expr produces."""
+    cached = load_build_paths_json_cache()
+    rebuilt = get_build_paths_dict()
+    mismatches = tuple(
+        (script_name, expr_name, cached[script_name][expr_name], rebuilt_path)
+        for script_name, exprs in cached.items()
+        for expr_name, cached_path in exprs.items()
+        if (rebuilt_path := rebuilt.get(script_name, {}).get(expr_name)) != cached_path
+    )
+    assert not mismatches, "Stale hashes in build_paths.json:\n" + "\n".join(
+        f"  {sn}:{en}: cached={cp}, rebuilt={rp}" for sn, en, cp, rp in mismatches
+    )
+
+
+def test_build_paths_json_cache_dirs_exist():
+    """Step 4: every build hash in build_paths.json exists on disk."""
+    build_cache = load_build_paths_json_cache()
+    builds_dir = Path(__file__).resolve().parent.parent / "builds"
+    missing = tuple(
+        (script_name, expr_name, build_path)
+        for script_name, exprs in build_cache.items()
+        for expr_name, build_path in exprs.items()
+        if not (builds_dir / Path(build_path).name).is_dir()
+    )
+    assert not missing, "Missing build directories:\n" + "\n".join(
+        f"  {sn}:{en} -> {bp}" for sn, en, bp in missing
+    )
+
+
+def test_catalog_matches_build_paths():
+    """Step 5: catalog entries/aliases match build_paths.json."""
+    build_cache = load_build_paths_json_cache()
+    catalog = _get_catalog()
+
+    desired_entries, desired_alias_to_entry = _desired_catalog_state(build_cache)
+    current_entries, current_alias_to_entry = _current_catalog_state(catalog)
+
+    assert current_entries == desired_entries, (
+        f"extra={sorted(current_entries - desired_entries)}, "
+        f"missing={sorted(desired_entries - current_entries)}"
+    )
+    assert set(current_alias_to_entry) == set(desired_alias_to_entry), (
+        f"alias mismatches: {set(current_alias_to_entry) ^ set(desired_alias_to_entry)}"
+    )
