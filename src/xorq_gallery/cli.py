@@ -287,7 +287,6 @@ def update_catalog_cmd(dry_run):
 
     from xorq_gallery.sklearn.utils import (
         _get_catalog,
-        apply_catalog_diff,
         compute_catalog_diff,
     )
     from xorq_gallery.sklearn.utils import (
@@ -317,21 +316,43 @@ def update_catalog_cmd(dry_run):
         click.echo("(dry run — no changes applied)")
         return
 
-    total = (
-        len(diff.aliases_to_remove)
-        + len(diff.entries_to_remove)
-        + len(diff.entries_to_add)
-        + len(diff.aliases_to_add)
-    )
-    with click.progressbar(
-        length=total, label="Syncing catalog", item_show_func=str
-    ) as bar:
+    from xorq.catalog.catalog import CatalogAlias
 
-        def _on_step(name):
-            bar.current_item = name
-            bar.update(1)
+    if diff.aliases_to_remove:
+        for alias in click.progressbar(
+            diff.aliases_to_remove,
+            label="Removing aliases",
+            item_show_func=str,
+        ):
+            CatalogAlias.from_name(alias, catalog).remove()
 
-        apply_catalog_diff(catalog, diff, builds_dir, on_step=_on_step)
+    if diff.entries_to_remove:
+        for entry_name in click.progressbar(
+            diff.entries_to_remove,
+            label="Removing entries",
+            item_show_func=str,
+        ):
+            catalog.remove(entry_name, sync=False)
+
+    if diff.entries_to_add:
+        for entry_hash, aliases in click.progressbar(
+            diff.entries_to_add,
+            label="Adding entries",
+            item_show_func=lambda x: x[0][:12] if x else "",
+        ):
+            build_dir = builds_dir / entry_hash
+            assert build_dir.is_dir(), f"Build directory not found: {build_dir}"
+            catalog.add(build_dir, sync=False, aliases=aliases)
+
+    if diff.aliases_to_add:
+        for alias, entry_hash in click.progressbar(
+            diff.aliases_to_add,
+            label="Adding aliases",
+            item_show_func=lambda x: x[0] if x else "",
+        ):
+            catalog.add_alias(entry_hash, alias, sync=False)
+
+    catalog.assert_consistency()
 
 
 @cli.command("pytest-changed")
