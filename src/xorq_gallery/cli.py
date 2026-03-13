@@ -248,10 +248,24 @@ def update_build_paths(script_names):
 
     Optionally pass one or more SCRIPT_NAMES to update only those scripts.
     """
+    from xorq_gallery.sklearn.utils import load_exprs_json_cache as _load_exprs
+
     filter_names = (
         tuple(s if s.endswith(".py") else f"{s}.py" for s in script_names) or None
     )
-    path = update_build_paths_json_cache(script_names=filter_names)
+    cache = _load_exprs()
+    total = sum(1 for sn in cache if filter_names is None or sn in filter_names)
+    with click.progressbar(
+        length=total, label="Building exprs", item_show_func=str
+    ) as bar:
+
+        def _on_script(name):
+            bar.current_item = name
+            bar.update(1)
+
+        path = update_build_paths_json_cache(
+            script_names=filter_names, on_script=_on_script
+        )
     if filter_names:
         click.echo(f"Updated {path} for {', '.join(filter_names)}")
     else:
