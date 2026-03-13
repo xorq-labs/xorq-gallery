@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773423914613,
+  "lastUpdate": 1773428582945,
   "repoUrl": "https://github.com/xorq-labs/xorq-gallery",
   "entries": {
     "Benchmark": [
@@ -2180,6 +2180,551 @@ window.BENCHMARK_DATA = {
             "unit": "iter/sec",
             "range": "stddev: 0.009268581262072929",
             "extra": "mean: 101.52123609090454 msec\nrounds: 11"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "xorq-labs",
+            "username": "xorq-labs"
+          },
+          "committer": {
+            "name": "xorq-labs",
+            "username": "xorq-labs"
+          },
+          "id": "51762794b1ae520871dd66dd0682510d4305d85e",
+          "message": "Add build artifact caching and catalog sync",
+          "timestamp": "2026-03-11T11:15:48Z",
+          "url": "https://github.com/xorq-labs/xorq-gallery/pull/3/commits/51762794b1ae520871dd66dd0682510d4305d85e"
+        },
+        "date": 1773428581903,
+        "tool": "pytest",
+        "benches": [
+          {
+            "name": "tests/test_benchmarks.py::test_list_groups",
+            "value": 4822.578528854923,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0003325420653586069",
+            "extra": "mean: 207.35795052723398 usec\nrounds: 1233"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_all_scripts",
+            "value": 4316.174901007702,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00004048043894135907",
+            "extra": "mean: 231.6866259906495 usec\nrounds: 1893"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_cyclical_feature_engineering]",
+            "value": 2096.7270877699443,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00038976011131209166",
+            "extra": "mean: 476.93379163789456 usec\nrounds: 1459"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_time_series_lagged_features]",
+            "value": 1924.799138926662,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0005144309865607468",
+            "extra": "mean: 519.5347295082624 usec\nrounds: 1952"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_tomography_l1_reconstruction]",
+            "value": 2041.799232551979,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00006834778080387428",
+            "extra": "mean: 489.76411787075284 usec\nrounds: 1841"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_topics_extraction_with_nmf_lda]",
+            "value": 2067.355860366854,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0006017439568517839",
+            "extra": "mean: 483.7096598466358 usec\nrounds: 1955"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_compare_calibration]",
+            "value": 2260.221155344394,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000037735026245540304",
+            "extra": "mean: 442.4345810742702 usec\nrounds: 1955"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_classification_probability]",
+            "value": 2051.894781131948,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0010051595133155461",
+            "extra": "mean: 487.354424405885 usec\nrounds: 1852"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_classifier_comparison]",
+            "value": 2178.9463750568234,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00003799973340778374",
+            "extra": "mean: 458.9374072934317 usec\nrounds: 1947"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_lda_qda]",
+            "value": 2049.0041492625414,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0011541088880507367",
+            "extra": "mean: 488.04195948549483 usec\nrounds: 1555"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_affinity_propagation]",
+            "value": 2184.987379952903,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000037343209600880724",
+            "extra": "mean: 457.6685472762569 usec\nrounds: 1946"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_kmeans_digits]",
+            "value": 2170.622037976084,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00003866606994360759",
+            "extra": "mean: 460.6974325813134 usec\nrounds: 1995"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_kmeans_silhouette_analysis]",
+            "value": 2024.2824672917195,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0013616685222036559",
+            "extra": "mean: 494.00220382182954 usec\nrounds: 1884"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_column_transformer_mixed_types]",
+            "value": 2209.03793146568,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00003805641267446871",
+            "extra": "mean: 452.68575326658504 usec\nrounds: 1990"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_feature_union]",
+            "value": 2197.2457473394848,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00004727254219256557",
+            "extra": "mean: 455.1152283311236 usec\nrounds: 2019"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_faces_decomposition]",
+            "value": 2031.7579955578708,
+            "unit": "iter/sec",
+            "range": "stddev: 0.002113184391744528",
+            "extra": "mean: 492.184601801173 usec\nrounds: 1999"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_gradient_boosting_categorical]",
+            "value": 2148.0593375078856,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00005078309250606336",
+            "extra": "mean: 465.53648800045266 usec\nrounds: 1375"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_stack_predictors]",
+            "value": 2165.8485602758733,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00003831933343696477",
+            "extra": "mean: 461.71279854978684 usec\nrounds: 1931"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_voting_regressor]",
+            "value": 2134.6594378026953,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00004534305766980695",
+            "extra": "mean: 468.4588006362957 usec\nrounds: 1886"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_rfe_digits]",
+            "value": 2193.451432908899,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00004098826914408436",
+            "extra": "mean: 455.90250369657184 usec\nrounds: 2029"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_select_from_model_diabetes]",
+            "value": 1937.744798285123,
+            "unit": "iter/sec",
+            "range": "stddev: 0.002701338803817782",
+            "extra": "mean: 516.0638288824132 usec\nrounds: 2022"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_lasso_and_elasticnet]",
+            "value": 2172.252879529581,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00004056070558761341",
+            "extra": "mean: 460.3515591686351 usec\nrounds: 1876"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_logistic_multinomial]",
+            "value": 2167.3394893734626,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00003960114518813538",
+            "extra": "mean: 461.39518285115605 usec\nrounds: 1936"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_quantile_regression]",
+            "value": 2156.961730270655,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000055243919783663173",
+            "extra": "mean: 463.61508689100395 usec\nrounds: 1991"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_confusion_matrix]",
+            "value": 2165.085688898979,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00004063314377614623",
+            "extra": "mean: 461.87548378675706 usec\nrounds: 1912"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_cv_indices]",
+            "value": 1865.5002777477666,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0034065161052516772",
+            "extra": "mean: 536.0492367266265 usec\nrounds: 2053"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_roc]",
+            "value": 2177.031575907815,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00003676178583435242",
+            "extra": "mean: 459.3410637983068 usec\nrounds: 2022"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_nca_classification]",
+            "value": 2248.352855468972,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00003975305740134756",
+            "extra": "mean: 444.7700446874098 usec\nrounds: 2014"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_mlp_alpha]",
+            "value": 2253.4261818247414,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00003834319575754389",
+            "extra": "mean: 443.7686967807559 usec\nrounds: 1926"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_all_scaling]",
+            "value": 2076.7564941862292,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00006931361544721545",
+            "extra": "mean: 481.5201025249939 usec\nrounds: 1980"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_discretization_strategies]",
+            "value": 2156.592931481081,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00004000878611505361",
+            "extra": "mean: 463.694369670975 usec\nrounds: 1853"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_target_encoder]",
+            "value": 1740.8478193920796,
+            "unit": "iter/sec",
+            "range": "stddev: 0.004439800738909434",
+            "extra": "mean: 574.4327498708126 usec\nrounds: 1935"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_svm_kernels]",
+            "value": 2139.4197571812742,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00006226972708061532",
+            "extra": "mean: 467.4164556269775 usec\nrounds: 2017"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_svm_regression]",
+            "value": 2140.7588097323123,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00005950803071878158",
+            "extra": "mean: 467.12408490568976 usec\nrounds: 1908"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_document_classification_20newsgroups]",
+            "value": 2222.195388304858,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000039514963374873807",
+            "extra": "mean: 450.00543393388244 usec\nrounds: 1998"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_list_exprs[plot_tree_regression]",
+            "value": 2212.85957352773,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00004535059075754207",
+            "extra": "mean: 451.9039581015097 usec\nrounds: 1981"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_cyclical_feature_engineering]",
+            "value": 2.6106059233316543,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00534679671802059",
+            "extra": "mean: 383.05283500000655 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_time_series_lagged_features]",
+            "value": 21.713739942533763,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0011373113786034379",
+            "extra": "mean: 46.05378910526413 msec\nrounds: 19"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_tomography_l1_reconstruction]",
+            "value": 0.1528291394903627,
+            "unit": "iter/sec",
+            "range": "stddev: 0.5037666844268821",
+            "extra": "mean: 6.543254796399998 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_topics_extraction_with_nmf_lda]",
+            "value": 0.06795189189703185,
+            "unit": "iter/sec",
+            "range": "stddev: 0.6264047976651606",
+            "extra": "mean: 14.716293720200014 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_compare_calibration]",
+            "value": 4.269809118652657,
+            "unit": "iter/sec",
+            "range": "stddev: 0.012671813004793718",
+            "extra": "mean: 234.20250700002043 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_classification_probability]",
+            "value": 19.1756046627972,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0007442655996419052",
+            "extra": "mean: 52.14959411111093 msec\nrounds: 18"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_classifier_comparison]",
+            "value": 0.5006077932783193,
+            "unit": "iter/sec",
+            "range": "stddev: 0.015082500136596348",
+            "extra": "mean: 1.9975717786000131 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_lda_qda]",
+            "value": 44.52927933169205,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0005121214686768503",
+            "extra": "mean: 22.457134160001715 msec\nrounds: 25"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_affinity_propagation]",
+            "value": 102.45433696913538,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00039167847736760195",
+            "extra": "mean: 9.760445771087781 msec\nrounds: 83"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_kmeans_digits]",
+            "value": 10.298679976055926,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0033561619147533467",
+            "extra": "mean: 97.09982272727818 msec\nrounds: 11"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_kmeans_silhouette_analysis]",
+            "value": 58.089167211272475,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00033222478048836946",
+            "extra": "mean: 17.21491369230622 msec\nrounds: 52"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_column_transformer_mixed_types]",
+            "value": 24.66080395838166,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000798637142921336",
+            "extra": "mean: 40.55017840000801 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_feature_union]",
+            "value": 0.33586707913314184,
+            "unit": "iter/sec",
+            "range": "stddev: 0.012785080870451828",
+            "extra": "mean: 2.9773683165999953 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_faces_decomposition]",
+            "value": 0.23598129531226963,
+            "unit": "iter/sec",
+            "range": "stddev: 1.0355756852311995",
+            "extra": "mean: 4.237623997599973 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_gradient_boosting_categorical]",
+            "value": 0.6098132431599945,
+            "unit": "iter/sec",
+            "range": "stddev: 0.010701028581926427",
+            "extra": "mean: 1.6398463155999934 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_stack_predictors]",
+            "value": 23.01120986376194,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0005335505001791892",
+            "extra": "mean: 43.457080523818966 msec\nrounds: 21"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_voting_regressor]",
+            "value": 46.81688523949979,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0019358543675955528",
+            "extra": "mean: 21.359814837837433 msec\nrounds: 37"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_rfe_digits]",
+            "value": 5386.748797799324,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000014618089139948108",
+            "extra": "mean: 185.64073387059278 usec\nrounds: 496"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_select_from_model_diabetes]",
+            "value": 0.9777374543555619,
+            "unit": "iter/sec",
+            "range": "stddev: 0.011272237435274581",
+            "extra": "mean: 1.0227694515999814 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_lasso_and_elasticnet]",
+            "value": 24.258988545846893,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0004633477108825355",
+            "extra": "mean: 41.22183404761938 msec\nrounds: 21"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_logistic_multinomial]",
+            "value": 111.7347281752161,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0002482845327890404",
+            "extra": "mean: 8.949768942310007 msec\nrounds: 52"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_quantile_regression]",
+            "value": 21.674282543744887,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0013618845646687302",
+            "extra": "mean: 46.137628684212025 msec\nrounds: 19"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_confusion_matrix]",
+            "value": 35.54860938121588,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0017964541910977358",
+            "extra": "mean: 28.130495606064592 msec\nrounds: 33"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_cv_indices]",
+            "value": 0.8464483152611639,
+            "unit": "iter/sec",
+            "range": "stddev: 1.1382502600780613",
+            "extra": "mean: 1.1814070416000049 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_roc]",
+            "value": 4.349004988756636,
+            "unit": "iter/sec",
+            "range": "stddev: 0.004109534202164468",
+            "extra": "mean: 229.93765300000177 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_nca_classification]",
+            "value": 4.093994494502808,
+            "unit": "iter/sec",
+            "range": "stddev: 0.022549654868522118",
+            "extra": "mean: 244.26022099999045 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_mlp_alpha]",
+            "value": 2.9193461001744248,
+            "unit": "iter/sec",
+            "range": "stddev: 0.003355409456804257",
+            "extra": "mean: 342.5424618000079 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_all_scaling]",
+            "value": 4.734739702410387,
+            "unit": "iter/sec",
+            "range": "stddev: 0.006352555910757801",
+            "extra": "mean: 211.2048523999988 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_discretization_strategies]",
+            "value": 23.82254290320054,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0006777712055521647",
+            "extra": "mean: 41.97704686957037 msec\nrounds: 23"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_target_encoder]",
+            "value": 0.5576556437083172,
+            "unit": "iter/sec",
+            "range": "stddev: 0.022030838479037813",
+            "extra": "mean: 1.7932213387999922 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_svm_kernels]",
+            "value": 72.18744216381974,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0003844230260983564",
+            "extra": "mean: 13.852824951611856 msec\nrounds: 62"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_svm_regression]",
+            "value": 100.00301830533493,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0003626776476942919",
+            "extra": "mean: 9.999698178576399 msec\nrounds: 84"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_document_classification_20newsgroups]",
+            "value": 0.2766593552982179,
+            "unit": "iter/sec",
+            "range": "stddev: 0.27566811148743414",
+            "extra": "mean: 3.614553351799998 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_get_exprs_for_script[plot_tree_regression]",
+            "value": 219.10100215925647,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00022206928342218059",
+            "extra": "mean: 4.5641050937463845 msec\nrounds: 64"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_subprocess_list_groups",
+            "value": 10.09630185891089,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0018401866260872475",
+            "extra": "mean: 99.04616699999025 msec\nrounds: 8"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_subprocess_list_all_scripts",
+            "value": 10.106497186539368,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0023605510467883902",
+            "extra": "mean: 98.94625027273337 msec\nrounds: 11"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_subprocess_list_exprs[plot_lasso_and_elasticnet-linear_model]",
+            "value": 10.158935819452244,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0005988034211999094",
+            "extra": "mean: 98.43550719999712 msec\nrounds: 10"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_subprocess_list_exprs[plot_confusion_matrix-model_selection]",
+            "value": 10.129473810798157,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0009169790561260533",
+            "extra": "mean: 98.72181109091632 msec\nrounds: 11"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_subprocess_list_exprs[plot_tree_regression-tree]",
+            "value": 10.036049306638219,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0024439782978228357",
+            "extra": "mean: 99.64080181815791 msec\nrounds: 11"
           }
         ]
       }
