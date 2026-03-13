@@ -16,7 +16,6 @@ from xorq_gallery.sklearn import (
 from xorq_gallery.sklearn.utils import (
     load_exprs_json_cache,
     update_build_paths_json_cache,
-    update_catalog,
     update_exprs_json_cache,
 )
 
@@ -284,7 +283,25 @@ def update_build_paths(script_names):
 @click.option("--dry-run", is_flag=True, help="Show diff without applying.")
 def update_catalog_cmd(dry_run):
     """Sync the git catalog submodule with build_paths.json."""
-    diff = update_catalog(dry_run=dry_run)
+    from git import Repo
+
+    from xorq_gallery.sklearn.utils import (
+        _get_catalog,
+        apply_catalog_diff,
+        compute_catalog_diff,
+    )
+    from xorq_gallery.sklearn.utils import (
+        load_build_paths_json_cache as _load_build_paths,
+    )
+
+    catalog = _get_catalog()
+    repo_root = pathlib.Path(
+        Repo(pathlib.Path.cwd(), search_parent_directories=True).working_dir
+    )
+    builds_dir = repo_root / "builds"
+    build_cache = _load_build_paths()
+
+    diff = compute_catalog_diff(catalog, build_cache)
     if diff.is_empty:
         click.echo("Catalog is up to date.")
         return
@@ -298,6 +315,23 @@ def update_catalog_cmd(dry_run):
         click.echo(f"Aliases to remove: {len(diff.aliases_to_remove)}")
     if dry_run:
         click.echo("(dry run — no changes applied)")
+        return
+
+    total = (
+        len(diff.aliases_to_remove)
+        + len(diff.entries_to_remove)
+        + len(diff.entries_to_add)
+        + len(diff.aliases_to_add)
+    )
+    with click.progressbar(
+        length=total, label="Syncing catalog", item_show_func=str
+    ) as bar:
+
+        def _on_step(name):
+            bar.current_item = name
+            bar.update(1)
+
+        apply_catalog_diff(catalog, diff, builds_dir, on_step=_on_step)
 
 
 @cli.command("pytest-changed")

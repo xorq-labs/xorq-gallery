@@ -191,21 +191,29 @@ def compute_catalog_diff(catalog, build_cache):
     )
 
 
-def apply_catalog_diff(catalog, diff, builds_dir):
+def apply_catalog_diff(catalog, diff, builds_dir, on_step=None):
     from xorq.catalog.catalog import CatalogAlias
 
     for alias in diff.aliases_to_remove:
+        if on_step:
+            on_step(f"remove alias {alias}")
         CatalogAlias.from_name(alias, catalog).remove()
 
     for entry_name in diff.entries_to_remove:
+        if on_step:
+            on_step(f"remove {entry_name}")
         catalog.remove(entry_name, sync=False)
 
     for entry_hash, aliases in diff.entries_to_add:
+        if on_step:
+            on_step(f"add {entry_hash[:12]}")
         build_dir = builds_dir / entry_hash
         assert build_dir.is_dir(), f"Build directory not found: {build_dir}"
         catalog.add(build_dir, sync=False, aliases=aliases)
 
     for alias, entry_hash in diff.aliases_to_add:
+        if on_step:
+            on_step(f"alias {alias}")
         catalog.add_alias(entry_hash, alias, sync=False)
 
     catalog.assert_consistency()
