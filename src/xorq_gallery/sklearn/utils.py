@@ -106,7 +106,7 @@ def _get_catalog():
 
     repo_root = Path(Repo(Path.cwd(), search_parent_directories=True).working_dir)
     catalog_path = repo_root / Catalog.submodule_rel_path / CATALOG_NAME
-    return Catalog.from_repo_path(catalog_path, init=False)
+    return Catalog.from_repo_path(catalog_path, init=False, check_consistency=False)
 
 
 def _current_catalog_state(catalog):
