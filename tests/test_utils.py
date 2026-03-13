@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -35,15 +36,30 @@ def test_load_build_paths_json_cache_keys_match_exprs_cache():
             )
 
 
+def _changed_script_names():
+    """Return script names to check, or None for all.
+
+    When CHANGED_SCRIPTS is set (comma-separated basenames, with or without .py),
+    only those scripts are rebuilt. Unset or empty means check all.
+    """
+    raw = os.environ.get("CHANGED_SCRIPTS", "").strip()
+    if not raw:
+        return None
+    return tuple(s if s.endswith(".py") else f"{s}.py" for s in raw.split(","))
+
+
 @pytest.mark.slow2
 def test_build_paths_json_cache_hashes_are_current():
     """Step 3: build_paths.json hashes match what xo.build_expr produces."""
     cached = load_build_paths_json_cache()
-    rebuilt = get_build_paths_dict()
+    script_filter = _changed_script_names()
+    rebuilt = get_build_paths_dict(script_names=script_filter)
+    scripts_to_check = rebuilt.keys() if script_filter else cached.keys()
     mismatches = tuple(
         (script_name, expr_name, cached[script_name][expr_name], rebuilt_path)
-        for script_name, exprs in cached.items()
-        for expr_name, cached_path in exprs.items()
+        for script_name in scripts_to_check
+        if script_name in cached
+        for expr_name, cached_path in cached[script_name].items()
         if (rebuilt_path := rebuilt.get(script_name, {}).get(expr_name)) != cached_path
     )
     assert not mismatches, "Stale hashes in build_paths.json:\n" + "\n".join(
