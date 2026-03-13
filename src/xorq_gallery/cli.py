@@ -2,6 +2,7 @@ import os
 import pathlib
 import pdb
 import runpy
+import subprocess
 import sys
 import traceback
 
@@ -275,3 +276,36 @@ def update_catalog_cmd(dry_run):
         click.echo(f"Aliases to remove: {len(diff.aliases_to_remove)}")
     if dry_run:
         click.echo("(dry run — no changes applied)")
+
+
+@cli.command("pytest-changed")
+@click.option("--base", default="main", help="Base branch/ref to diff against.")
+@click.argument("pytest_args", nargs=-1, type=click.UNPROCESSED)
+def pytest_changed(base, pytest_args):
+    """Run pytest with CHANGED_SCRIPTS set from git diff against BASE.
+
+    Only sklearn scripts changed since BASE are hash-checked. Extra args
+    are forwarded to pytest.
+
+    \b
+    Examples:
+      xorq-gallery test
+      xorq-gallery test --base HEAD~3
+      xorq-gallery test -- -v -m slow2
+    """
+    result = subprocess.run(
+        ["git", "diff", "--name-only", base, "--", "src/xorq_gallery/sklearn/**/*.py"],
+        capture_output=True,
+        text=True,
+    )
+    changed = ",".join(
+        sorted({pathlib.Path(f).name for f in result.stdout.strip().splitlines()})
+    )
+    if changed:
+        click.echo(f"Changed scripts: {changed}")
+    else:
+        click.echo("No sklearn scripts changed; checking all.")
+
+    env = {**os.environ, "CHANGED_SCRIPTS": changed}
+    args = ["pytest", "--verbose", "--import-mode=importlib", *pytest_args, "tests/"]
+    sys.exit(subprocess.run(args, env=env).returncode)
