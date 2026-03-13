@@ -1687,7 +1687,7 @@ wheels = [
 [[package]]
 name = "xorq"
 version = "0.3.14"
-source = { git = "https://github.com/xorq-labs/xorq.git?branch=main#3118066b781742b5a21abcae505bbb660efd368e" }
+source = { git = "https://github.com/xorq-labs/xorq.git?branch=feat%2Fcatalog%2Fcheck-consistency-opt-out#8f03c08423eb4d87e175d0486992d2dc382ff95a" }
 dependencies = [
     { name = "atpublic" },
     { name = "attrs" },
@@ -1780,7 +1780,7 @@ requires-dist = [
     { name = "pytest-benchmark", specifier = ">=5.2.3" },
     { name = "scikit-learn" },
     { name = "toolz", specifier = ">=1.1.0" },
-    { name = "xorq", git = "https://github.com/xorq-labs/xorq.git?branch=main" },
+    { name = "xorq", git = "https://github.com/xorq-labs/xorq.git?branch=feat%2Fcatalog%2Fcheck-consistency-opt-out" },
 ]
 
 [package.metadata.requires-dev]

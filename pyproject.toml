@@ -36,7 +36,7 @@ test = [
 ]
 
 [tool.uv.sources]
-xorq = { git = "https://github.com/xorq-labs/xorq.git", branch = "main" }
+xorq = { git = "https://github.com/xorq-labs/xorq.git", branch = "feat/catalog/check-consistency-opt-out" }
 
 [tool.uv.extra-build-dependencies]
 xorq = ["hatchling"]
