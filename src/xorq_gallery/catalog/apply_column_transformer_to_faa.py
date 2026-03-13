@@ -9,8 +9,8 @@ Source pipeline (Titanic):
 import toolz
 import xorq.api as xo
 from git import Repo
-from sklearn.metrics import accuracy_score, f1_score
 from xorq.catalog.catalog import Catalog
+from xorq.expr.ml.metrics import deferred_sklearn_metric
 from xorq.expr.ml.sklearn_utils import ColumnRemapper
 
 from xorq_gallery.sklearn.utils import load_build_paths_json_cache
@@ -129,6 +129,13 @@ pipeline = load_remapped_pipeline()
 fitted = pipeline.fit(train_table, features=FEATURE_COLS, target=TARGET_COL)
 preds_expr = fitted.predict(test_table, name=PRED_COL)
 
+accuracy_expr = deferred_sklearn_metric(
+    preds_expr, target=TARGET_COL, pred=PRED_COL, metric="accuracy"
+)
+f1_expr = deferred_sklearn_metric(
+    preds_expr, target=TARGET_COL, pred=PRED_COL, metric="f1"
+)
+
 
 # ---------------------------------------------------------------------------
 # Main
@@ -144,14 +151,9 @@ def main():
         f"  column refs after remap: {ColumnRemapper.list_column_refs(pipeline.instance)}"
     )
 
-    print("\nExecuting deferred predictions...")
-    preds_df = preds_expr.execute()
-
-    y_test = preds_df[TARGET_COL].values
-    y_pred = preds_df[PRED_COL].values
-
-    acc = accuracy_score(y_test, y_pred)
-    f1 = f1_score(y_test, y_pred)
+    print("\nExecuting deferred metrics...")
+    acc = accuracy_expr.execute()
+    f1 = f1_expr.execute()
     print(f"\n  accuracy={acc:.4f}  F1={f1:.4f}")
 
 
