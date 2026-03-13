@@ -1,5 +1,6 @@
 import importlib
 import json
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 from attr import frozen
@@ -52,7 +53,40 @@ def _build_expr(script, expr_name):
     return str(xo.build_expr(expr))
 
 
-def get_build_paths_dict(script_names=None, on_script=None):
+def _build_script_exprs(script_name, script_path, expr_names):
+    """Build all exprs for a single script. Runs in a worker process."""
+    script = Path(script_path)
+    return {
+        expr_name: built
+        for expr_name in expr_names
+        if (built := _build_expr(script, expr_name)) is not None
+    }
+
+
+def _get_build_paths_dict_parallel(items, script_by_name, max_workers, on_script):
+    result = {}
+    with ProcessPoolExecutor(max_workers=max_workers) as pool:
+        future_to_script = {
+            pool.submit(
+                _build_script_exprs,
+                script_name,
+                str(script_by_name[script_name]),
+                tuple(expr_names),
+            ): script_name
+            for script_name, expr_names in items
+        }
+        for future in as_completed(future_to_script):
+            script_name = future_to_script[future]
+            if on_script:
+                on_script(script_name)
+            try:
+                result[script_name] = future.result()
+            except Exception:
+                result[script_name] = {}
+    return result
+
+
+def get_build_paths_dict(script_names=None, on_script=None, max_workers=None):
     script_by_name = {s.name: s for s in scripts}
     cache = load_exprs_json_cache()
     items = [
@@ -60,21 +94,29 @@ def get_build_paths_dict(script_names=None, on_script=None):
         for sn, ens in cache.items()
         if sn in script_by_name and (script_names is None or sn in script_names)
     ]
-    result = {}
-    for script_name, expr_names in items:
-        if on_script:
-            on_script(script_name)
-        result[script_name] = {
-            expr_name: built
-            for expr_name in expr_names
-            if (built := _build_expr(script_by_name[script_name], expr_name))
-            is not None
-        }
-    return result
+    match max_workers:
+        case None | 1:
+            result = {}
+            for script_name, expr_names in items:
+                if on_script:
+                    on_script(script_name)
+                result[script_name] = {
+                    expr_name: built
+                    for expr_name in expr_names
+                    if (built := _build_expr(script_by_name[script_name], expr_name))
+                    is not None
+                }
+            return result
+        case _:
+            return _get_build_paths_dict_parallel(
+                items, script_by_name, max_workers, on_script
+            )
 
 
-def update_build_paths_json_cache(script_names=None, on_script=None):
-    rebuilt = get_build_paths_dict(script_names=script_names, on_script=on_script)
+def update_build_paths_json_cache(script_names=None, on_script=None, max_workers=None):
+    rebuilt = get_build_paths_dict(
+        script_names=script_names, on_script=on_script, max_workers=max_workers
+    )
     if script_names is not None:
         dct = load_build_paths_json_cache()
         dct.update(rebuilt)

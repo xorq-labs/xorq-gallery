@@ -273,14 +273,24 @@ def update_exprs(ctx):
 
 @cli.command("update-build-paths")
 @click.argument("script_names", nargs=-1, shell_complete=_complete_script_name)
+@click.option(
+    "-j",
+    "--workers",
+    type=int,
+    default=None,
+    help="Max parallel workers (default: cpu_count). Use -j1 for sequential (required for --pdb).",
+)
 @click.pass_context
-def update_build_paths(ctx, script_names):
+def update_build_paths(ctx, script_names, workers):
     """Rebuild build_paths.json cache from current exprs.
 
     Optionally pass one or more SCRIPT_NAMES to update only those scripts.
     """
     _reexec_if_needed(ctx)
     from xorq_gallery.sklearn.utils import load_exprs_json_cache as _load_exprs
+
+    if workers is None:
+        workers = os.cpu_count()
 
     filter_names = (
         tuple(s if s.endswith(".py") else f"{s}.py" for s in script_names) or None
@@ -296,7 +306,7 @@ def update_build_paths(ctx, script_names):
             bar.update(1)
 
         path = update_build_paths_json_cache(
-            script_names=filter_names, on_script=_on_script
+            script_names=filter_names, on_script=_on_script, max_workers=workers
         )
     if filter_names:
         click.echo(f"Updated {path} for {', '.join(filter_names)}")
