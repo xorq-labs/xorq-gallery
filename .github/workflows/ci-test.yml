@@ -57,7 +57,7 @@ jobs:
         working-directory: ${{ github.workspace }}
 
       - name: pytest
-        run: uv run --no-sync pytest --verbose --import-mode=importlib --cov --cov-report=xml --junit-xml=test-results.xml .
+        run: uv run --no-sync pytest --verbose --import-mode=importlib --durations=0 --cov --cov-report=xml --junit-xml=test-results.xml .
         working-directory: ${{ github.workspace }}
         env:
           CHANGED_SCRIPTS: ${{ steps.changed.outputs.scripts }}
