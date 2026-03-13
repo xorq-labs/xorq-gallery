@@ -52,7 +52,7 @@ def _build_expr(script, expr_name):
     return str(xo.build_expr(expr))
 
 
-def get_build_paths_dict():
+def get_build_paths_dict(script_names=None):
     script_by_name = {s.name: s for s in scripts}
     cache = load_exprs_json_cache()
     return {
@@ -64,11 +64,17 @@ def get_build_paths_dict():
         }
         for script_name, expr_names in cache.items()
         if script_name in script_by_name
+        and (script_names is None or script_name in script_names)
     }
 
 
-def update_build_paths_json_cache():
-    dct = get_build_paths_dict()
+def update_build_paths_json_cache(script_names=None):
+    rebuilt = get_build_paths_dict(script_names=script_names)
+    if script_names is not None:
+        dct = load_build_paths_json_cache()
+        dct.update(rebuilt)
+    else:
+        dct = rebuilt
     build_paths_json_path.write_text(json.dumps(dct))
     return build_paths_json_path
 

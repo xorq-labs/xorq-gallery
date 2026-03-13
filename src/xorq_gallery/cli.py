@@ -1,6 +1,9 @@
 import os
 import pathlib
+import pdb
 import runpy
+import sys
+import traceback
 
 import click
 
@@ -9,7 +12,12 @@ from xorq_gallery.sklearn import (
     group_paths,
     scripts,
 )
-from xorq_gallery.sklearn.utils import load_exprs_json_cache
+from xorq_gallery.sklearn.utils import (
+    load_exprs_json_cache,
+    update_build_paths_json_cache,
+    update_catalog,
+    update_exprs_json_cache,
+)
 
 
 def _scripts_for_group(group):
@@ -44,8 +52,36 @@ def _complete_script_name(ctx, param, incomplete):
     ]
 
 
-@click.group()
-def cli():
+class PdbCommand(click.Command):
+    def invoke(self, ctx):
+        if ctx.parent and ctx.parent.params.get("pdb_runcall"):
+            return pdb.runcall(ctx.invoke, self.callback, **ctx.params)
+        return super().invoke(ctx)
+
+
+class PdbGroup(click.Group):
+    command_class = PdbCommand
+
+    def invoke(self, ctx):
+        try:
+            return super().invoke(ctx)
+        except (click.ClickException, click.exceptions.Exit, SystemExit):
+            raise
+        except Exception as e:
+            if ctx.params.get("use_pdb"):
+                traceback.print_exception(e)
+                pdb.post_mortem(e.__traceback__)
+            else:
+                traceback.print_exc()
+            sys.exit(1)
+
+
+@click.group(cls=PdbGroup)
+@click.option("--pdb", "use_pdb", is_flag=True, help="Drop into pdb on failure")
+@click.option(
+    "--pdb-runcall", "pdb_runcall", is_flag=True, help="Invoke with pdb.runcall"
+)
+def cli(use_pdb, pdb_runcall):
     """xorq gallery: list and run example scripts."""
 
 
@@ -195,3 +231,47 @@ def install_completion(shell):
     install_path.write_text(_get_completion_source(shell))
     click.echo(f"Installed {shell} completion to {install_path}")
     click.echo(f"Restart your shell or run: source {install_path}")
+
+
+@cli.command("update-exprs")
+def update_exprs():
+    """Rebuild exprs.json cache from current scripts."""
+    path = update_exprs_json_cache()
+    click.echo(f"Updated {path}")
+
+
+@cli.command("update-build-paths")
+@click.argument("script_names", nargs=-1, shell_complete=_complete_script_name)
+def update_build_paths(script_names):
+    """Rebuild build_paths.json cache from current exprs.
+
+    Optionally pass one or more SCRIPT_NAMES to update only those scripts.
+    """
+    filter_names = (
+        tuple(s if s.endswith(".py") else f"{s}.py" for s in script_names) or None
+    )
+    path = update_build_paths_json_cache(script_names=filter_names)
+    if filter_names:
+        click.echo(f"Updated {path} for {', '.join(filter_names)}")
+    else:
+        click.echo(f"Updated {path}")
+
+
+@cli.command("update-catalog")
+@click.option("--dry-run", is_flag=True, help="Show diff without applying.")
+def update_catalog_cmd(dry_run):
+    """Sync the git catalog submodule with build_paths.json."""
+    diff = update_catalog(dry_run=dry_run)
+    if diff.is_empty:
+        click.echo("Catalog is up to date.")
+        return
+    if diff.entries_to_add:
+        click.echo(f"Entries to add: {len(diff.entries_to_add)}")
+    if diff.entries_to_remove:
+        click.echo(f"Entries to remove: {len(diff.entries_to_remove)}")
+    if diff.aliases_to_add:
+        click.echo(f"Aliases to add: {len(diff.aliases_to_add)}")
+    if diff.aliases_to_remove:
+        click.echo(f"Aliases to remove: {len(diff.aliases_to_remove)}")
+    if dry_run:
+        click.echo("(dry run — no changes applied)")
