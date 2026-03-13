@@ -1,8 +1,10 @@
 import os
+import sys
 from pathlib import Path
 
 import pytest
 
+from xorq_gallery.cli import PINNED_PYTHON
 from xorq_gallery.sklearn.utils import (
     _current_catalog_state,
     _desired_catalog_state,
@@ -12,6 +14,15 @@ from xorq_gallery.sklearn.utils import (
     load_build_paths_json_cache,
     load_exprs_json_cache,
 )
+
+
+def test_python_version_matches_pinned():
+    """Step 0: fail fast if Python minor version doesn't match PINNED_PYTHON."""
+    current = f"{sys.version_info.major}.{sys.version_info.minor}"
+    assert current == PINNED_PYTHON, (
+        f"Running Python {current}, but build hashes require {PINNED_PYTHON}. "
+        f"Update the CI matrix or PINNED_PYTHON in cli.py."
+    )
 
 
 def test_load_exprs_json_cache_matches_get_exprs_dict():

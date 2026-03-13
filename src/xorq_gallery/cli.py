@@ -20,6 +20,27 @@ from xorq_gallery.sklearn.utils import (
 )
 
 
+PINNED_PYTHON = "3.13"
+
+
+def _reexec_if_needed(ctx):
+    """Re-exec the current command under the pinned Python via ``uv run`` if needed."""
+    current = f"{sys.version_info.major}.{sys.version_info.minor}"
+    if current == PINNED_PYTHON:
+        return False
+    args = ["uv", "run", "--python", PINNED_PYTHON, "xorq-gallery"]
+    # reconstruct full command path from click context
+    parts = []
+    c = ctx
+    while c and c.info_name != ctx.find_root().info_name:
+        parts.append(c.info_name)
+        c = c.parent
+    args.extend(reversed(parts))
+    args.extend(ctx.params.get("script_names", ()))
+    click.echo(f"Re-running under Python {PINNED_PYTHON}: {' '.join(args)}")
+    sys.exit(subprocess.run(args).returncode)
+
+
 def _scripts_for_group(group):
     try:
         return get_scripts_for_group(group)
@@ -234,8 +255,10 @@ def install_completion(shell):
 
 
 @cli.command("update-exprs")
-def update_exprs():
+@click.pass_context
+def update_exprs(ctx):
     """Rebuild exprs.json cache from current scripts."""
+    _reexec_if_needed(ctx)
     with click.progressbar(
         length=len(scripts), label="Scanning scripts", item_show_func=str
     ) as bar:
@@ -250,11 +273,13 @@ def update_exprs():
 
 @cli.command("update-build-paths")
 @click.argument("script_names", nargs=-1, shell_complete=_complete_script_name)
-def update_build_paths(script_names):
+@click.pass_context
+def update_build_paths(ctx, script_names):
     """Rebuild build_paths.json cache from current exprs.
 
     Optionally pass one or more SCRIPT_NAMES to update only those scripts.
     """
+    _reexec_if_needed(ctx)
     from xorq_gallery.sklearn.utils import load_exprs_json_cache as _load_exprs
 
     filter_names = (
@@ -319,38 +344,42 @@ def update_catalog_cmd(dry_run):
     from xorq.catalog.catalog import CatalogAlias
 
     if diff.aliases_to_remove:
-        for alias in click.progressbar(
+        with click.progressbar(
             diff.aliases_to_remove,
             label="Removing aliases",
             item_show_func=str,
-        ):
-            CatalogAlias.from_name(alias, catalog).remove()
+        ) as bar:
+            for alias in bar:
+                CatalogAlias.from_name(alias, catalog).remove()
 
     if diff.entries_to_remove:
-        for entry_name in click.progressbar(
+        with click.progressbar(
             diff.entries_to_remove,
             label="Removing entries",
             item_show_func=str,
-        ):
-            catalog.remove(entry_name, sync=False)
+        ) as bar:
+            for entry_name in bar:
+                catalog.remove(entry_name, sync=False)
 
     if diff.entries_to_add:
-        for entry_hash, aliases in click.progressbar(
+        with click.progressbar(
             diff.entries_to_add,
             label="Adding entries",
             item_show_func=lambda x: x[0][:12] if x else "",
-        ):
-            build_dir = builds_dir / entry_hash
-            assert build_dir.is_dir(), f"Build directory not found: {build_dir}"
-            catalog.add(build_dir, sync=False, aliases=aliases)
+        ) as bar:
+            for entry_hash, aliases in bar:
+                build_dir = builds_dir / entry_hash
+                assert build_dir.is_dir(), f"Build directory not found: {build_dir}"
+                catalog.add(build_dir, sync=False, aliases=aliases)
 
     if diff.aliases_to_add:
-        for alias, entry_hash in click.progressbar(
+        with click.progressbar(
             diff.aliases_to_add,
             label="Adding aliases",
             item_show_func=lambda x: x[0] if x else "",
-        ):
-            catalog.add_alias(entry_hash, alias, sync=False)
+        ) as bar:
+            for alias, entry_hash in bar:
+                catalog.add_alias(entry_hash, alias, sync=False)
 
     catalog.assert_consistency()
 
