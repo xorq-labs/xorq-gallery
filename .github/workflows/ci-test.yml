@@ -19,6 +19,7 @@ on:
 
 permissions:
   contents: read
+  checks: write
 
 jobs:
   linux:
@@ -44,13 +45,30 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Detect changed scripts
+        id: changed
+        run: |
+          BASE=${{ github.event.pull_request.base.sha || github.event.before || 'HEAD~1' }}
+          SCRIPTS=$(git diff --name-only "$BASE" HEAD -- 'src/xorq_gallery/sklearn/**/*.py' | xargs -r -n1 basename | sort -u | paste -sd,)
+          echo "scripts=$SCRIPTS" >> "$GITHUB_OUTPUT"
+
       - name: Install the project
         run: uv sync --locked --group dev --group test --all-extras
         working-directory: ${{ github.workspace }}
 
       - name: pytest
-        run: uv run --no-sync pytest --verbose --import-mode=importlib --cov --cov-report=xml .
+        run: uv run --no-sync pytest --verbose --import-mode=importlib --cov --cov-report=xml --junit-xml=test-results.xml .
         working-directory: ${{ github.workspace }}
+        env:
+          CHANGED_SCRIPTS: ${{ steps.changed.outputs.scripts }}
+
+      - name: Test Report
+        uses: dorny/test-reporter@v2
+        if: always()
+        with:
+          name: pytest
+          path: test-results.xml
+          reporter: java-junit
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5.5.2
