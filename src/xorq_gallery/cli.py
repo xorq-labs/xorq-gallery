@@ -237,7 +237,15 @@ def install_completion(shell):
 @cli.command("update-exprs")
 def update_exprs():
     """Rebuild exprs.json cache from current scripts."""
-    path = update_exprs_json_cache()
+    with click.progressbar(
+        length=len(scripts), label="Scanning scripts", item_show_func=str
+    ) as bar:
+
+        def _on_script(name):
+            bar.current_item = name
+            bar.update(1)
+
+        path = update_exprs_json_cache(on_script=_on_script)
     click.echo(f"Updated {path}")
 
 

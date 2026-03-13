@@ -22,19 +22,19 @@ def _module_name_for_script(script):
     return ".".join(parts[idx:]).removesuffix(".py")
 
 
-def get_exprs_dict():
-    return {
-        script.name: tuple(exprs)
-        for (script, exprs) in (
-            (script, cexcepts(Exception, get_exprs_for_script)(script))
-            for script in scripts
-        )
-        if exprs
-    }
+def get_exprs_dict(on_script=None):
+    result = {}
+    for script in scripts:
+        if on_script:
+            on_script(script.name)
+        exprs = cexcepts(Exception, get_exprs_for_script)(script)
+        if exprs:
+            result[script.name] = tuple(exprs)
+    return result
 
 
-def update_exprs_json_cache():
-    dct = get_exprs_dict()
+def update_exprs_json_cache(on_script=None):
+    dct = get_exprs_dict(on_script=on_script)
     exprs_json_path.write_text(json.dumps(dct))
     return exprs_json_path
 
