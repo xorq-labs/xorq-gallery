@@ -423,5 +423,13 @@ def pytest_changed(base, pytest_args):
         click.echo("No sklearn scripts changed; checking all.")
 
     env = {**os.environ, "CHANGED_SCRIPTS": changed}
-    args = ["pytest", "--verbose", "--import-mode=importlib", *pytest_args, "tests/"]
+    from git import Repo
+
+    repo_root = pathlib.Path(
+        Repo(pathlib.Path.cwd(), search_parent_directories=True).working_dir
+    )
+    has_paths = any(not a.startswith("-") for a in pytest_args)
+    args = ["pytest", "--verbose", "--import-mode=importlib", *pytest_args]
+    if not has_paths:
+        args.append(str(repo_root / "tests"))
     sys.exit(subprocess.run(args, env=env).returncode)
