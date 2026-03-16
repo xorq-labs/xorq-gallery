@@ -12,6 +12,7 @@ dependencies = [
     "toolz>=1.1.0",
     "click>=8.3.1",
     "pytest-benchmark>=5.2.3",
+    "git-remote-s3>=0.3.2",
 ]
 
 [build-system]
