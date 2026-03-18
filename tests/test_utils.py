@@ -78,17 +78,18 @@ def test_build_paths_json_cache_hashes_are_current():
     )
 
 
-def test_build_paths_json_cache_dirs_exist():
-    """Step 4: every build hash in build_paths.json exists on disk."""
+def test_build_paths_json_cache_entries_exist_in_catalog():
+    """Step 4: every build hash in build_paths.json exists in the catalog."""
     build_cache = load_build_paths_json_cache()
-    builds_dir = Path(__file__).resolve().parent.parent / "builds"
+    catalog = _get_catalog()
+    catalog_entries = frozenset(catalog.list())
     missing = tuple(
         (script_name, expr_name, build_path)
         for script_name, exprs in build_cache.items()
         for expr_name, build_path in exprs.items()
-        if not (builds_dir / Path(build_path).name).is_dir()
+        if Path(build_path).name not in catalog_entries
     )
-    assert not missing, "Missing build directories:\n" + "\n".join(
+    assert not missing, "Missing catalog entries:\n" + "\n".join(
         f"  {sn}:{en} -> {bp}" for sn, en, bp in missing
     )
 
