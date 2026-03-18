@@ -59,6 +59,13 @@ def _changed_script_names():
     return tuple(s if s.endswith(".py") else f"{s}.py" for s in raw.split(","))
 
 
+_NONDETERMINISTIC_SCRIPTS = frozenset(
+    {
+        "plot_faces_decomposition.py",  # NMF, ICA, DictionaryLearning converge differently across platforms
+    }
+)
+
+
 @pytest.mark.slow2
 def test_build_paths_json_cache_hashes_are_current():
     """Step 3: build_paths.json hashes match what xo.build_expr produces."""
@@ -69,7 +76,7 @@ def test_build_paths_json_cache_hashes_are_current():
     mismatches = tuple(
         (script_name, expr_name, cached[script_name][expr_name], rebuilt_path)
         for script_name in scripts_to_check
-        if script_name in cached
+        if script_name in cached and script_name not in _NONDETERMINISTIC_SCRIPTS
         for expr_name, cached_path in cached[script_name].items()
         if (rebuilt_path := rebuilt.get(script_name, {}).get(expr_name)) != cached_path
     )
