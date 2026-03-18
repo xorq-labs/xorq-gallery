@@ -1,0 +1,7 @@
+[
+  "xorq_kfold_folds",
+  "xorq_stratifiedkfold_folds",
+  "xorq_shufflesplit_folds",
+  "xorq_stratifiedshufflesplit_folds",
+  "xorq_timeseriessplit_folds"
+]

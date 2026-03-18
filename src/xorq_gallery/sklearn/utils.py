@@ -13,8 +13,8 @@ from xorq_gallery.sklearn import (
 from xorq_gallery.utils import get_data_file
 
 
-exprs_json_path = get_data_file("exprs.json")
-build_paths_json_path = get_data_file("build_paths.json")
+exprs_dir = get_data_file("exprs")
+build_paths_dir = get_data_file("build_paths")
 
 
 def _module_name_for_script(script):
@@ -36,12 +36,18 @@ def get_exprs_dict(on_script=None):
 
 def update_exprs_json_cache(on_script=None):
     dct = get_exprs_dict(on_script=on_script)
-    exprs_json_path.write_text(json.dumps(dct, sort_keys=True))
-    return exprs_json_path
+    for script_name, expr_names in dct.items():
+        (exprs_dir / f"{script_name}.json").write_text(
+            json.dumps(expr_names, sort_keys=True)
+        )
+    return exprs_dir
 
 
 def load_exprs_json_cache():
-    return json.loads(exprs_json_path.read_text())
+    return {
+        p.name.removesuffix(".json"): json.loads(p.read_text())
+        for p in sorted(exprs_dir.glob("*.json"))
+    }
 
 
 @cexcepts(Exception, handler=lambda _: None)
@@ -117,17 +123,18 @@ def update_build_paths_json_cache(script_names=None, on_script=None, max_workers
     rebuilt = get_build_paths_dict(
         script_names=script_names, on_script=on_script, max_workers=max_workers
     )
-    if script_names is not None:
-        dct = load_build_paths_json_cache()
-        dct.update(rebuilt)
-    else:
-        dct = rebuilt
-    build_paths_json_path.write_text(json.dumps(dct, sort_keys=True))
-    return build_paths_json_path
+    for script_name, exprs in rebuilt.items():
+        (build_paths_dir / f"{script_name}.json").write_text(
+            json.dumps(exprs, sort_keys=True)
+        )
+    return build_paths_dir
 
 
 def load_build_paths_json_cache():
-    return json.loads(build_paths_json_path.read_text())
+    return {
+        p.name.removesuffix(".json"): json.loads(p.read_text())
+        for p in sorted(build_paths_dir.glob("*.json"))
+    }
 
 
 CATALOG_NAME = "xorq-gallery-sklearn"

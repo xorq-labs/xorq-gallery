@@ -1,0 +1,6 @@
+[
+  "xorq_linear_ridge_preds",
+  "xorq_spline_ridge_preds",
+  "xorq_hgbt_preds",
+  "xorq_stacking_preds"
+]

@@ -1,0 +1,7 @@
+{
+  "xorq_kfold_folds": "builds/23c94e94b3cc",
+  "xorq_shufflesplit_folds": "builds/23c94e94b3cc",
+  "xorq_stratifiedkfold_folds": "builds/23c94e94b3cc",
+  "xorq_stratifiedshufflesplit_folds": "builds/23c94e94b3cc",
+  "xorq_timeseriessplit_folds": "builds/07d766b76b0a"
+}

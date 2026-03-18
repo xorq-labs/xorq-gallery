@@ -1,0 +1,17 @@
+[
+  "xorq_moons_alpha010_preds",
+  "xorq_moons_alpha032_preds",
+  "xorq_moons_alpha100_preds",
+  "xorq_moons_alpha316_preds",
+  "xorq_moons_alpha1000_preds",
+  "xorq_circles_alpha010_preds",
+  "xorq_circles_alpha032_preds",
+  "xorq_circles_alpha100_preds",
+  "xorq_circles_alpha316_preds",
+  "xorq_circles_alpha1000_preds",
+  "xorq_linearly_alpha010_preds",
+  "xorq_linearly_alpha032_preds",
+  "xorq_linearly_alpha100_preds",
+  "xorq_linearly_alpha316_preds",
+  "xorq_linearly_alpha1000_preds"
+]
