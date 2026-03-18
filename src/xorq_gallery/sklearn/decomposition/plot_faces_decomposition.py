@@ -18,6 +18,8 @@ Source: https://github.com/scikit-learn/scikit-learn/blob/main/examples/decompos
 
 from __future__ import annotations
 
+import sys
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -52,36 +54,33 @@ PRED_COL = "pred"  # unused, required by comparator
 # ---------------------------------------------------------------------------
 
 
-def load_data():
-    """Load Olivetti faces, return DataFrame with pixel + centered cols + subject_id."""
-    faces, target = fetch_olivetti_faces(
-        return_X_y=True, shuffle=True, random_state=SEED
-    )
-    faces = faces.astype(np.float64)
-    n_samples, n_features = faces.shape
-    print(f"Dataset: {n_samples} faces, {n_features} features")
-
-    pixel_cols = tuple(f"pixel_{i}" for i in range(n_features))
-    centered_cols = tuple(f"centered_{i}" for i in range(n_features))
-
-    faces_centered = faces - faces.mean(axis=0)
-    faces_centered -= faces_centered.mean(axis=1).reshape(n_samples, -1)
-
-    df = pd.DataFrame(faces, columns=pixel_cols)
-    df_centered = pd.DataFrame(faces_centered, columns=centered_cols)
-    df = pd.concat([df, df_centered], axis=1)
-    df[TARGET_COL] = target
-    return df
-
-
-# pixel_cols / centered_cols are derived from load_data() but we need them
-# at module level for FEATURE_COLS of each comparator.  Compute once here.
+# Fetch once at module level; reused by both load_data_* functions.
 _sample_faces, _sample_target = fetch_olivetti_faces(
     return_X_y=True, shuffle=True, random_state=SEED
 )
-_n_features = _sample_faces.shape[1]
+_sample_faces = _sample_faces.astype(np.float64)
+_n_samples, _n_features = _sample_faces.shape
+_faces_centered = _sample_faces - _sample_faces.mean(axis=0)
+_faces_centered -= _faces_centered.mean(axis=1).reshape(_n_samples, -1)
+
 PIXEL_COLS = tuple(f"pixel_{i}" for i in range(_n_features))
 CENTERED_COLS = tuple(f"centered_{i}" for i in range(_n_features))
+
+
+def load_data_pixel():
+    """Return narrow DataFrame with only pixel cols + subject_id."""
+    print(f"Dataset: {_n_samples} faces, {_n_features} features", file=sys.stderr)
+    df = pd.DataFrame(_sample_faces, columns=PIXEL_COLS)
+    df[TARGET_COL] = _sample_target
+    return df
+
+
+def load_data_centered():
+    """Return narrow DataFrame with only centered cols + subject_id."""
+    print(f"Dataset: {_n_samples} faces, {_n_features} features", file=sys.stderr)
+    df = pd.DataFrame(_faces_centered, columns=CENTERED_COLS)
+    df[TARGET_COL] = _sample_target
+    return df
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +333,6 @@ _shared_kwargs = dict(
     target=TARGET_COL,
     pred=PRED_COL,
     metrics_names_funcs=metrics_names_funcs,
-    load_data=load_data,
     split_data=split_data_nop,
     make_sklearn_result=make_sklearn_fit_transform_result(
         make_other=_make_sklearn_other
@@ -350,11 +348,13 @@ _shared_kwargs = dict(
 comparator_pixel = SklearnXorqComparator(
     names_pipelines=_pixel_names_pipelines,
     features=PIXEL_COLS,
+    load_data=load_data_pixel,
     **_shared_kwargs,
 )
 comparator_centered = SklearnXorqComparator(
     names_pipelines=_centered_names_pipelines,
     features=CENTERED_COLS,
+    load_data=load_data_centered,
     **_shared_kwargs,
 )
 

@@ -3,3 +3,4 @@
 .envrc.secrets
 .envrc.user
 imgs/
+.claude
