@@ -12,11 +12,15 @@ dependencies = [
     "toolz>=1.1.0",
     "click>=8.3.1",
     "pytest-benchmark>=5.2.3",
+    "git-remote-s3>=0.3.2",
 ]
 
 [build-system]
 requires = ["uv_build>=0.9.0,<0.10.0"]
 build-backend = "uv_build"
+
+[tool.uv.build-backend]
+source-include = ["uv.lock", ".python-version"]
 
 [project.scripts]
 xorq-gallery = "xorq_gallery.cli:cli"
@@ -33,7 +37,6 @@ test = [
     "coverage>=7.13.2",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
-    "pytest-codspeed>=3.0.0",
 ]
 
 [tool.uv.sources]
