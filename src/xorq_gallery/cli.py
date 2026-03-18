@@ -1,15 +1,44 @@
 import os
 import pathlib
+import pdb
 import runpy
+import subprocess
+import sys
+import traceback
 
 import click
 
 from xorq_gallery.sklearn import (
-    get_exprs_for_script,
     get_scripts_for_group,
     group_paths,
     scripts,
 )
+from xorq_gallery.sklearn.utils import (
+    load_exprs_json_cache,
+    update_build_paths_json_cache,
+    update_exprs_json_cache,
+)
+
+
+PINNED_PYTHON = "3.13"
+
+
+def _reexec_if_needed(ctx):
+    """Re-exec the current command under the pinned Python via ``uv run`` if needed."""
+    current = f"{sys.version_info.major}.{sys.version_info.minor}"
+    if current == PINNED_PYTHON:
+        return False
+    args = ["uv", "run", "--python", PINNED_PYTHON, "xorq-gallery"]
+    # reconstruct full command path from click context
+    parts = []
+    c = ctx
+    while c and c.info_name != ctx.find_root().info_name:
+        parts.append(c.info_name)
+        c = c.parent
+    args.extend(reversed(parts))
+    args.extend(ctx.params.get("script_names", ()))
+    click.echo(f"Re-running under Python {PINNED_PYTHON}: {' '.join(args)}")
+    sys.exit(subprocess.run(args).returncode)
 
 
 def _scripts_for_group(group):
@@ -44,8 +73,36 @@ def _complete_script_name(ctx, param, incomplete):
     ]
 
 
-@click.group()
-def cli():
+class PdbCommand(click.Command):
+    def invoke(self, ctx):
+        if ctx.parent and ctx.parent.params.get("pdb_runcall"):
+            return pdb.runcall(ctx.invoke, self.callback, **ctx.params)
+        return super().invoke(ctx)
+
+
+class PdbGroup(click.Group):
+    command_class = PdbCommand
+
+    def invoke(self, ctx):
+        try:
+            return super().invoke(ctx)
+        except (click.ClickException, click.exceptions.Exit, SystemExit):
+            raise
+        except Exception as e:
+            if ctx.params.get("use_pdb"):
+                traceback.print_exception(e)
+                pdb.post_mortem(e.__traceback__)
+            else:
+                traceback.print_exc()
+            sys.exit(1)
+
+
+@click.group(cls=PdbGroup)
+@click.option("--pdb", "use_pdb", is_flag=True, help="Drop into pdb on failure")
+@click.option(
+    "--pdb-runcall", "pdb_runcall", is_flag=True, help="Invoke with pdb.runcall"
+)
+def cli(use_pdb, pdb_runcall):
     """xorq gallery: list and run example scripts."""
 
 
@@ -88,8 +145,9 @@ def list_exprs(script_name, group):
                 f"no such script {script_name!r}", param_hint="script_name"
             )
         case _:
-            dct = get_exprs_for_script(script)
-            click.echo("\n".join(expr for expr in dct))
+            cache = load_exprs_json_cache()
+            exprs = cache.get(script.name, [])
+            click.echo("\n".join(exprs))
 
 
 @cli.command("run")
@@ -194,3 +252,63 @@ def install_completion(shell):
     install_path.write_text(_get_completion_source(shell))
     click.echo(f"Installed {shell} completion to {install_path}")
     click.echo(f"Restart your shell or run: source {install_path}")
+
+
+@cli.command("update-exprs")
+@click.pass_context
+def update_exprs(ctx):
+    """Rebuild exprs.json cache from current scripts."""
+    _reexec_if_needed(ctx)
+    with click.progressbar(
+        length=len(scripts), label="Scanning scripts", item_show_func=str
+    ) as bar:
+
+        def _on_script(name):
+            bar.current_item = name
+            bar.update(1)
+
+        path = update_exprs_json_cache(on_script=_on_script)
+    click.echo(f"Updated {path}")
+
+
+@cli.command("update-build-paths")
+@click.argument("script_names", nargs=-1, shell_complete=_complete_script_name)
+@click.option(
+    "-j",
+    "--workers",
+    type=int,
+    default=None,
+    help="Max parallel workers (default: cpu_count). Use -j1 for sequential (required for --pdb).",
+)
+@click.pass_context
+def update_build_paths(ctx, script_names, workers):
+    """Rebuild build_paths.json cache from current exprs.
+
+    Optionally pass one or more SCRIPT_NAMES to update only those scripts.
+    """
+    _reexec_if_needed(ctx)
+    from xorq_gallery.sklearn.utils import load_exprs_json_cache as _load_exprs
+
+    if workers is None:
+        workers = os.cpu_count()
+
+    filter_names = (
+        tuple(s if s.endswith(".py") else f"{s}.py" for s in script_names) or None
+    )
+    cache = _load_exprs()
+    total = sum(1 for sn in cache if filter_names is None or sn in filter_names)
+    with click.progressbar(
+        length=total, label="Building exprs", item_show_func=str
+    ) as bar:
+
+        def _on_script(name):
+            bar.current_item = name
+            bar.update(1)
+
+        path = update_build_paths_json_cache(
+            script_names=filter_names, on_script=_on_script, max_workers=workers
+        )
+    if filter_names:
+        click.echo(f"Updated {path} for {', '.join(filter_names)}")
+    else:
+        click.echo(f"Updated {path}")
