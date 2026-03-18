@@ -312,3 +312,83 @@ def update_build_paths(ctx, script_names, workers):
         click.echo(f"Updated {path} for {', '.join(filter_names)}")
     else:
         click.echo(f"Updated {path}")
+
+
+@cli.command("update-catalog")
+@click.option("--dry-run", is_flag=True, help="Show diff without applying.")
+def update_catalog_cmd(dry_run):
+    """Sync the git catalog submodule with build_paths.json."""
+    from git import Repo
+
+    from xorq_gallery.sklearn.utils import (
+        _get_catalog,
+        compute_catalog_diff,
+    )
+    from xorq_gallery.sklearn.utils import (
+        load_build_paths_json_cache as _load_build_paths,
+    )
+
+    catalog = _get_catalog()
+    repo_root = pathlib.Path(
+        Repo(pathlib.Path.cwd(), search_parent_directories=True).working_dir
+    )
+    builds_dir = repo_root / "builds"
+    build_cache = _load_build_paths()
+
+    diff = compute_catalog_diff(catalog, build_cache)
+    if diff.is_empty:
+        click.echo("Catalog is up to date.")
+        return
+    if diff.entries_to_add:
+        click.echo(f"Entries to add: {len(diff.entries_to_add)}")
+    if diff.entries_to_remove:
+        click.echo(f"Entries to remove: {len(diff.entries_to_remove)}")
+    if diff.aliases_to_add:
+        click.echo(f"Aliases to add: {len(diff.aliases_to_add)}")
+    if diff.aliases_to_remove:
+        click.echo(f"Aliases to remove: {len(diff.aliases_to_remove)}")
+    if dry_run:
+        click.echo("(dry run — no changes applied)")
+        return
+
+    from xorq.catalog.catalog import CatalogAlias
+
+    if diff.aliases_to_remove:
+        with click.progressbar(
+            diff.aliases_to_remove,
+            label="Removing aliases",
+            item_show_func=str,
+        ) as bar:
+            for alias in bar:
+                CatalogAlias.from_name(alias, catalog).remove()
+
+    if diff.entries_to_remove:
+        with click.progressbar(
+            diff.entries_to_remove,
+            label="Removing entries",
+            item_show_func=str,
+        ) as bar:
+            for entry_name in bar:
+                catalog.remove(entry_name, sync=False)
+
+    if diff.entries_to_add:
+        with click.progressbar(
+            diff.entries_to_add,
+            label="Adding entries",
+            item_show_func=lambda x: x[0][:12] if x else "",
+        ) as bar:
+            for entry_hash, aliases in bar:
+                build_dir = builds_dir / entry_hash
+                assert build_dir.is_dir(), f"Build directory not found: {build_dir}"
+                catalog.add(build_dir, sync=False, aliases=aliases)
+
+    if diff.aliases_to_add:
+        with click.progressbar(
+            diff.aliases_to_add,
+            label="Adding aliases",
+            item_show_func=lambda x: x[0] if x else "",
+        ) as bar:
+            for alias, entry_hash in bar:
+                catalog.add_alias(entry_hash, alias, sync=False)
+
+    catalog.assert_consistency()
