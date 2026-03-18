@@ -392,3 +392,44 @@ def update_catalog_cmd(dry_run):
                 catalog.add_alias(entry_hash, alias, sync=False)
 
     catalog.assert_consistency()
+
+
+@cli.command("pytest-changed")
+@click.option("--base", default="main", help="Base branch/ref to diff against.")
+@click.argument("pytest_args", nargs=-1, type=click.UNPROCESSED)
+def pytest_changed(base, pytest_args):
+    """Run pytest with CHANGED_SCRIPTS set from git diff against BASE.
+
+    Only sklearn scripts changed since BASE are hash-checked. Extra args
+    are forwarded to pytest.
+
+    \b
+    Examples:
+      xorq-gallery test
+      xorq-gallery test --base HEAD~3
+      xorq-gallery test -- -v -m slow2
+    """
+    result = subprocess.run(
+        ["git", "diff", "--name-only", base, "--", "src/xorq_gallery/sklearn/**/*.py"],
+        capture_output=True,
+        text=True,
+    )
+    changed = ",".join(
+        sorted({pathlib.Path(f).name for f in result.stdout.strip().splitlines()})
+    )
+    if changed:
+        click.echo(f"Changed scripts: {changed}")
+    else:
+        click.echo("No sklearn scripts changed; checking all.")
+
+    env = {**os.environ, "CHANGED_SCRIPTS": changed}
+    from git import Repo
+
+    repo_root = pathlib.Path(
+        Repo(pathlib.Path.cwd(), search_parent_directories=True).working_dir
+    )
+    has_paths = any(not a.startswith("-") for a in pytest_args)
+    args = ["pytest", "--verbose", "--import-mode=importlib", *pytest_args]
+    if not has_paths:
+        args.append(str(repo_root / "tests"))
+    sys.exit(subprocess.run(args, env=env).returncode)

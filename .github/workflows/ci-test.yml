@@ -19,16 +19,21 @@ on:
 
 permissions:
   contents: read
+  checks: write
 
 jobs:
-  linux:
+  linux-fast:
+    name: linux-fast (${{ matrix.target }}, ${{ matrix.python-version }})
     runs-on: bigger-runner
     strategy:
       matrix:
         target: [x86_64]
-        python-version: ["3.12"]
+        python-version: ["3.13"]
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
       - uses: extractions/setup-just@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -46,11 +51,87 @@ jobs:
         run: uv sync --locked --group dev --group test --all-extras
         working-directory: ${{ github.workspace }}
 
-      - name: pytest
-        run: uv run --no-sync pytest --verbose --import-mode=importlib --cov --cov-report=xml .
+      - name: pytest (fast)
+        run: >
+          uv run --no-sync pytest
+          --verbose
+          --import-mode=importlib
+          --durations=0
+          -m "not benchmark and not slow1 and not slow2"
+          -n auto
+          --cov --cov-report=xml
+          --junit-xml=test-results.xml
+          .
         working-directory: ${{ github.workspace }}
+
+      - name: Test Report
+        uses: dorny/test-reporter@v2
+        if: always()
+        with:
+          name: pytest-fast
+          path: test-results.xml
+          reporter: java-junit
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5.5.2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  linux-slow:
+    name: linux-slow (${{ matrix.target }}, ${{ matrix.python-version }})
+    runs-on: bigger-runner
+    strategy:
+      matrix:
+        target: [x86_64]
+        python-version: ["3.13"]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - uses: extractions/setup-just@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Detect changed scripts
+        id: changed
+        run: |
+          BASE=${{ github.event.pull_request.base.sha || github.event.before || 'HEAD~1' }}
+          SCRIPTS=$(git diff --name-only "$BASE" HEAD -- 'src/xorq_gallery/sklearn/**/*.py' | xargs -r -n1 basename | sort -u | paste -sd,)
+          echo "scripts=$SCRIPTS" >> "$GITHUB_OUTPUT"
+
+      - name: Install the project
+        run: uv sync --locked --group dev --group test --all-extras
+        working-directory: ${{ github.workspace }}
+
+      - name: pytest (slow)
+        run: >
+          uv run --no-sync pytest
+          --verbose
+          --import-mode=importlib
+          --durations=0
+          -m "(slow1 or slow2) and not benchmark"
+          -n auto
+          --cov --cov-report=xml
+          --junit-xml=test-results.xml
+          .
+        working-directory: ${{ github.workspace }}
+        env:
+          CHANGED_SCRIPTS: ${{ steps.changed.outputs.scripts }}
+
+      - name: Test Report
+        uses: dorny/test-reporter@v2
+        if: always()
+        with:
+          name: pytest-slow
+          path: test-results.xml
+          reporter: java-junit
