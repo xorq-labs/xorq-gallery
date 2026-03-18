@@ -36,7 +36,7 @@ def get_exprs_dict(on_script=None):
 
 def update_exprs_json_cache(on_script=None):
     dct = get_exprs_dict(on_script=on_script)
-    exprs_json_path.write_text(json.dumps(dct))
+    exprs_json_path.write_text(json.dumps(dct, sort_keys=True))
     return exprs_json_path
 
 
@@ -122,7 +122,7 @@ def update_build_paths_json_cache(script_names=None, on_script=None, max_workers
         dct.update(rebuilt)
     else:
         dct = rebuilt
-    build_paths_json_path.write_text(json.dumps(dct))
+    build_paths_json_path.write_text(json.dumps(dct, sort_keys=True))
     return build_paths_json_path
 
 
