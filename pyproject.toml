@@ -53,6 +53,7 @@ markers = [
     "slow1: test takes between 6 and 17 seconds",
     "slow2: test takes longer than 17 seconds",
     "benchmark: benchmark test (deselect with '-m not benchmark')",
+    "implicit_parallel: script uses OpenMP/BLAS internal threading (run serially)",
 ]
 
 [tool.ruff.lint]
