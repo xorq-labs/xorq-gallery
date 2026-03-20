@@ -97,6 +97,17 @@ _SLOW2_SCRIPTS = frozenset(
     }
 )
 
+_IMPLICIT_PARALLEL_SCRIPTS = frozenset(
+    {
+        "plot_cyclical_feature_engineering",
+        "plot_target_encoder",
+        "plot_gradient_boosting_categorical",
+        "plot_faces_decomposition",
+        "plot_tomography_l1_reconstruction",
+        "plot_kmeans_digits",
+    }
+)
+
 
 def _marks_for_hash_check(script_name):
     stem = script_name.removesuffix(".py")
@@ -107,6 +118,8 @@ def _marks_for_hash_check(script_name):
         marks.append(pytest.mark.slow1)
     if stem in _SLOW2_SCRIPTS:
         marks.append(pytest.mark.slow2)
+    if stem in _IMPLICIT_PARALLEL_SCRIPTS:
+        marks.append(pytest.mark.implicit_parallel)
     return marks
 
 

@@ -58,6 +58,20 @@ _SLOW2_SCRIPTS = frozenset(
     }
 )
 
+# Scripts that use OpenMP (HistGradientBoosting, KMeans) or heavy BLAS/LAPACK
+# (PCA, NMF, Ridge on large matrices) internally. These should not run under
+# pytest-xdist as the implicit threading causes CPU contention.
+_IMPLICIT_PARALLEL_SCRIPTS = frozenset(
+    {
+        "plot_cyclical_feature_engineering",  # HistGradientBoostingRegressor (OpenMP)
+        "plot_target_encoder",  # HistGradientBoostingRegressor (OpenMP)
+        "plot_gradient_boosting_categorical",  # 5× HistGradientBoostingRegressor (OpenMP)
+        "plot_faces_decomposition",  # PCA, NMF, FastICA, SparsePCA, DictLearning (BLAS)
+        "plot_tomography_l1_reconstruction",  # Ridge, Lasso on 16K×16K matrix (BLAS)
+        "plot_kmeans_digits",  # KMeans (OpenMP), PCA (BLAS)
+    }
+)
+
 
 def _marks_for(stem):
     marks = []
@@ -67,6 +81,8 @@ def _marks_for(stem):
         marks.append(pytest.mark.slow1)
     if stem in _SLOW2_SCRIPTS:
         marks.append(pytest.mark.slow2)
+    if stem in _IMPLICIT_PARALLEL_SCRIPTS:
+        marks.append(pytest.mark.implicit_parallel)
     return marks
 
 
