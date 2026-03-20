@@ -1,6 +1,6 @@
 {
-  "xorq_linear_preds": "builds/6d19219f92ab",
-  "xorq_poly_preds": "builds/504340afc80d",
-  "xorq_rbf_preds": "builds/92cf8848e649",
-  "xorq_sigmoid_preds": "builds/1d76916cf359"
+  "xorq_linear_preds": "builds/e92af961d0fe",
+  "xorq_poly_preds": "builds/009c87982139",
+  "xorq_rbf_preds": "builds/7771595a3364",
+  "xorq_sigmoid_preds": "builds/193100f1e26e"
 }

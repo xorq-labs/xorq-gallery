@@ -1,11 +1,11 @@
 {
-  "xorq_maxabs_transformed": "builds/9a8f7873a55b",
-  "xorq_minmax_transformed": "builds/ddb180482213",
-  "xorq_normalizer_transformed": "builds/0d6b7cdc390b",
-  "xorq_power_bc_transformed": "builds/4d120b0f4683",
-  "xorq_power_yj_transformed": "builds/f24c4bcc2104",
-  "xorq_quantile_normal_transformed": "builds/055bb706a3e0",
-  "xorq_quantile_uniform_transformed": "builds/3e26be790f6b",
-  "xorq_robust_transformed": "builds/e00863039330",
-  "xorq_standard_transformed": "builds/c988dd3eb8d1"
+  "xorq_maxabs_transformed": "builds/abddc3b166f7",
+  "xorq_minmax_transformed": "builds/6c74d85c98c8",
+  "xorq_normalizer_transformed": "builds/cf91b9415424",
+  "xorq_power_bc_transformed": "builds/236fa3935a85",
+  "xorq_power_yj_transformed": "builds/0c7989def42b",
+  "xorq_quantile_normal_transformed": "builds/5790d5ec0e86",
+  "xorq_quantile_uniform_transformed": "builds/6d3f509343a9",
+  "xorq_robust_transformed": "builds/ae31fa761968",
+  "xorq_standard_transformed": "builds/75f77ccd5104"
 }
