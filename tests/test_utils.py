@@ -26,10 +26,23 @@ def test_python_version_matches_pinned():
     )
 
 
+_XFAIL_SCRIPTS = {
+    "plot_document_classification_20newsgroups": "20 Newsgroups dataset download unreliable in CI",
+}
+
+
 @pytest.mark.parametrize(
     "script",
-    list(scripts),
-    ids=[s.stem for s in scripts],
+    [
+        pytest.param(
+            s,
+            id=s.stem,
+            marks=[pytest.mark.xfail(reason=_XFAIL_SCRIPTS[s.stem])]
+            if s.stem in _XFAIL_SCRIPTS
+            else [],
+        )
+        for s in scripts
+    ],
 )
 def test_exprs_snapshot(script, snapshot):
     """Step 1: exprs discovered from each script match snapshot."""
@@ -112,6 +125,8 @@ _IMPLICIT_PARALLEL_SCRIPTS = frozenset(
 def _marks_for_hash_check(script_name):
     stem = script_name.removesuffix(".py")
     marks = []
+    if stem in _XFAIL_SCRIPTS:
+        marks.append(pytest.mark.xfail(reason=_XFAIL_SCRIPTS[stem]))
     if script_name in _NONDETERMINISTIC_SCRIPTS:
         marks.append(pytest.mark.xfail(reason="non-deterministic across platforms"))
     if stem in _SLOW1_SCRIPTS:
