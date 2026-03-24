@@ -190,3 +190,29 @@ def test_catalog_matches_build_paths():
     assert set(current_alias_to_entry) == set(desired_alias_to_entry), (
         f"alias mismatches: {set(current_alias_to_entry) ^ set(desired_alias_to_entry)}"
     )
+
+
+@pytest.mark.parametrize("script_name", _hash_check_scripts())
+def test_rebuilt_hashes_in_catalog(script_name):
+    """Step 6: rebuilt hashes for each script exist in the catalog.
+
+    Rebuilds hashes from source and checks them directly against the catalog,
+    bypassing the build_paths.json cache. Catches the case where code or
+    dependency changes produce new hashes but the catalog has not been updated.
+    """
+    catalog = _get_catalog()
+    catalog_entries = frozenset(catalog.list())
+
+    rebuilt = get_build_paths_dict(script_names=(script_name,))
+    exprs = rebuilt.get(script_name, {})
+    assert exprs, f"no expressions built for {script_name}"
+
+    missing = tuple(
+        (expr_name, build_path)
+        for expr_name, build_path in exprs.items()
+        if Path(build_path).name not in catalog_entries
+    )
+    assert not missing, (
+        f"Rebuilt hashes not in catalog for {script_name}:\n"
+        + "\n".join(f"  {en} -> {bp}" for en, bp in missing)
+    )
