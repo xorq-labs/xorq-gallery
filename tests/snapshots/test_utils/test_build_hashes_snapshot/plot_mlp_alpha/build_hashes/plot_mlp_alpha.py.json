@@ -1,0 +1,17 @@
+{
+  "xorq_circles_alpha010_preds": "builds/95d924bf1259",
+  "xorq_circles_alpha032_preds": "builds/b7cdb71162ea",
+  "xorq_circles_alpha1000_preds": "builds/1174c3bf6736",
+  "xorq_circles_alpha100_preds": "builds/77f5232e45d7",
+  "xorq_circles_alpha316_preds": "builds/6f99afe87a75",
+  "xorq_linearly_alpha010_preds": "builds/a5601e854ac1",
+  "xorq_linearly_alpha032_preds": "builds/e2382ee6b2ed",
+  "xorq_linearly_alpha1000_preds": "builds/3f9a87cd70e2",
+  "xorq_linearly_alpha100_preds": "builds/bfe768bc4490",
+  "xorq_linearly_alpha316_preds": "builds/0a1fded9101d",
+  "xorq_moons_alpha010_preds": "builds/979564f4832d",
+  "xorq_moons_alpha032_preds": "builds/8bc649d7689b",
+  "xorq_moons_alpha1000_preds": "builds/85e050b15a67",
+  "xorq_moons_alpha100_preds": "builds/d79c8e4ff158",
+  "xorq_moons_alpha316_preds": "builds/746058631e29"
+}

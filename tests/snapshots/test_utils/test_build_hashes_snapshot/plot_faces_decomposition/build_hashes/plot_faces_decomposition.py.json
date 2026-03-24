@@ -1,0 +1,9 @@
+{
+  "xorq_dict_learning_transformed": "builds/f3f4e32294f2",
+  "xorq_dict_pos_transformed": "builds/1a1aa770a06b",
+  "xorq_fa_transformed": "builds/7bc63773e437",
+  "xorq_ica_transformed": "builds/bf68197c2926",
+  "xorq_nmf_transformed": "builds/296a70635e2b",
+  "xorq_pca_transformed": "builds/027088db80d4",
+  "xorq_sparse_pca_transformed": "builds/6a6b54330672"
+}

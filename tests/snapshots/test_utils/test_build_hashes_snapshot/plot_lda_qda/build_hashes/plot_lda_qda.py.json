@@ -1,0 +1,8 @@
+{
+  "xorq_lda_diff_preds": "builds/9f6b91fa3bbd",
+  "xorq_lda_iso_preds": "builds/3db8c34da9da",
+  "xorq_lda_shared_preds": "builds/9271b42a5a1d",
+  "xorq_qda_diff_preds": "builds/2ed613e63217",
+  "xorq_qda_iso_preds": "builds/77ab6b19f674",
+  "xorq_qda_shared_preds": "builds/0e013328a20a"
+}

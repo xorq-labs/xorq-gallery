@@ -1,0 +1,6 @@
+{
+  "xorq_logistic_proba": "builds/62ded2dad446",
+  "xorq_naive_bayes_proba": "builds/23472683133d",
+  "xorq_random_forest_proba": "builds/5c22f637f532",
+  "xorq_svc_proba": "builds/da87d5e9638f"
+}

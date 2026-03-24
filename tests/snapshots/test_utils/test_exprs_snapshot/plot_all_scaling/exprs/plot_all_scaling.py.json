@@ -1,0 +1,11 @@
+[
+  "xorq_standard_transformed",
+  "xorq_minmax_transformed",
+  "xorq_maxabs_transformed",
+  "xorq_robust_transformed",
+  "xorq_power_yj_transformed",
+  "xorq_power_bc_transformed",
+  "xorq_quantile_uniform_transformed",
+  "xorq_quantile_normal_transformed",
+  "xorq_normalizer_transformed"
+]

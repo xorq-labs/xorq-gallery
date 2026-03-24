@@ -37,6 +37,8 @@ test = [
     "coverage>=7.13.2",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
+    "pytest-xdist>=3.5.0",
+    "pytest-snapshot>=0.9.0",
 ]
 
 [tool.uv.sources]
@@ -51,6 +53,7 @@ markers = [
     "slow1: test takes between 6 and 17 seconds",
     "slow2: test takes longer than 17 seconds",
     "benchmark: benchmark test (deselect with '-m not benchmark')",
+    "implicit_parallel: script uses OpenMP/BLAS internal threading (run serially)",
 ]
 
 [tool.ruff.lint]

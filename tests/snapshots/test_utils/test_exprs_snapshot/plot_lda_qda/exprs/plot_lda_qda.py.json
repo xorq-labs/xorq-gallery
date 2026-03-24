@@ -1,0 +1,8 @@
+[
+  "xorq_lda_iso_preds",
+  "xorq_lda_shared_preds",
+  "xorq_lda_diff_preds",
+  "xorq_qda_iso_preds",
+  "xorq_qda_shared_preds",
+  "xorq_qda_diff_preds"
+]
