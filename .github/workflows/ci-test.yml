@@ -136,8 +136,25 @@ jobs:
           path: test-results.xml
           reporter: java-junit
 
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      scripts: ${{ steps.changed.outputs.scripts }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Detect changed scripts
+        id: changed
+        run: |
+          BASE=${{ github.event.pull_request.base.sha || github.event.before || 'HEAD~1' }}
+          SCRIPTS=$(git diff --name-only "$BASE" HEAD -- 'src/xorq_gallery/sklearn/**/*.py' | xargs -r -n1 basename | sort -u | paste -sd,)
+          echo "scripts=$SCRIPTS" >> "$GITHUB_OUTPUT"
+
   linux-serial:
     name: linux-serial (${{ matrix.target }}, ${{ matrix.python-version }})
+    needs: detect-changes
+    if: needs.detect-changes.outputs.scripts != ''
     runs-on: bigger-runner
     strategy:
       matrix:
@@ -161,12 +178,13 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Detect changed scripts
-        id: changed
+      - name: Build pytest -k filter from changed scripts
+        id: filter
         run: |
-          BASE=${{ github.event.pull_request.base.sha || github.event.before || 'HEAD~1' }}
-          SCRIPTS=$(git diff --name-only "$BASE" HEAD -- 'src/xorq_gallery/sklearn/**/*.py' | xargs -r -n1 basename | sort -u | paste -sd,)
-          echo "scripts=$SCRIPTS" >> "$GITHUB_OUTPUT"
+          SCRIPTS="${{ needs.detect-changes.outputs.scripts }}"
+          # Convert "plot_foo.py,plot_bar.py" to "plot_foo or plot_bar"
+          K_EXPR=$(echo "$SCRIPTS" | tr ',' '\n' | sed 's/\.py$//' | paste -sd'|' | sed 's/|/ or /g')
+          echo "k_expr=$K_EXPR" >> "$GITHUB_OUTPUT"
 
       - name: Install the project
         run: uv sync --locked --group dev --group test --all-extras
@@ -179,11 +197,12 @@ jobs:
           --import-mode=importlib
           --durations=0
           -m "implicit_parallel and not benchmark"
+          -k "${{ steps.filter.outputs.k_expr }}"
           --junit-xml=test-results.xml
           .
         working-directory: ${{ github.workspace }}
         env:
-          CHANGED_SCRIPTS: ${{ steps.changed.outputs.scripts }}
+          CHANGED_SCRIPTS: ${{ needs.detect-changes.outputs.scripts }}
 
       - name: Test Report
         uses: dorny/test-reporter@v2
