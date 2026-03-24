@@ -30,6 +30,7 @@ scripts = tuple(
 _XFAIL_SCRIPTS = {
     "plot_topics_extraction_with_nmf_lda": "xorq#1713: do_into_backend skipped for KV-encoded transforms breaks downstream steps",
     "plot_stack_predictors": "xorq#1713: do_into_backend skipped for KV-encoded transforms breaks downstream steps",
+    "plot_document_classification_20newsgroups": "20 Newsgroups dataset download unreliable in CI",
 }
 
 _SLOW1_SCRIPTS = frozenset(
