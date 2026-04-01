@@ -1,3 +1,3 @@
-[submodule ".xorq/git-catalogs/xorq-gallery-sklearn"]
-	path = .xorq/git-catalogs/xorq-gallery-sklearn
+[submodule ".xorq/catalogs/xorq-gallery-sklearn"]
+	path = .xorq/catalogs/xorq-gallery-sklearn
 	url = git@github.com:xorq-labs/xorq-gallery-sklearn.git
