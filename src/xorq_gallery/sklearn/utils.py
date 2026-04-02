@@ -158,8 +158,17 @@ def _get_catalog():
     from git import Repo
     from xorq.catalog.catalog import Catalog
 
-    repo_root = Path(Repo(Path.cwd(), search_parent_directories=True).working_dir)
-    catalog_path = repo_root / Catalog.submodule_rel_path / CATALOG_NAME
+    repo = Repo(Path.cwd(), search_parent_directories=True)
+    repo_root = Path(repo.working_dir)
+    catalog_rel = str(Path(Catalog.submodule_rel_path) / CATALOG_NAME)
+    submodule_paths = {sm.path for sm in repo.submodules}
+    if catalog_rel not in submodule_paths:
+        raise RuntimeError(
+            f"Catalog path {catalog_rel!r} is not a registered git submodule. "
+            f"Registered submodules: {submodule_paths}. "
+            f"Update .gitmodules to match Catalog.submodule_rel_path ({Catalog.submodule_rel_path!r})."
+        )
+    catalog_path = repo_root / catalog_rel
     return Catalog.from_repo_path(catalog_path, init=False, check_consistency=False)
 
 
