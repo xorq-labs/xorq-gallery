@@ -181,3 +181,10 @@ nix develop -c pytest tests/test_examples.py -v
 ## Output
 
 Examples write comparison plots to `imgs/`. This directory is created automatically but is not tracked by git.
+
+
+## git-annex
+You can back the catalog with a `git-annex` repo used for the catalog entry content.
+```
+git clone --branch=feat/catalog/git-annex --recurse-submodules https://github.com/xorq-labs/xorq-gallery
+```
