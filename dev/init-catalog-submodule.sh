@@ -4,13 +4,13 @@ set -euo pipefail
 # Add a catalog submodule backed by a GitHub remote.
 #
 # Usage:
-#   ./scripts/init-catalog-submodule.sh [--remote URL] [--empty]
+#   ./dev/init-catalog-submodule.sh [--remote URL] [--empty]
 #
 # --empty: initialize an empty catalog instead of cloning the remote.
 #          Useful for rebuilding the catalog from scratch.
 #
 # Precondition: no submodule at the catalog path. If one exists,
-# remove it first:  bash scripts/rm-submodule.sh .xorq/catalogs/xorq-gallery-sklearn
+# remove it first:  bash dev/rm-submodule.sh .xorq/catalogs/xorq-gallery-sklearn
 #
 # When switching between branches that use different submodule remotes:
 #   git checkout <branch> --recurse-submodules
@@ -29,7 +29,7 @@ CATALOG_REL="${XORQ_SUBMODULE_REL}/${CATALOG_NAME}"
 # --- Fail fast if submodule or leftover directory exists ---
 if git config --file .gitmodules --get "submodule.${CATALOG_REL}.path" &>/dev/null 2>&1; then
     echo "Submodule already registered in .gitmodules at ${CATALOG_REL}." >&2
-    echo "Remove it first:  bash scripts/rm-submodule.sh ${CATALOG_REL}" >&2
+    echo "Remove it first:  bash dev/rm-submodule.sh ${CATALOG_REL}" >&2
     exit 1
 fi
 if [[ -d "$CATALOG_REL" ]]; then
