@@ -183,8 +183,37 @@ nix develop -c pytest tests/test_examples.py -v
 Examples write comparison plots to `imgs/`. This directory is created automatically but is not tracked by git.
 
 
-## git-annex
-You can back the catalog with a `git-annex` repo used for the catalog entry content.
-```
+## git-annex catalog
+
+The `feat/catalog/git-annex` branch backs the catalog submodule with
+[git-annex](https://git-annex.branchable.com/) and an S3 remote. Entry
+`.zip` artifacts are stored in S3 instead of committed to git, keeping the
+repo small. Read-only credentials are embedded in the annex repo so no
+extra setup is needed.
+
+### Cloning
+
+```bash
 git clone --branch=feat/catalog/git-annex --recurse-submodules https://github.com/xorq-labs/xorq-gallery
+```
+
+After cloning, entry files are broken symlinks. Content is fetched lazily
+the first time a `CatalogEntry` is accessed (via `entry.expr` or
+`entry.fetch()`). The `Catalog` class auto-detects the annex branch,
+runs `annex init`, and enables the S3 remote.
+
+### Switching branches
+
+Plain `git checkout` does not sync submodule URLs. Use the helper script
+when switching between branches that use different catalog remotes (e.g.
+`main` uses plain git, `feat/catalog/git-annex` uses annex+S3):
+
+```bash
+./dev/switch-catalog-branch.sh <branch>
+```
+
+Run with no arguments to repair the submodule on the current branch:
+
+```bash
+./dev/switch-catalog-branch.sh
 ```
