@@ -5,6 +5,8 @@ A collection of scikit-learn examples ported to [xorq](https://github.com/xorq-l
 Scikit-learn's [example gallery](https://scikit-learn.org/stable/auto_examples/index.html) is one of the best ways to learn practical ML. This project takes 34 of those examples, same models, same datasets, often the same code, and runs each pipeline two ways: eagerly with sklearn and deferred with xorq. Every example asserts numerical equivalence between the two and produces a side-by-side comparison plot.
 
 ## Quickstart
+-- More context is needed here, tell the user why they are running this comment and what they will see when they do
+
 
 Run any example directly with `uv`:
 
@@ -13,18 +15,26 @@ uv tool run --isolated --python 3.12 --with git+ssh://git@github.com/xorq-labs/x
 ```
 
 Or run locally:
+-- This implies that something is installed and you haven't given that instruction yet
+
 
 ```bash
 xorq-gallery run plot_cyclical_feature_engineering
 ```
 
 Run all examples in a group:
+-- first we should list the groups
+
 
 ```bash
 xorq-gallery run-all --group svm
 ```
 
 ## Examples
+-- generally how do we want people to interact with the gallery?  You can download the content of the real scikit-learn-examples, but I think it's primarily geared towards people who browse to their docs site
+-- from browsing this , I couldn't find the the first example `plot_cyclical_feature_engineering` on the sklearn examples page - I'm already lost
+-- We should organize these sections in the same order they appear in the sklearn gallery so it can be followed
+
 
 Each example lives under `src/xorq_gallery/sklearn/<category>/` and mirrors the structure of sklearn's own gallery. 34 examples across 16 categories:
 
@@ -184,6 +194,7 @@ Examples write comparison plots to `imgs/`. This directory is created automatica
 
 
 ## git-annex catalog
+-- This is useful internally for xorq, but it doesn't belong in a README
 
 The `feat/catalog/git-annex` branch backs the catalog submodule with
 [git-annex](https://git-annex.branchable.com/) and an S3 remote. Entry
