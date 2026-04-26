@@ -126,6 +126,18 @@ Catalog aliases follow the convention `{script_stem}-{expr_name}`, e.g. `plot_la
 
 ### Updating
 
+The three caches must be updated in order — each step reads from the previous:
+
+```bash
+xorq-gallery update-exprs          # scan scripts → data/exprs/{script}.json
+xorq-gallery update-build-paths    # build each expr → data/build_paths/{script}.json (~7 min, -j for parallel)
+xorq-gallery update-catalog        # diff build_paths vs catalog → add/remove entries and aliases
+```
+
+Use `--dry-run` with `update-catalog` to preview changes without applying them.
+
+Equivalent Python API:
+
 ```python
 from xorq_gallery.sklearn.utils import (
     update_exprs_json_cache,
@@ -133,12 +145,10 @@ from xorq_gallery.sklearn.utils import (
     update_catalog,
 )
 
-update_exprs_json_cache()         # refresh exprs.json from live scripts
-update_build_paths_json_cache()   # rebuild all exprs, refresh build_paths.json
-update_catalog()                  # sync catalog entries/aliases to match
+update_exprs_json_cache()
+update_build_paths_json_cache()
+update_catalog()                  # pass dry_run=True to preview
 ```
-
-Use `update_catalog(dry_run=True)` to preview changes without applying them. It returns a `CatalogDiff` with `aliases_to_remove`, `entries_to_remove`, `entries_to_add`, `aliases_to_add`, and an `is_empty` property.
 
 ### Validation
 
@@ -164,6 +174,15 @@ uv run pytest tests/test_utils.py -v
 
 ```bash
 nix develop
+```
+
+The `dev/` directory is added to `PATH` via `.envrc`, so scripts can be
+called by name after `direnv allow`:
+
+```bash
+rebuild-catalog-git.sh          # fresh empty catalog (plain git)
+rebuild-catalog-annex.sh --gcs  # fresh empty catalog (git-annex + S3)
+switch-catalog-branch.sh main   # switch to a branch with a different remote
 ```
 
 Run all examples:

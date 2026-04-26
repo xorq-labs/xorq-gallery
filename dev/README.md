@@ -48,6 +48,36 @@ With `--force`, also handles leftover directories and stale caches when the
 submodule is no longer registered in `.gitmodules`.
 Requires a commit afterward to finalize.
 
+### `rebuild-catalog-git.sh [--no-empty]`
+
+Tear down and reinitialize the catalog submodule using the plain git remote
+(`xorq-gallery-sklearn.git`). Defaults to creating a fresh, empty catalog.
+Pass `--no-empty` to clone the existing remote with its full history instead.
+
+Composes `rm-submodule.sh` and `init-catalog-submodule.sh`.
+
+### `rebuild-catalog-annex.sh [--no-empty] [--env-file FILE] [--gcs]`
+
+Tear down and reinitialize the catalog submodule using the git-annex remote
+(`xorq-gallery-sklearn-annex.git`). Defaults to creating a fresh, empty
+catalog with git-annex initialized via S3 credentials from the env file
+(default: `.envrcs/.env.catalog.s3.write`). Add `--gcs` for Google Cloud
+Storage defaults. Pass `--no-empty` to clone the existing remote instead
+(skips annex init and env file).
+
+Composes `rm-submodule.sh` and `init-catalog-submodule.sh`.
+
+### Populating the catalog after rebuild
+
+The rebuild scripts only set up the empty submodule. To populate it, run
+the update chain in order — each step reads from the previous:
+
+```bash
+xorq-gallery update-exprs          # scan scripts → data/exprs/{script}.json
+xorq-gallery update-build-paths    # build each expr → data/build_paths/{script}.json
+xorq-gallery update-catalog        # diff build_paths vs catalog → add/remove entries and aliases
+```
+
 ### `switch-catalog-branch.sh [<branch>]`
 
 Switch to a branch that may use a different submodule remote. Plain
