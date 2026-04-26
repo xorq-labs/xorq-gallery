@@ -157,7 +157,7 @@ def _get_catalog():
 
     repo = Repo(Path.cwd(), search_parent_directories=True)
     repo_root = Path(repo.working_dir)
-    submodule_rel = Catalog.submodule_rel_path.rstrip("/")
+    submodule_rel = str(Catalog.submodule_rel_path)
     catalog_sms = [
         sm for sm in repo.submodules if sm.path.startswith(submodule_rel + "/")
     ]

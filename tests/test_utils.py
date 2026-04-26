@@ -28,6 +28,12 @@ def test_python_version_matches_pinned():
 
 _XFAIL_SCRIPTS = {
     "plot_document_classification_20newsgroups": "20 Newsgroups dataset download unreliable in CI",
+    "plot_column_transformer_mixed_types": "OpenML fetch_openml redirect loop in CI",
+    "plot_time_series_lagged_features": "OpenML fetch_openml redirect loop in CI",
+    "plot_cyclical_feature_engineering": "OpenML fetch_openml redirect loop in CI",
+    "plot_target_encoder": "OpenML fetch_openml redirect loop in CI",
+    "plot_gradient_boosting_categorical": "OpenML fetch_openml redirect loop in CI",
+    "plot_topics_extraction_with_nmf_lda": "20 Newsgroups dataset download unreliable in CI",
 }
 
 
