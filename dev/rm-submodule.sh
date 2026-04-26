@@ -5,6 +5,7 @@ force=false
 submodule_path=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -h|--help) echo "Usage: $0 [--force] <submodule-path>"; exit 0 ;;
         --force) force=true; shift ;;
         -*) echo "Unknown option: $1" >&2; exit 1 ;;
         *)
@@ -27,6 +28,11 @@ git_dir="$(git rev-parse --absolute-git-dir)"
 # Normalize to a repo-root-relative path
 abs_path="$(cd "$repo_root" && realpath --relative-to=. "$(realpath -m "$submodule_path")")"
 submodule_path="${abs_path%/}"
+
+if [[ "$submodule_path" == ../* || "$submodule_path" == ".." ]]; then
+    echo "Error: path escapes repo root: ${submodule_path}" >&2
+    exit 1
+fi
 
 if git config --file "$repo_root/.gitmodules" --get "submodule.${submodule_path}.path" &>/dev/null; then
     cd "$repo_root"

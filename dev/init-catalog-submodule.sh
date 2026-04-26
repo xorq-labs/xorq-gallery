@@ -4,14 +4,16 @@ set -euo pipefail
 # Add a catalog submodule backed by a GitHub remote.
 #
 # Usage:
-#   ./dev/init-catalog-submodule.sh [--remote URL] [--empty] [--env-file FILE] [--gcs]
+#   ./dev/init-catalog-submodule.sh [--remote URL] [--empty] [--env-file FILE] [--gcs] [--annex-uuid UUID]
 #
-# --empty:    initialize an empty catalog instead of cloning the remote.
-#             Useful for rebuilding the catalog from scratch.
-# --env-file: env file with S3 credentials for git-annex initremote.
-#             Requires --empty. Implies git-annex init.
-# --gcs:      apply GCS defaults (host, protocol, etc.) to the S3 remote.
-#             Only meaningful with --env-file.
+# --empty:      initialize an empty catalog instead of cloning the remote.
+#               Useful for rebuilding the catalog from scratch.
+# --env-file:   env file with S3 credentials for git-annex initremote.
+#               Requires --empty. Implies git-annex init.
+# --gcs:        apply GCS defaults (host, protocol, etc.) to the S3 remote.
+#               Only meaningful with --env-file.
+# --annex-uuid: use this UUID for git-annex init (default: auto-generated).
+#               The S3 fileprefix is derived from this UUID.
 #
 # Precondition: no submodule at the catalog path. If one exists,
 # remove it first:  bash dev/rm-submodule.sh .xorq/catalogs/xorq-gallery-sklearn
@@ -59,12 +61,15 @@ remote_url=""
 empty=false
 env_file=""
 gcs=false
+annex_uuid=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -h|--help) echo "Usage: $0 [--remote URL] [--empty] [--env-file FILE] [--gcs] [--annex-uuid UUID]"; exit 0 ;;
         --remote) remote_url="$2"; shift 2 ;;
         --empty) empty=true; shift ;;
         --env-file) env_file="$2"; shift 2 ;;
         --gcs) gcs=true; shift ;;
+        --annex-uuid) annex_uuid="$2"; shift 2 ;;
         *) echo "Unknown arg: $1" >&2; exit 1 ;;
     esac
 done
@@ -130,23 +135,28 @@ fi
 
 # --- Git-annex init + initremote ---
 if [[ -n "$env_file" ]]; then
-    eval "$(grep -E '^(export\s+)?[A-Za-z_][A-Za-z_0-9]*=' "$env_file")"
+    set -a; source "$env_file"; set +a
     export AWS_ACCESS_KEY_ID="${XORQ_CATALOG_S3_AWS_ACCESS_KEY_ID:?missing in $env_file}"
     export AWS_SECRET_ACCESS_KEY="${XORQ_CATALOG_S3_AWS_SECRET_ACCESS_KEY:?missing in $env_file}"
 
     name="${XORQ_CATALOG_S3_NAME:?missing in $env_file}"
     bucket="${XORQ_CATALOG_S3_BUCKET:?missing in $env_file}"
 
-    echo "Initializing git-annex in ${CATALOG_REL}..."
-    git -C "$CATALOG_REL" annex init
+    if [[ -z "$annex_uuid" ]]; then
+        annex_uuid="$(uuidgen)"
+    fi
+    fileprefix="annex-only/${annex_uuid}/"
+
+    echo "Initializing git-annex in ${CATALOG_REL} (uuid=${annex_uuid})..."
+    git -C "$CATALOG_REL" annex init --uuid "$annex_uuid"
 
     initremote_args=(
         "$name"
         "type=S3"
         "encryption=${XORQ_CATALOG_S3_ENCRYPTION:-none}"
         "bucket=${bucket}"
+        "fileprefix=${fileprefix}"
     )
-    [[ -n "${XORQ_CATALOG_S3_FILEPREFIX:-}" ]] && initremote_args+=("fileprefix=${XORQ_CATALOG_S3_FILEPREFIX}")
 
     if [[ "$gcs" == true ]]; then
         initremote_args+=(
@@ -164,7 +174,7 @@ if [[ -n "$env_file" ]]; then
         [[ -n "${XORQ_CATALOG_S3_REGION:-}" ]] && initremote_args+=("region=${XORQ_CATALOG_S3_REGION}")
     fi
 
-    echo "Creating annex remote '${name}' -> s3://${bucket}/${XORQ_CATALOG_S3_FILEPREFIX:-}..."
+    echo "Creating annex remote '${name}' -> s3://${bucket}/${fileprefix}..."
     git -C "$CATALOG_REL" annex initremote "${initremote_args[@]}"
 fi
 

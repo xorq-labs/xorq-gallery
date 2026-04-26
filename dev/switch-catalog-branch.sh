@@ -15,6 +15,11 @@ set -euo pipefail
 # 3. Force-update the submodule to match the new remote
 # 4. If the submodule is annex-backed, fix symlinks
 
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    echo "Usage: $0 [<branch>]"
+    exit 0
+fi
+
 branch="${1:-$(git branch --show-current)}"
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"

@@ -4,11 +4,13 @@ set -euo pipefail
 # Remove the catalog submodule and clear its S3 bucket prefix.
 #
 # Usage:
-#   ./dev/reset-catalog.sh [--env-file FILE] [--dry-run] [--submodule-only]
+#   ./dev/reset-catalog.sh [--env-file FILE] [--dry-run] [--force] [--submodule-only] [--annex-uuid UUID]
 #
 # --env-file:       env file with write credentials (default: .envrcs/.env.catalog.s3.write)
 # --dry-run:        print what would be deleted without acting
+# --force:          skip confirmation prompt (for CI)
 # --submodule-only: remove the submodule without touching S3
+# --annex-uuid:     annex UUID to derive S3 prefix from (default: read from submodule)
 #
 # After reset, re-init with:
 #   bash dev/init-catalog-submodule.sh --remote URL --empty --env-file FILE --gcs
@@ -22,12 +24,17 @@ CATALOG_REL="$(catalog_path_from_gitmodules)" || exit 1
 # --- Parse args ---
 env_file=".envrcs/.env.catalog.s3.write"
 dry_run=false
+force=false
 submodule_only=false
+annex_uuid=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -h|--help) echo "Usage: $0 [--env-file FILE] [--dry-run] [--force] [--submodule-only] [--annex-uuid UUID]"; exit 0 ;;
         --env-file) env_file="$2"; shift 2 ;;
         --dry-run) dry_run=true; shift ;;
+        --force) force=true; shift ;;
         --submodule-only) submodule_only=true; shift ;;
+        --annex-uuid) annex_uuid="$2"; shift 2 ;;
         *) echo "Unknown arg: $1" >&2; exit 1 ;;
     esac
 done
@@ -40,16 +47,21 @@ if [[ "$submodule_only" != true ]]; then
     validate_env_file "$env_file"
 
     # --- Load env for bucket info ---
-    eval "$(grep -E '^(export\s+)?[A-Za-z_][A-Za-z_0-9]*=' "$env_file")"
+    set -a; source "$env_file"; set +a
     bucket="${XORQ_CATALOG_S3_BUCKET:?missing XORQ_CATALOG_S3_BUCKET in $env_file}"
-    prefix="${XORQ_CATALOG_S3_FILEPREFIX:?missing XORQ_CATALOG_S3_FILEPREFIX in $env_file}"
 
-    # Guard against empty or root-like prefix that would wipe the whole bucket
-    if [[ ! "$prefix" =~ ^[A-Za-z0-9][A-Za-z0-9_./-]+/$ ]]; then
-        echo "XORQ_CATALOG_S3_FILEPREFIX looks unsafe: '${prefix}'" >&2
-        echo "Expected a non-empty path component ending in '/' (e.g. 'catalog/v1/')" >&2
-        exit 1
+    # --- Derive S3 prefix from annex UUID ---
+    if [[ -z "$annex_uuid" ]]; then
+        if [[ -n "$CATALOG_REL" ]] && [[ -d "$CATALOG_REL" ]]; then
+            annex_uuid="$(git -C "$CATALOG_REL" config annex.uuid 2>/dev/null || true)"
+        fi
+        if [[ -z "$annex_uuid" ]]; then
+            echo "Cannot determine annex UUID from submodule." >&2
+            echo "Pass --annex-uuid UUID explicitly." >&2
+            exit 1
+        fi
     fi
+    prefix="annex-only/${annex_uuid}/"
 
     # --- Build endpoint URL from env vars ---
     host="${XORQ_CATALOG_S3_HOST:-}"
@@ -75,19 +87,21 @@ if [[ "$dry_run" == true ]]; then
 fi
 
 # --- Confirm ---
-echo "This will:"
-if [[ "$submodule_only" != true ]]; then
-    echo "  - Delete all objects under s3://${bucket}/${prefix}"
-fi
-if [[ -n "$CATALOG_REL" ]]; then
-    echo "  - Remove submodule ${CATALOG_REL}"
-else
-    echo "  - (no submodule in .gitmodules to remove)"
-fi
-read -p "Proceed? [y/N] " confirm
-if [[ "$confirm" != [yY] ]]; then
-    echo "Aborted." >&2
-    exit 1
+if [[ "$force" != true ]]; then
+    echo "This will:"
+    if [[ "$submodule_only" != true ]]; then
+        echo "  - Delete all objects under s3://${bucket}/${prefix}"
+    fi
+    if [[ -n "$CATALOG_REL" ]]; then
+        echo "  - Remove submodule ${CATALOG_REL}"
+    else
+        echo "  - (no submodule in .gitmodules to remove)"
+    fi
+    read -p "Proceed? [y/N] " confirm
+    if [[ "$confirm" != [yY] ]]; then
+        echo "Aborted." >&2
+        exit 1
+    fi
 fi
 
 # --- Clear bucket prefix ---
@@ -116,4 +130,8 @@ elif [[ -n "$CATALOG_REL" ]]; then
     echo "Done. Submodule removed, bucket prefix cleared."
 else
     echo "Done. Bucket prefix cleared."
+fi
+if ! git diff --cached --quiet 2>/dev/null; then
+    echo "Finalize with:"
+    echo "  git commit -m 'chore: reset catalog'"
 fi

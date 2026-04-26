@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 # Derive the single catalog submodule path from .gitmodules.
 # Returns "" if no submodule is registered; exits 1 if multiple are found.
 #

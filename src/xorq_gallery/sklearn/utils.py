@@ -161,11 +161,17 @@ def _get_catalog():
     catalog_sms = [
         sm for sm in repo.submodules if sm.path.startswith(submodule_rel + "/")
     ]
-    if len(catalog_sms) != 1:
+    if len(catalog_sms) == 0:
         raise RuntimeError(
-            f"Expected exactly one submodule under {submodule_rel!r}, "
-            f"found {len(catalog_sms)}: {[sm.path for sm in catalog_sms]}. "
-            f"Registered submodules: {[sm.path for sm in repo.submodules]}."
+            f"No submodule found under {submodule_rel!r}. "
+            f"Registered submodules: {[sm.path for sm in repo.submodules]}. "
+            f"Run: bash dev/init-catalog-submodule.sh --empty"
+        )
+    if len(catalog_sms) > 1:
+        raise RuntimeError(
+            f"Multiple submodules under {submodule_rel!r}: "
+            f"{[sm.path for sm in catalog_sms]}. "
+            f"Remove extras with: bash dev/rm-submodule.sh <path>"
         )
     catalog_path = repo_root / catalog_sms[0].path
     return Catalog.from_repo_path(catalog_path, init=False, check_consistency=False)

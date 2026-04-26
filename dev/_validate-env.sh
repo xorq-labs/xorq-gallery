@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 # Validate that an env file contains only safe KEY=VALUE lines.
 # Rejects shell metacharacters ($, `, ;, |, &) in values to prevent
 # command injection when the file is later sourced.

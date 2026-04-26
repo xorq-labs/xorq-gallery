@@ -32,11 +32,12 @@ Add `--gcs` to apply Google Cloud Storage defaults (host, protocol, etc.).
 Precondition: no submodule at the catalog path. Remove first with
 `reset-catalog.sh` or `rm-submodule.sh`.
 
-### `reset-catalog.sh [--env-file FILE] [--dry-run] [--submodule-only]`
+### `reset-catalog.sh [--env-file FILE] [--dry-run] [--force] [--submodule-only]`
 
 Tear down the catalog: remove the submodule and clear its S3 bucket prefix.
 Uses write credentials from the env file (default: `.envrcs/.env.catalog.s3.write`).
 Prompts for confirmation before deleting. Use `--dry-run` to preview without acting.
+Use `--force` to skip the confirmation prompt (for CI).
 Use `--submodule-only` to remove just the submodule without touching S3.
 Leaves staged deletions from `git rm`; run `git commit` afterward to finalize.
 
