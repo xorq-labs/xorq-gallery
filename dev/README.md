@@ -78,6 +78,23 @@ xorq-gallery update-build-paths    # build each expr → data/build_paths/{scrip
 xorq-gallery update-catalog        # diff build_paths vs catalog → add/remove entries and aliases
 ```
 
+### Updating the git-annex catalog (`feat/catalog/git-annex`)
+
+Full rebuild and populate cycle for the annex-backed catalog:
+
+```bash
+# 1. Rebuild the empty annex submodule with S3 write credentials
+rebuild-catalog-annex.sh --env-file ./.envrcs/.env.catalog.s3.write --gcs
+
+# 2. Replay snapshots into the catalog
+xorq catalog --path ../xorq-gallery-sklearn replay \
+  --env-file ./.envrcs/.env.catalog.s3.write --gcs \
+  ./.xorq/catalogs/xorq-gallery-sklearn
+
+# 3. Embed read-only credentials for consumers
+xorq catalog embed-readonly --env-file ./.envrcs/.env.catalog.s3.read --gcs
+```
+
 ### `switch-catalog-branch.sh [<branch>]`
 
 Switch to a branch that may use a different submodule remote. Plain
