@@ -2,21 +2,81 @@
 
 Developer workflow scripts for managing the catalog submodule.
 
+## Catalog name convention
+
+The catalog name (`xorq-gallery-sklearn`) is hardcoded in exactly one place:
+`init-catalog-submodule.sh`, because the submodule does not exist in
+`.gitmodules` yet when that script runs. All other scripts and Python code
+derive the catalog path at runtime from `.gitmodules` (shell) or
+`repo.submodules` (Python), so renaming the catalog only requires updating
+the init script.
+
+## Shared helpers
+
+- `_catalog-path.sh` — `catalog_path_from_gitmodules`: derives the single catalog
+  submodule path from `.gitmodules`. Returns empty string if none, exits 1 if multiple.
+- `_validate-env.sh` — `validate_env_file`: rejects env files with shell metacharacters.
+
 ## Scripts
 
-### `init-catalog-submodule.sh [--remote URL] [--empty]`
+### `init-catalog-submodule.sh [--remote URL] [--empty] [--env-file FILE] [--gcs]`
 
 Add the catalog submodule. Derives the remote URL from the parent repo's
 origin unless `--remote` is given. Creates the GitHub repo if it doesn't
 exist. Use `--empty` to initialize a blank catalog instead of cloning.
 
-Precondition: no submodule at the catalog path. Remove first with
-`rm-submodule.sh` if one exists.
+With `--env-file`, also initializes git-annex and creates an S3 special
+remote using credentials and config from the env file (requires `--empty`).
+Add `--gcs` to apply Google Cloud Storage defaults (host, protocol, etc.).
 
-### `rm-submodule.sh <submodule-path>`
+Precondition: no submodule at the catalog path. Remove first with
+`reset-catalog.sh` or `rm-submodule.sh`.
+
+### `reset-catalog.sh [--env-file FILE] [--dry-run] [--force] [--submodule-only]`
+
+Tear down the catalog: remove the submodule and clear its S3 bucket prefix.
+Uses write credentials from the env file (default: `.envrcs/.env.catalog.s3.write`).
+Prompts for confirmation before deleting. Use `--dry-run` to preview without acting.
+Use `--force` to skip the confirmation prompt (for CI).
+Use `--submodule-only` to remove just the submodule without touching S3.
+Leaves staged deletions from `git rm`; run `git commit` afterward to finalize.
+
+### `rm-submodule.sh [--force] <submodule-path>`
 
 Cleanly remove a submodule: deinit, `git rm`, and delete the module cache.
+With `--force`, also handles leftover directories and stale caches when the
+submodule is no longer registered in `.gitmodules`.
 Requires a commit afterward to finalize.
+
+### `rebuild-catalog-git.sh [--no-empty]`
+
+Tear down and reinitialize the catalog submodule using the plain git remote
+(`xorq-gallery-sklearn.git`). Defaults to creating a fresh, empty catalog.
+Pass `--no-empty` to clone the existing remote with its full history instead.
+
+Composes `rm-submodule.sh` and `init-catalog-submodule.sh`.
+
+### `rebuild-catalog-annex.sh [--no-empty] [--env-file FILE] [--gcs]`
+
+Tear down and reinitialize the catalog submodule using the git-annex remote
+(`xorq-gallery-sklearn-annex.git`). Defaults to creating a fresh, empty
+catalog with git-annex initialized via S3 credentials from the env file
+(default: `.envrcs/.env.catalog.s3.write`). Add `--gcs` for Google Cloud
+Storage defaults. Pass `--no-empty` to clone the existing remote instead
+(skips annex init and env file).
+
+Composes `rm-submodule.sh` and `init-catalog-submodule.sh`.
+
+### Populating the catalog after rebuild
+
+The rebuild scripts only set up the empty submodule. To populate it, run
+the update chain in order — each step reads from the previous:
+
+```bash
+xorq-gallery update-exprs          # scan scripts → data/exprs/{script}.json
+xorq-gallery update-build-paths    # build each expr → data/build_paths/{script}.json
+xorq-gallery update-catalog        # diff build_paths vs catalog → add/remove entries and aliases
+```
 
 ### `switch-catalog-branch.sh [<branch>]`
 

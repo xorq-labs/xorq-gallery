@@ -15,13 +15,21 @@ set -euo pipefail
 # 3. Force-update the submodule to match the new remote
 # 4. If the submodule is annex-backed, fix symlinks
 
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    echo "Usage: $0 [<branch>]"
+    exit 0
+fi
+
 branch="${1:-$(git branch --show-current)}"
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-CATALOG_NAME="xorq-gallery-sklearn"
-XORQ_SUBMODULE_REL="$(uv run python -c 'from xorq.catalog.catalog import Catalog; print(Catalog.submodule_rel_path)')"
-CATALOG_REL="${XORQ_SUBMODULE_REL}/${CATALOG_NAME}"
+source "$(dirname "$0")/_catalog-path.sh"
+CATALOG_REL="$(catalog_path_from_gitmodules)"
+if [[ -z "$CATALOG_REL" ]]; then
+    echo "No submodule found in .gitmodules" >&2
+    exit 1
+fi
 
 # --- Show what's changing ---
 current_url="$(git config --file .gitmodules --get "submodule.${CATALOG_REL}.url" 2>/dev/null || echo "(none)")"

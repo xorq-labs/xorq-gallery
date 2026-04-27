@@ -4,10 +4,16 @@ set -euo pipefail
 # Add a catalog submodule backed by a GitHub remote.
 #
 # Usage:
-#   ./dev/init-catalog-submodule.sh [--remote URL] [--empty]
+#   ./dev/init-catalog-submodule.sh [--remote URL] [--empty] [--env-file FILE] [--gcs] [--annex-uuid UUID]
 #
-# --empty: initialize an empty catalog instead of cloning the remote.
-#          Useful for rebuilding the catalog from scratch.
+# --empty:      initialize an empty catalog instead of cloning the remote.
+#               Useful for rebuilding the catalog from scratch.
+# --env-file:   env file with S3 credentials for git-annex initremote.
+#               Requires --empty. Implies git-annex init.
+# --gcs:        apply GCS defaults (host, protocol, etc.) to the S3 remote.
+#               Only meaningful with --env-file.
+# --annex-uuid: use this UUID for git-annex init (default: auto-generated).
+#               The S3 fileprefix is derived from this UUID.
 #
 # Precondition: no submodule at the catalog path. If one exists,
 # remove it first:  bash dev/rm-submodule.sh .xorq/catalogs/xorq-gallery-sklearn
@@ -17,12 +23,17 @@ set -euo pipefail
 # or after a regular checkout:
 #   git submodule sync && git submodule update --init --force
 
+# Source of truth for the catalog name — hardcoded here because the submodule
+# does not exist in .gitmodules yet when this script runs.  Other scripts
+# derive the name from .gitmodules at runtime.
 CATALOG_NAME="xorq-gallery-sklearn"
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
 # --- Verify submodule path matches xorq's expected path ---
+# Requires a working uv/Python environment — the submodule doesn't exist
+# in .gitmodules yet, so we must ask the xorq library for the canonical path.
 XORQ_SUBMODULE_REL="$(uv run python -c 'from xorq.catalog.catalog import Catalog; print(Catalog.submodule_rel_path)')"
 CATALOG_REL="${XORQ_SUBMODULE_REL}/${CATALOG_NAME}"
 
@@ -48,13 +59,29 @@ fi
 # --- Parse args ---
 remote_url=""
 empty=false
+env_file=""
+gcs=false
+annex_uuid=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -h|--help) echo "Usage: $0 [--remote URL] [--empty] [--env-file FILE] [--gcs] [--annex-uuid UUID]"; exit 0 ;;
         --remote) remote_url="$2"; shift 2 ;;
         --empty) empty=true; shift ;;
+        --env-file) env_file="$2"; shift 2 ;;
+        --gcs) gcs=true; shift ;;
+        --annex-uuid) annex_uuid="$2"; shift 2 ;;
         *) echo "Unknown arg: $1" >&2; exit 1 ;;
     esac
 done
+
+if [[ -n "$env_file" && "$empty" != true ]]; then
+    echo "--env-file requires --empty (git-annex must be initialized before the first commit; use --empty to start fresh)" >&2
+    exit 1
+fi
+if [[ -n "$env_file" ]]; then
+    source "$(dirname "$0")/_validate-env.sh"
+    validate_env_file "$env_file"
+fi
 
 # --- Resolve remote URL ---
 if [[ -z "$remote_url" ]]; then
@@ -106,7 +133,55 @@ else
     git submodule update --init "$CATALOG_REL"
 fi
 
+# --- Git-annex init + initremote ---
+if [[ -n "$env_file" ]]; then
+    set -a; source "$env_file"; set +a
+    export AWS_ACCESS_KEY_ID="${XORQ_CATALOG_S3_AWS_ACCESS_KEY_ID:?missing in $env_file}"
+    export AWS_SECRET_ACCESS_KEY="${XORQ_CATALOG_S3_AWS_SECRET_ACCESS_KEY:?missing in $env_file}"
+
+    name="${XORQ_CATALOG_S3_NAME:?missing in $env_file}"
+    bucket="${XORQ_CATALOG_S3_BUCKET:?missing in $env_file}"
+
+    if [[ -z "$annex_uuid" ]]; then
+        annex_uuid="$(uuidgen)"
+    fi
+    fileprefix="annex-only/${annex_uuid}/"
+
+    echo "Initializing git-annex in ${CATALOG_REL} (uuid=${annex_uuid})..."
+    git -C "$CATALOG_REL" annex init --uuid "$annex_uuid"
+
+    initremote_args=(
+        "$name"
+        "type=S3"
+        "encryption=${XORQ_CATALOG_S3_ENCRYPTION:-none}"
+        "bucket=${bucket}"
+        "fileprefix=${fileprefix}"
+    )
+
+    if [[ "$gcs" == true ]]; then
+        initremote_args+=(
+            "host=${XORQ_CATALOG_S3_HOST:-storage.googleapis.com}"
+            "protocol=${XORQ_CATALOG_S3_PROTOCOL:-https}"
+            "requeststyle=${XORQ_CATALOG_S3_REQUESTSTYLE:-path}"
+            "signature=${XORQ_CATALOG_S3_SIGNATURE:-v4}"
+            "region=${XORQ_CATALOG_S3_REGION:-auto}"
+        )
+    else
+        [[ -n "${XORQ_CATALOG_S3_HOST:-}" ]] && initremote_args+=("host=${XORQ_CATALOG_S3_HOST}")
+        [[ -n "${XORQ_CATALOG_S3_PROTOCOL:-}" ]] && initremote_args+=("protocol=${XORQ_CATALOG_S3_PROTOCOL}")
+        [[ -n "${XORQ_CATALOG_S3_REQUESTSTYLE:-}" ]] && initremote_args+=("requeststyle=${XORQ_CATALOG_S3_REQUESTSTYLE}")
+        [[ -n "${XORQ_CATALOG_S3_SIGNATURE:-}" ]] && initremote_args+=("signature=${XORQ_CATALOG_S3_SIGNATURE}")
+        [[ -n "${XORQ_CATALOG_S3_REGION:-}" ]] && initremote_args+=("region=${XORQ_CATALOG_S3_REGION}")
+    fi
+
+    echo "Creating annex remote '${name}' -> s3://${bucket}/${fileprefix}..."
+    git -C "$CATALOG_REL" annex initremote "${initremote_args[@]}"
+fi
+
 echo ""
 echo "Done. Verify with:"
 echo "  git submodule status"
+if [[ -n "$env_file" ]]; then
+    echo "  git -C ${CATALOG_REL} annex info"
+fi
 echo "  uv run xorq-gallery update-catalog --dry-run"

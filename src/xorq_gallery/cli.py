@@ -394,6 +394,34 @@ def update_catalog_cmd(dry_run):
     catalog.assert_consistency()
 
 
+@cli.command("update-snapshots")
+@click.argument("script_names", nargs=-1, shell_complete=_complete_script_name)
+@click.pass_context
+def update_snapshots(ctx, script_names):
+    """Update pytest snapshots for exprs and build-hashes tests.
+
+    Optionally pass one or more SCRIPT_NAMES to update only those scripts.
+    """
+    _reexec_if_needed(ctx)
+    from git import Repo
+
+    repo_root = pathlib.Path(
+        Repo(pathlib.Path.cwd(), search_parent_directories=True).working_dir
+    )
+    test_file = str(repo_root / "tests" / "test_utils.py")
+    args = [
+        "pytest",
+        "--verbose",
+        "--import-mode=importlib",
+        "--snapshot-update",
+        test_file,
+    ]
+    if script_names:
+        k_expr = " or ".join(s.removesuffix(".py") for s in script_names)
+        args.extend(["-k", k_expr])
+    sys.exit(subprocess.run(args).returncode)
+
+
 @cli.command("pytest-changed")
 @click.option("--base", default="main", help="Base branch/ref to diff against.")
 @click.argument("pytest_args", nargs=-1, type=click.UNPROCESSED)

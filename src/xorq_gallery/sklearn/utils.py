@@ -137,9 +137,6 @@ def load_build_paths_json_cache():
     }
 
 
-CATALOG_NAME = "xorq-gallery-sklearn"
-
-
 def _make_alias(script_name, expr_name):
     return f"{script_name.removesuffix('.py')}-{expr_name}"
 
@@ -160,15 +157,23 @@ def _get_catalog():
 
     repo = Repo(Path.cwd(), search_parent_directories=True)
     repo_root = Path(repo.working_dir)
-    catalog_rel = str(Path(Catalog.submodule_rel_path) / CATALOG_NAME)
-    submodule_paths = {sm.path for sm in repo.submodules}
-    if catalog_rel not in submodule_paths:
+    submodule_rel = str(Catalog.submodule_rel_path)
+    catalog_sms = [
+        sm for sm in repo.submodules if sm.path.startswith(submodule_rel + "/")
+    ]
+    if len(catalog_sms) == 0:
         raise RuntimeError(
-            f"Catalog path {catalog_rel!r} is not a registered git submodule. "
-            f"Registered submodules: {submodule_paths}. "
-            f"Update .gitmodules to match Catalog.submodule_rel_path ({Catalog.submodule_rel_path!r})."
+            f"No submodule found under {submodule_rel!r}. "
+            f"Registered submodules: {[sm.path for sm in repo.submodules]}. "
+            f"Run: bash dev/init-catalog-submodule.sh --empty"
         )
-    catalog_path = repo_root / catalog_rel
+    if len(catalog_sms) > 1:
+        raise RuntimeError(
+            f"Multiple submodules under {submodule_rel!r}: "
+            f"{[sm.path for sm in catalog_sms]}. "
+            f"Remove extras with: bash dev/rm-submodule.sh <path>"
+        )
+    catalog_path = repo_root / catalog_sms[0].path
     return Catalog.from_repo_path(catalog_path, init=False, check_consistency=False)
 
 
