@@ -1387,18 +1387,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pytest-mock"
-version = "3.15.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pytest" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/68/14/eb014d26be205d38ad5ad20d9a80f7d201472e08167f0bb4361e251084a9/pytest_mock-3.15.1.tar.gz", hash = "sha256:1849a238f6f396da19762269de72cb1814ab44416fa73a8686deac10b0d87a0f", size = 34036, upload-time = "2025-09-16T16:37:27.081Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/5a/cc/06253936f4a7fa2e0f48dfe6d851d9c56df896a9ab09ac019d70b760619c/pytest_mock-3.15.1-py3-none-any.whl", hash = "sha256:0a25e2eb88fe5168d535041d09a4529a188176ae608a6d249ee65abc0949630d", size = 10095, upload-time = "2025-09-16T16:37:25.734Z" },
-]
-
-[[package]]
 name = "pytest-snapshot"
 version = "0.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1713,6 +1701,15 @@ wheels = [
 ]
 
 [[package]]
+name = "tomlkit"
+version = "0.14.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/af/14b24e41977adb296d6bd1fb59402cf7d60ce364f90c890bd2ec65c43b5a/tomlkit-0.14.0.tar.gz", hash = "sha256:cf00efca415dbd57575befb1f6634c4f42d2d87dbba376128adb42c121b87064", size = 187167, upload-time = "2026-01-13T01:14:53.304Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b5/11/87d6d29fb5d237229d67973a6c9e06e048f01cf4994dee194ab0ea841814/tomlkit-0.14.0-py3-none-any.whl", hash = "sha256:592064ed85b40fa213469f81ac584f67a4f2992509a7c3ea2d632208623a3680", size = 39310, upload-time = "2026-01-13T01:14:51.965Z" },
+]
+
+[[package]]
 name = "toolz"
 version = "1.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1816,8 +1813,8 @@ wheels = [
 
 [[package]]
 name = "xorq"
-version = "0.3.17"
-source = { git = "https://github.com/xorq-labs/xorq.git?branch=main#07348355edac8562007fecf5e4fef2c008c8a1d7" }
+version = "0.3.20"
+source = { git = "https://github.com/xorq-labs/xorq.git?branch=main#385e696d90743c5b83fdbee677ef5371db918a58" }
 dependencies = [
     { name = "atpublic" },
     { name = "attrs" },
@@ -1841,7 +1838,6 @@ dependencies = [
     { name = "py-yaml12" },
     { name = "pyarrow" },
     { name = "pyarrow-hotfix" },
-    { name = "pytest-mock" },
     { name = "python-dateutil" },
     { name = "pythran", marker = "sys_platform == 'darwin'" },
     { name = "pytz" },
@@ -1849,6 +1845,7 @@ dependencies = [
     { name = "sqlglot" },
     { name = "structlog" },
     { name = "textual" },
+    { name = "tomlkit" },
     { name = "toolz" },
     { name = "typing-extensions" },
     { name = "uv" },
