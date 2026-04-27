@@ -148,7 +148,7 @@ if [[ -n "$env_file" ]]; then
     fileprefix="annex-only/${annex_uuid}/"
 
     echo "Initializing git-annex in ${CATALOG_REL} (uuid=${annex_uuid})..."
-    git -C "$CATALOG_REL" annex init --uuid "$annex_uuid"
+    git -C "$CATALOG_REL" annex reinit "$annex_uuid"
 
     initremote_args=(
         "$name"
