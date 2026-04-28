@@ -139,43 +139,30 @@ if [[ -n "$env_file" ]]; then
     export AWS_ACCESS_KEY_ID="${XORQ_CATALOG_S3_AWS_ACCESS_KEY_ID:?missing in $env_file}"
     export AWS_SECRET_ACCESS_KEY="${XORQ_CATALOG_S3_AWS_SECRET_ACCESS_KEY:?missing in $env_file}"
 
-    name="${XORQ_CATALOG_S3_NAME:?missing in $env_file}"
-    bucket="${XORQ_CATALOG_S3_BUCKET:?missing in $env_file}"
+    : "${XORQ_CATALOG_S3_NAME:?missing in $env_file}"
+    : "${XORQ_CATALOG_S3_BUCKET:?missing in $env_file}"
 
     if [[ -z "$annex_uuid" ]]; then
         annex_uuid="$(uuidgen)"
     fi
-    fileprefix="annex-only/${annex_uuid}/"
 
     echo "Initializing git-annex in ${CATALOG_REL} (uuid=${annex_uuid})..."
     git -C "$CATALOG_REL" annex reinit "$annex_uuid"
 
-    initremote_args=(
-        "$name"
-        "type=S3"
-        "encryption=${XORQ_CATALOG_S3_ENCRYPTION:-none}"
-        "bucket=${bucket}"
-        "fileprefix=${fileprefix}"
-    )
+    factory="from_env"
 
     if [[ "$gcs" == true ]]; then
-        initremote_args+=(
-            "host=${XORQ_CATALOG_S3_HOST:-storage.googleapis.com}"
-            "protocol=${XORQ_CATALOG_S3_PROTOCOL:-https}"
-            "requeststyle=${XORQ_CATALOG_S3_REQUESTSTYLE:-path}"
-            "signature=${XORQ_CATALOG_S3_SIGNATURE:-v4}"
-            "region=${XORQ_CATALOG_S3_REGION:-auto}"
-        )
-    else
-        [[ -n "${XORQ_CATALOG_S3_HOST:-}" ]] && initremote_args+=("host=${XORQ_CATALOG_S3_HOST}")
-        [[ -n "${XORQ_CATALOG_S3_PROTOCOL:-}" ]] && initremote_args+=("protocol=${XORQ_CATALOG_S3_PROTOCOL}")
-        [[ -n "${XORQ_CATALOG_S3_REQUESTSTYLE:-}" ]] && initremote_args+=("requeststyle=${XORQ_CATALOG_S3_REQUESTSTYLE}")
-        [[ -n "${XORQ_CATALOG_S3_SIGNATURE:-}" ]] && initremote_args+=("signature=${XORQ_CATALOG_S3_SIGNATURE}")
-        [[ -n "${XORQ_CATALOG_S3_REGION:-}" ]] && initremote_args+=("region=${XORQ_CATALOG_S3_REGION}")
+        factory="make_gcs_remote_from_env"
     fi
 
-    echo "Creating annex remote '${name}' -> s3://${bucket}/${fileprefix}..."
-    git -C "$CATALOG_REL" annex initremote "${initremote_args[@]}"
+    echo "Creating annex remote '${XORQ_CATALOG_S3_NAME}' via xorq (fileprefix suffix: ${XORQ_CATALOG_S3_NAME}/${annex_uuid}/)..."
+    uv run python - <<EOF
+from pathlib import Path
+from xorq.catalog.annex import Annex, S3RemoteConfig
+
+rc = S3RemoteConfig.${factory}()
+Annex(repo_path=Path("${CATALOG_REL}")).initremote(rc)
+EOF
 fi
 
 echo ""
